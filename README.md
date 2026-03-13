@@ -1,73 +1,65 @@
-# React + TypeScript + Vite
+<div align="center">
+  <img src="docs/screenshots/app-main.png" alt="NoteFlow Screenshot" width="800">
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+  # NoteFlow
 
-Currently, two official plugins are available:
+  **Fast notes for Windows developers.**  
+  *No cloud, no accounts, no telemetry. Just you and your thoughts.*
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+  [![GitHub Release](https://img.shields.io/github/v/release/yagoid/noteflow?style=flat-square&color=3de8c2)](https://github.com/yagoid/noteflow/releases/latest)
+  [![License](https://img.shields.io/github/license/yagoid/noteflow?style=flat-square)](LICENSE)
 
-## React Compiler
+</div>
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## What is NoteFlow?
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+NoteFlow is a keyboard-first, lightweight note-taking application designed **exclusively for Windows**. 
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+It was built specifically for software engineers, power users, or anyone simply tired of the clunky, pre-installed Windows Sticky Notes apps and looking for something faster than heavy tools like Notion. 
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+If you just need to scratch down a quick task list, jot down some code snippets, or drop a quick markdown heading—this is the tool for you.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Features
+
+- **Markdown-first editor**: Write with full Markdown support—headings, bold, italic, inline code, and code blocks.
+- **Interactive Task Lists**: Add checkboxes to any note, check them off, and keep track of your daily sprint or tasks.
+- **Multi-tab workflow**: Open multiple notes at once in tabs and switch context instantly without losing your place.
+- **Instant Search**: Find any note by title or content in milliseconds.
+- **100% Local & Private**: Your notes never leave your machine. No cloud syncing, no accounts, no tracking.
+- **Developer Aesthetic**: A dark theme, monospace font (JetBrains Mono), and minimal chrome that feels at home next to your IDE.
+
+## Download
+
+Ready to focus? Download the latest `.exe` installer for Windows 10/11 directly from the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
+
+*[View the official landing page](https://yagoid.github.io/noteflow/)*
+
+## Development
+
+NoteFlow is built with React, TypeScript, Vite, and Electron.
+
+To run the app locally:
+
+```bash
+# Clone the repository
+git clone https://github.com/yagoid/noteflow.git
+cd noteflow
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+To build the executable for Windows:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dist
 ```
+
+## License
+
+This project is licensed under the MIT License.
