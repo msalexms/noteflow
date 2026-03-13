@@ -1,0 +1,59 @@
+﻿
+> scratch@0.1.0 lint
+> eslint .
+
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\CommandPalette\CommandPalette.tsx
+  30:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\CommandPalette\CommandPalette.tsx:30:7
+  28 |   useEffect(() => {
+  29 |     if (commandPaletteOpen) {
+> 30 |       setQuery('')
+     |       ^^^^^^^^ Avoid calling setState() directly within an effect
+  31 |       setTimeout(() => inputRef.current?.focus(), 50)
+  32 |     }
+  33 |   }, [commandPaletteOpen])  react-hooks/set-state-in-effect
+  52:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\CommandPalette\CommandPalette.tsx:52:5
+  50 |
+  51 |   useEffect(() => {
+> 52 |     setSelectedIdx(0)
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  53 |   }, [query])
+  54 |
+  55 |   if (!commandPaletteOpen) return null                                                           react-hooks/set-state-in-effect
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\NoteEditor.tsx
+  60:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\NoteEditor.tsx:60:5
+  58 |     if (!note) return
+  59 |     const firstId = note.sections[0]?.id ?? null
+> 60 |     setActiveSectionId(firstId)
+     |     ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  61 |     setRawContent(note.sections[0]?.content ?? '')
+  62 |     setRenamingId(null)
+  63 |   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps  react-hooks/set-state-in-effect
+
+Ô£û 3 problems (3 errors, 0 warnings)
+

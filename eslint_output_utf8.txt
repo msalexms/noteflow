@@ -1,0 +1,54 @@
+﻿
+> scratch@0.1.0 lint
+> eslint .
+
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\CommandPalette\CommandPalette.tsx
+  102:41  error  React Hook "useState" is called conditionally. React Hooks must be called in the exact same order in every component render. Did you accidentally call a React Hook after an early return?   react-hooks/rules-of-hooks
+  104:3   error  React Hook "useEffect" is called conditionally. React Hooks must be called in the exact same order in every component render. Did you accidentally call a React Hook after an early return?  react-hooks/rules-of-hooks
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\Editor.tsx
+  205:7  error  'md' is never reassigned. Use 'const' instead  prefer-const
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\NoteEditor.tsx
+  85:9  error  Error: Cannot access variable before it is declared
+
+`openDeleteNoteModal` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\NoteEditor.tsx:85:9
+  83 |       if (e.key === 'Delete' && !isEditing) {
+  84 |         e.preventDefault()
+> 85 |         openDeleteNoteModal()
+     |         ^^^^^^^^^^^^^^^^^^^ `openDeleteNoteModal` accessed before it is declared
+  86 |       }
+  87 |     }
+  88 |     window.addEventListener('keydown', handler)
+
+C:\Users\yagoi\Documents\proyects\notas_windows\scratch\src\components\Editor\NoteEditor.tsx:105:3
+  103 |   // ÔöÇÔöÇ Helpers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  104 |
+> 105 |   function openDeleteNoteModal() {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 106 |     setModal({
+      | ^^^^^^^^^^^^^^
+> 107 |       title: 'Delete note',
+      | ^^^^^^^^^^^^^^
+> 108 |       message: `"${note!.title || 'Untitled'}" will be permanently deleted.`,
+      | ^^^^^^^^^^^^^^
+> 109 |       confirmLabel: 'Delete',
+      | ^^^^^^^^^^^^^^
+> 110 |       danger: true,
+      | ^^^^^^^^^^^^^^
+> 111 |       onConfirm: () => { setModal(null); deleteNote(note!.id) },
+      | ^^^^^^^^^^^^^^
+> 112 |     })
+      | ^^^^^^^^^^^^^^
+> 113 |   }
+      | ^^^^ `openDeleteNoteModal` is declared here
+  114 |
+  115 |   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+  116 |     updateNote(note.id, { title: e.target.value })  react-hooks/immutability
+
+Ô£û 4 problems (4 errors, 0 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
