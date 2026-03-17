@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNotesStore } from '../stores/notesStore'
 import { Editor } from './Editor/Editor'
-import { X } from 'lucide-react'
+import { X, Minus } from 'lucide-react'
 
 // Custom TitleBar for the sticky window
 function StickyTitleBar({ title }: { title: string }) {
@@ -14,15 +14,13 @@ function StickyTitleBar({ title }: { title: string }) {
         {title}
       </div>
       <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        {/*
         <button
           className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-          onClick={onPopIn}
-          title="Pop back in"
+          onClick={() => window.noteflow.minimize()}
+          title="Minimize Sticky Note"
         >
-          <ExternalLink size={12} className="rotate-180" />
+          <Minus size={12} />
         </button>
-        */}
         <button
           className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
           onClick={() => window.noteflow.close()}
