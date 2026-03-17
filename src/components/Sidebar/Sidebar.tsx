@@ -1,8 +1,9 @@
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import type { Note } from '../../types'
-import { Archive, Search, Tag, Pin, PanelLeftClose } from 'lucide-react'
+import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
+import { ConfirmModal } from '../ConfirmModal'
 
 interface SidebarProps {
   onCollapse: () => void
@@ -47,6 +48,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const showArchived = useNotesStore((s) => s.showArchived)
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
+  const updateNote = useNotesStore((s) => s.updateNote)
+  const archiveNote = useNotesStore((s) => s.archiveNote)
+  const deleteNote = useNotesStore((s) => s.deleteNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterSection = useNotesStore((s) => s.setFilterSection)
   const setFilterTag = useNotesStore((s) => s.setFilterTag)
@@ -55,7 +59,28 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // ── Focus search via Ctrl+F custom event ──────────────────────────────────
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    noteId: string
+  } | null>(null)
+
+  // Confirm modal state
+  const [modal, setModal] = useState<{
+    title: string
+    message: string
+    confirmLabel: string
+    danger: boolean
+    onConfirm: () => void
+  } | null>(null)
+
+  // ── Close context menu on click elsewhere ──────────────────────────────────
+  useEffect(() => {
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [])
   useEffect(() => {
     const handler = () => {
       searchRef.current?.focus()
@@ -104,6 +129,16 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   return (
     <div className="flex flex-col h-full border-r border-border bg-surface-1">
+      {modal && (
+        <ConfirmModal
+          title={modal.title}
+          message={modal.message}
+          confirmLabel={modal.confirmLabel}
+          danger={modal.danger}
+          onConfirm={modal.onConfirm}
+          onCancel={() => setModal(null)}
+        />
+      )}
       {/* ── Search + collapse ──────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
         <div className="relative flex-1">
@@ -188,9 +223,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         <button
           onClick={() => createNote()}
           title="New note (Ctrl+N)"
-          className="w-full py-1.5 rounded text-xs font-mono
-                     border border-border hover:border-accent/30 transition-colors
-                     text-text-muted hover:text-text bg-surface-2 hover:bg-surface-2/80"
+          className="w-full py-1.5 rounded text-xs font-mono transition-all
+                     bg-accent/10 text-accent border border-accent/20 
+                     hover:bg-accent/20 hover:border-accent/40"
         >
           + New note
         </button>
@@ -204,17 +239,28 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <span className="text-xs font-mono">No notes</span>
           </div>
         ) : (
-          <ul className="py-1">
+          <ul className="pt-2 pb-1">
             {notes.map((note) => (
               <li key={note.id}>
                 <button
                   onClick={() => setActiveNote(note.id)}
-                  className={`w-full text-left px-3 py-2.5 transition-colors
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setContextMenu({
+                      x: e.clientX,
+                      y: Math.min(e.clientY, window.innerHeight - 150),
+                      noteId: note.id
+                    })
+                  }}
+                  className={`relative w-full text-left px-4 py-2 transition-colors h-[60px] flex flex-col justify-center
                     ${activeNoteId === note.id
                       ? 'bg-accent/10 border-r-2 border-accent'
                       : 'hover:bg-surface-2 border-r-2 border-transparent'
                     }`}
                 >
+                  {activeNoteId === note.id && (
+                    <div className="absolute left-1 top-2.5 bottom-2.5 w-[1px] bg-accent rounded-full" />
+                  )}
                   <div className="flex items-center gap-1 min-w-0">
                     {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
                     <span className={`text-xs font-mono font-medium truncate flex-1
@@ -225,14 +271,18 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       {formatNoteDate(note.updated)}
                     </span>
                   </div>
-                  {hasAnyContent(note) && (
-                    <p className="text-xs font-mono text-text-muted/50 truncate mt-0.5 leading-tight">
+                  {hasAnyContent(note) ? (
+                    <p className="text-[11px] font-mono text-text-muted/50 truncate mt-0.5 leading-tight">
                       {noteExcerpt(note)}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] font-mono text-text-muted/30 italic mt-0.5 leading-tight">
+                      No content
                     </p>
                   )}
                   {note.archived && (
-                    <span className="inline-flex items-center gap-0.5 text-xs font-mono text-text-muted/40 mt-0.5">
-                      <Archive size={9} /> archived
+                    <span className="flex items-center gap-0.5 text-[10px] font-mono text-text-muted/40 mt-0.5 leading-none">
+                      <Archive size={8} /> archived
                     </span>
                   )}
                 </button>
@@ -241,6 +291,60 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           </ul>
         )}
       </div>
+
+      {/* ── Context Menu ─────────────────────────────────────────────────── */}
+      {contextMenu && (() => {
+        const note = rawNotes.find(n => n.id === contextMenu.noteId)
+        if (!note) return null
+        return (
+          <div
+            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                updateNote(note.id, { pinned: !note.pinned })
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              {note.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+              {note.pinned ? 'Unpin note' : 'Pin note'}
+            </button>
+            <button
+              onClick={() => {
+                archiveNote(note.id)
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <Archive size={12} />
+              {note.archived ? 'Unarchive' : 'Archive'}
+            </button>
+            <div className="h-px bg-border my-1" />
+            <button
+              onClick={() => {
+                setContextMenu(null)
+                setModal({
+                  title: 'Delete note',
+                  message: `"${note.title || 'Untitled'}" will be permanently deleted.`,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                  onConfirm: () => {
+                    setModal(null)
+                    deleteNote(note.id)
+                  },
+                })
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
+            >
+              <Trash2 size={12} />
+              Delete note
+            </button>
+          </div>
+        )
+      })()}
 
       {/* ── Footer ─────────────────────────────────────────────────── */}
       <div className="px-3 py-2 border-t border-border flex items-center justify-between">

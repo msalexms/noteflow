@@ -56,6 +56,10 @@ export function NoteEditor() {
   // Confirm modal
   const [modal, setModal] = useState<ModalState | null>(null)
 
+  // Drag and drop state
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
+
   const titleRef = useRef<HTMLInputElement>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
@@ -99,6 +103,17 @@ export function NoteEditor() {
   // Stable ref for activeSectionId (for use inside event handlers)
   const activeSectionIdRef = useRef(activeSectionId)
   useEffect(() => { activeSectionIdRef.current = activeSectionId }, [activeSectionId])
+
+  // ── Auto-focus title on new note ───────────────────────────────────────────
+  useEffect(() => {
+    if (note && (note.title === '' || note.title === 'Untitled') && note.sections.length === 1 && note.sections[0].content === '') {
+      // Use requestAnimationFrame to ensure focus is set after the render/mount transitions
+      requestAnimationFrame(() => {
+        titleRef.current?.focus()
+        titleRef.current?.select()
+      })
+    }
+  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Undo/Redo logic ────────────────────────────────────────────────────────
   const pushToUndoStack = useCallback((sectionId: string, prevContent: string) => {
@@ -220,6 +235,45 @@ export function NoteEditor() {
   const handleCopyAllText = () => {
     const text = note.sections.map((s) => s.content).join('\n\n')
     navigator.clipboard.writeText(text)
+  }
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedSectionId(id)
+    e.dataTransfer.effectAllowed = 'move'
+    // Set a transparent ghost image or just let the browser handle it
+  }
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault()
+    if (draggedSectionId === id) return
+    setDragOverSectionId(id)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    if (!draggedSectionId || draggedSectionId === targetId) {
+      setDraggedSectionId(null)
+      setDragOverSectionId(null)
+      return
+    }
+
+    const sections = [...note.sections]
+    const draggedIdx = sections.findIndex(s => s.id === draggedSectionId)
+    const targetIdx = sections.findIndex(s => s.id === targetId)
+
+    if (draggedIdx !== -1 && targetIdx !== -1) {
+      const [moved] = sections.splice(draggedIdx, 1)
+      sections.splice(targetIdx, 0, moved)
+      updateNote(note.id, { sections })
+    }
+
+    setDraggedSectionId(null)
+    setDragOverSectionId(null)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedSectionId(null)
+    setDragOverSectionId(null)
   }
 
   const handleRawToggle = () => {
@@ -393,13 +447,23 @@ export function NoteEditor() {
               return (
                 <div
                   key={section.id}
-                  className={`group flex items-center gap-1 flex-shrink-0 rounded px-0.5
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, section.id)}
+                  onDragOver={(e) => handleDragOver(e, section.id)}
+                  onDrop={(e) => handleDrop(e, section.id)}
+                  onDragEnd={handleDragEnd}
+                  onDragLeave={() => setDragOverSectionId(null)}
+                  className={`group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
                      ${isActive
                       ? 'bg-yellow-400/10 border border-yellow-400/25'
                       : 'border border-border/40 hover:border-border/70'
-                    }`}
+                    }
+                    ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
+                    ${dragOverSectionId === section.id ? 'border-l-2 border-l-yellow-400 pl-1' : ''}
+                  `}
                 >
                   {isRenaming ? (
+                    // Inline rename input
                     <div className="flex items-center gap-0.5 px-1.5 py-1">
                       <input
                         ref={renameRef}
@@ -414,10 +478,11 @@ export function NoteEditor() {
                         onMouseDown={(e) => { e.preventDefault(); handleCommitRename() }}
                         className="text-yellow-400 hover:text-yellow-400 p-0.5 rounded"
                       >
-                        <Check size={10} />
+                        <Check size={12} />
                       </button>
                     </div>
                   ) : (
+                    // Normal tab
                     <button
                       onClick={() => handleSwitchSection(section.id)}
                       onDoubleClick={() => handleStartRename(section)}
@@ -435,17 +500,17 @@ export function NoteEditor() {
                       <button
                         onClick={() => handleStartRename(section)}
                         title="Rename section"
-                        className="p-0.5 rounded text-text-muted/50 hover:text-text-muted transition-colors"
+                        className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
                       >
-                        <Pencil size={9} />
+                        <Pencil size={12} />
                       </button>
                       {note.sections.length > 1 && (
                         <button
                           onClick={() => handleDeleteSection(section.id)}
                           title="Delete section (Ctrl+W)"
-                          className="p-0.5 rounded text-text-muted/50 hover:text-red-400 transition-colors"
+                          className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
                         >
-                          <X size={9} />
+                          <X size={12} />
                         </button>
                       )}
                     </div>
@@ -458,10 +523,10 @@ export function NoteEditor() {
               onClick={handleAddSection}
               title="Add section (Ctrl+T)"
               className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0
-                         text-text-muted/40 hover:text-text-muted hover:bg-surface-2
+                         text-text-muted/60 hover:text-text-muted hover:bg-surface-2
                          border border-transparent hover:border-border transition-colors"
             >
-              <Plus size={11} />
+              <Plus size={13} />
             </button>
           </div>
 
