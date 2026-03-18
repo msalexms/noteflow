@@ -1,6 +1,5 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
-import type { Note } from '../../types'
 import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
