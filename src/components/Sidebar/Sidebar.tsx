@@ -17,20 +17,6 @@ function formatNoteDate(iso: string): string {
   return format(d, 'MMM d')
 }
 
-function noteExcerpt(note: Note): string {
-  const content = note.sections[0]?.content ?? ''
-  return content
-    .replace(/^#{1,3}\s+.+$/m, '')
-    .replace(/```[\s\S]*?```/g, '[code]')
-    .replace(/[#*_`~]/g, '')
-    .replace(/\n+/g, ' ')
-    .trim()
-    .slice(0, 80)
-}
-
-function hasAnyContent(note: Note): boolean {
-  return note.sections.some((s) => s.content.trim().length > 0)
-}
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 function normalize(s: string): string {
