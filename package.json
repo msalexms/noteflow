@@ -83,10 +83,12 @@
       "category": "Utility",
       "icon": "public/icon.png",
       "desktop": {
-        "Name": "NoteFlow",
-        "Comment": "Fast notes for software engineers",
-        "Keywords": "notes;markdown;text;",
-        "Categories": "Utility;TextEditor;"
+        "entry": {
+          "Name": "NoteFlow",
+          "Comment": "Fast notes for software engineers",
+          "Keywords": "notes;markdown;text;",
+          "Categories": "Utility;TextEditor;"
+        }
       }
     },
     "deb": {
