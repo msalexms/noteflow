@@ -130,6 +130,7 @@ function createTray() {
         {
             label: 'Quit',
             click: () => {
+                mainWindow?.webContents.session.flushStorageData();
                 electron_1.app.quit();
             },
         },
@@ -257,6 +258,26 @@ electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
         title: 'Choose notes folder',
     });
     return result.canceled ? null : result.filePaths[0];
+});
+// ── Settings (userData/settings.json) ────────────────────────────────────────
+function readSettings() {
+    try {
+        return JSON.parse(fs_1.default.readFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), 'utf-8'));
+    }
+    catch {
+        return {};
+    }
+}
+function writeSettings(data) {
+    fs_1.default.writeFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8');
+}
+electron_1.ipcMain.on('settings:get-theme', (event) => {
+    event.returnValue = readSettings().theme ?? null;
+});
+electron_1.ipcMain.on('settings:set-theme', (_event, themeId) => {
+    const settings = readSettings();
+    settings.theme = themeId;
+    writeSettings(settings);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {

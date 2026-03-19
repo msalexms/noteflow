@@ -152,6 +152,7 @@ function createTray() {
     {
       label: 'Quit',
       click: () => {
+        mainWindow?.webContents.session.flushStorageData()
         app.quit()
       },
     },
@@ -282,6 +283,30 @@ ipcMain.handle('app:choose-notes-dir', async () => {
     title: 'Choose notes folder',
   })
   return result.canceled ? null : result.filePaths[0]
+})
+
+// ── Settings (userData/settings.json) ────────────────────────────────────────
+
+function readSettings(): Record<string, unknown> {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function writeSettings(data: Record<string, unknown>): void {
+  fs.writeFileSync(path.join(app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8')
+}
+
+ipcMain.on('settings:get-theme', (event) => {
+  event.returnValue = readSettings().theme ?? null
+})
+
+ipcMain.on('settings:set-theme', (_event, themeId: string) => {
+  const settings = readSettings()
+  settings.theme = themeId
+  writeSettings(settings)
 })
 
 // Window controls

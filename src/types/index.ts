@@ -52,6 +52,8 @@ declare global {
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
       windowId: () => number
+      getTheme: () => string | null
+      setTheme: (id: string) => void
     }
   }
 }

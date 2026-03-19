@@ -31,6 +31,10 @@ const api = {
   openNotesFolder: (): Promise<void> => ipcRenderer.invoke('app:open-notes-folder'),
   chooseNotesDir: (): Promise<string | null> => ipcRenderer.invoke('app:choose-notes-dir'),
 
+  // Settings
+  getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),
+  setTheme: (id: string)      => ipcRenderer.send('settings:set-theme', id),
+
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
   minimize: () => ipcRenderer.send('window:minimize'),

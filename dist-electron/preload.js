@@ -14,6 +14,9 @@ const api = {
     getNotesDir: () => electron_1.ipcRenderer.invoke('fs:notes-dir'),
     openNotesFolder: () => electron_1.ipcRenderer.invoke('app:open-notes-folder'),
     chooseNotesDir: () => electron_1.ipcRenderer.invoke('app:choose-notes-dir'),
+    // Settings
+    getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
+    setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
