@@ -1,8 +1,9 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
-import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff } from 'lucide-react'
+import { Archive, Search, Tag, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
+import { EncryptionModal } from '../EncryptionModal'
 import { tagStyle, getTagColor } from '../../lib/tagColors'
 
 interface SidebarProps {
@@ -37,11 +38,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
+  const encryptNote = useNotesStore((s) => s.encryptNote)
+  const unlockNote = useNotesStore((s) => s.unlockNote)
+  const lockNote = useNotesStore((s) => s.lockNote)
+  const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
+  const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const createNote = useNotesStore((s) => s.createNote)
+  const duplicateNote = useNotesStore((s) => s.duplicateNote)
 
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -59,6 +66,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     confirmLabel: string
     danger: boolean
     onConfirm: () => void
+  } | null>(null)
+
+  // Encryption modal state
+  const [encModal, setEncModal] = useState<{
+    mode: 'encrypt' | 'unlock' | 'remove'
+    noteId: string
   } | null>(null)
 
   // ── Close context menu on click elsewhere ──────────────────────────────────
@@ -128,6 +141,27 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           onCancel={() => setModal(null)}
         />
       )}
+      {encModal && (() => {
+        const encNote = rawNotes.find(n => n.id === encModal.noteId)
+        if (!encNote) return null
+        return (
+          <EncryptionModal
+            mode={encModal.mode}
+            noteTitle={encNote.title}
+            onConfirm={async (password, options) => {
+              if (encModal.mode === 'encrypt') {
+                await encryptNote(encModal.noteId, password, options)
+              } else if (encModal.mode === 'unlock') {
+                await unlockNote(encModal.noteId, password)
+              } else {
+                await removeNoteEncryption(encModal.noteId, password)
+              }
+              setEncModal(null)
+            }}
+            onCancel={() => setEncModal(null)}
+          />
+        )
+      })()}
       {/* ── Search + collapse ──────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
         <div className="relative flex-1">
@@ -241,6 +275,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   )}
                   <div className="flex items-center gap-1 min-w-0">
                     {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
+                    {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
                     <span className={`text-xs font-mono font-medium truncate flex-1
                       ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
                       {note.title || 'Untitled'}
@@ -253,7 +288,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     {note.sections.map((section) => (
                       <span
                         key={section.id}
-                        className="text-[9px] font-mono px-1 rounded flex-shrink-0 leading-[1.6]"
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+                            detail: { noteId: note.id, sectionId: section.id }
+                          }))
+                          setActiveNote(note.id)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
+                        }}
+                        className="text-[9px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
                         style={getTagColor(section.name)}
                       >
                         {section.name}
@@ -296,6 +343,64 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             >
               <Archive size={12} />
               {note.archived ? 'Unarchive' : 'Archive'}
+            </button>
+            {!note.encryption && (
+              <button
+                onClick={() => {
+                  setContextMenu(null)
+                  setEncModal({ mode: 'encrypt', noteId: note.id })
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              >
+                <Lock size={12} />
+                Encrypt note
+              </button>
+            )}
+            {note.encryption && !sessionPasswords[note.id] && (
+              <button
+                onClick={() => {
+                  setContextMenu(null)
+                  setEncModal({ mode: 'unlock', noteId: note.id })
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              >
+                <Unlock size={12} />
+                Unlock note
+              </button>
+            )}
+            {note.encryption && !!sessionPasswords[note.id] && (
+              <button
+                onClick={() => {
+                  lockNote(note.id)
+                  setContextMenu(null)
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              >
+                <Lock size={12} />
+                Lock note
+              </button>
+            )}
+            {note.encryption && (
+              <button
+                onClick={() => {
+                  setContextMenu(null)
+                  setEncModal({ mode: 'remove', noteId: note.id })
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              >
+                <Unlock size={12} />
+                Remove encryption
+              </button>
+            )}
+            <button
+              onClick={() => {
+                duplicateNote(note.id)
+                setContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            >
+              <Copy size={12} />
+              Duplicate note
             </button>
             <div className="h-px bg-border my-1" />
             <button

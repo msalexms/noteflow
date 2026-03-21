@@ -15,6 +15,7 @@ import ListItem from '@tiptap/extension-list-item'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Link from '@tiptap/extension-link'
+import Image from '@tiptap/extension-image'
 import HardBreak from '@tiptap/extension-hard-break'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import History from '@tiptap/extension-history'
@@ -25,12 +26,22 @@ import { EditorToolbar } from './EditorToolbar'
 
 const lowlight = createLowlight(common)
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 interface EditorProps {
   content: string
   onChange: (markdown: string) => void
   placeholder?: string
   readOnly?: boolean
   hideToolbar?: boolean
+  fontSize?: number
 }
 
 export function Editor({
@@ -39,6 +50,7 @@ export function Editor({
   placeholder = 'Start typing...',
   readOnly = false,
   hideToolbar = false,
+  fontSize,
 }: EditorProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -65,6 +77,7 @@ export function Editor({
       TaskList,
       TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false }),
+      Image.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
       HardBreak,
       History,
@@ -81,6 +94,20 @@ export function Editor({
     },
   })
 
+  // Open links in external browser on click
+  useEffect(() => {
+    if (!editor) return
+    const handler = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a')
+      if (!target) return
+      e.preventDefault()
+      const href = target.getAttribute('href')
+      if (href) window.noteflow.openUrl(href)
+    }
+    editor.view.dom.addEventListener('click', handler)
+    return () => editor.view.dom.removeEventListener('click', handler)
+  }, [editor])
+
   // Sync external content changes (e.g. switching notes)
   // IMPORTANT: compare normalized markdown to avoid overwriting valid content
   // with a superficially-different representation (which would eat line breaks).
@@ -93,6 +120,14 @@ export function Editor({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content])
+
+  const insertImageFiles = useCallback(async (files: File[]) => {
+    if (!editor) return
+    for (const file of files.filter(f => f.type.startsWith('image/'))) {
+      const src = await fileToBase64(file)
+      editor.chain().focus().setImage({ src, alt: file.name }).run()
+    }
+  }, [editor])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -127,9 +162,29 @@ export function Editor({
   if (!editor) return null
 
   return (
-    <div className="flex flex-col h-full" onKeyDown={handleKeyDown}>
+    <div
+      className="flex flex-col h-full"
+      onKeyDown={handleKeyDown}
+      onPaste={(e: React.ClipboardEvent) => {
+        const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
+        if (imageItems.length === 0) return
+        e.preventDefault()
+        insertImageFiles(imageItems.map(i => i.getAsFile()).filter(Boolean) as File[])
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e: React.DragEvent) => {
+        const files = Array.from(e.dataTransfer.files)
+        if (!files.some(f => f.type.startsWith('image/'))) return
+        e.preventDefault()
+        e.stopPropagation()
+        insertImageFiles(files)
+      }}
+    >
       {!readOnly && !hideToolbar && <EditorToolbar editor={editor} />}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex-1 overflow-y-auto"
+        style={fontSize ? { '--prose-font-size': `${fontSize}px` } as React.CSSProperties : undefined}
+      >
         <EditorContent
           editor={editor}
           className="h-full prose-editor"
@@ -263,6 +318,8 @@ function inlineElToMd(el: Element): string {
       else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
       else if (tag === 'code') result += `\`${c.textContent}\``
       else if (tag === 'br') result += '\n'
+      else if (tag === 'img') result += `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})`
+      else if (tag === 'a') result += `[${inlineElToMd(c)}](${c.getAttribute('href') ?? ''})`
       else result += inlineElToMd(c)
     }
   }
@@ -323,10 +380,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** Convert inline markdown (bold, italic, code, etc.) to HTML */
+/** Convert inline markdown (bold, italic, code, links, etc.) to HTML */
 function inlineToHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')

@@ -935,6 +935,10 @@ ul, ol { list-style: none; }
   50%       { box-shadow: 0 0 14px var(--green); }
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ─── RESPONSIVE ────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .callout { display: none; }

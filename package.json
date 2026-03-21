@@ -1,7 +1,7 @@
 {
   "name": "noteflow",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.3.0",
   "description": "Fast notes for software engineers",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -23,6 +23,7 @@
     "@tiptap/extension-heading": "^2.27.2",
     "@tiptap/extension-history": "^2.27.2",
     "@tiptap/extension-horizontal-rule": "^2.27.2",
+    "@tiptap/extension-image": "^2.27.2",
     "@tiptap/extension-italic": "^2.27.2",
     "@tiptap/extension-link": "^2.27.2",
     "@tiptap/extension-list-item": "^2.27.2",
@@ -79,7 +80,9 @@
       "icon": "public/icon.ico"
     },
     "linux": {
-      "target": ["deb"],
+      "target": [
+        "deb"
+      ],
       "category": "Utility",
       "icon": "public/icon.png",
       "desktop": {

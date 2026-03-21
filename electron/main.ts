@@ -11,6 +11,7 @@ import {
 } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import https from 'https'
 import os from 'os'
 
 function getIconPath(): string {
@@ -277,12 +278,115 @@ ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
 
 ipcMain.handle('app:open-notes-folder', () => shell.openPath(NOTES_DIR))
 
+ipcMain.handle('app:check-update', () => {
+  // if (!app.isPackaged) return { hasUpdate: false }
+  return new Promise((resolve) => {
+    const req = https.get(
+      'https://api.github.com/repos/yagoid/noteflow/releases/latest',
+      { headers: { 'User-Agent': 'NoteFlow-App' } },
+      (res) => {
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data)
+            const latest = json.tag_name?.replace(/^v/, '')
+            const current = app.getVersion()
+            const hasUpdate = latest && latest !== current
+            const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-Setup-${latest}.exe`
+            resolve({ hasUpdate, latestVersion: latest, downloadUrl })
+          } catch {
+            resolve({ hasUpdate: false })
+          }
+        })
+      }
+    )
+    req.on('error', () => resolve({ hasUpdate: false }))
+    req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }) })
+  })
+})
+
+ipcMain.handle('app:open-url', (_event, url: string) => {
+  shell.openExternal(url)
+})
+
 ipcMain.handle('app:choose-notes-dir', async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
     properties: ['openDirectory'],
     title: 'Choose notes folder',
   })
   return result.canceled ? null : result.filePaths[0]
+})
+
+ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string; content: string }>) => {
+  try {
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Export notes',
+      defaultPath: path.join(
+        os.homedir(),
+        `noteflow-export-${new Date().toISOString().slice(0, 10)}.noteflow`
+      ),
+      filters: [
+        { name: 'NoteFlow Export', extensions: ['noteflow'] },
+        { name: 'JSON', extensions: ['json'] },
+      ],
+    })
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true, error: 'Canceled' }
+    }
+    const exportFile = {
+      version: 1,
+      exported: new Date().toISOString(),
+      app: 'noteflow',
+      notes: entries,
+    }
+    fs.writeFileSync(result.filePath, JSON.stringify(exportFile, null, 2), 'utf-8')
+    return { ok: true, filePath: result.filePath }
+  } catch (err: unknown) {
+    return { ok: false, error: String(err) }
+  }
+})
+
+ipcMain.handle('notes:parse-import-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Import notes',
+      filters: [
+        { name: 'NoteFlow Export', extensions: ['noteflow'] },
+        { name: 'JSON', extensions: ['json'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true, error: 'Canceled' }
+    }
+    const raw = fs.readFileSync(result.filePaths[0], 'utf-8')
+    const parsed = JSON.parse(raw)
+    if (parsed.version !== 1 || parsed.app !== 'noteflow' || !Array.isArray(parsed.notes)) {
+      return { ok: false, error: 'Invalid .noteflow file format' }
+    }
+    return { ok: true, file: parsed }
+  } catch (err: unknown) {
+    return { ok: false, error: String(err) }
+  }
+})
+
+ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ filename: string; content: string }>) => {
+  const written: string[] = []
+  const errors: string[] = []
+  for (const entry of entries) {
+    try {
+      const dest = path.join(NOTES_DIR, entry.filename)
+      fs.writeFileSync(dest, entry.content, 'utf-8')
+      written.push(entry.filename)
+    } catch (err) {
+      errors.push(`${entry.filename}: ${String(err)}`)
+    }
+  }
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send('notes-updated')
+  })
+  return { written, errors }
 })
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────

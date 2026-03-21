@@ -220,14 +220,64 @@
     });
   }
 
-  // ── Download button click tracking (console) ─
-  ['hero-download-btn', 'main-download-btn'].forEach((id) => {
-    const btn = document.getElementById(id);
-    if (btn) {
-      btn.addEventListener('click', () => {
-        console.log('[NoteFlow] Download clicked from:', id);
+  // ── Direct download from GitHub releases ────
+  function triggerDirectDownload() {
+    const btn = document.getElementById('hero-download-btn');
+    if (!btn) return;
+
+    const originalHTML = btn.innerHTML;
+    btn.style.pointerEvents = 'none';
+    btn.style.opacity = '0.7';
+    btn.innerHTML = `
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+        style="animation: spin 1s linear infinite">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+      </svg>
+      Fetching latest…
+    `;
+
+    fetch('https://api.github.com/repos/yagoid/noteflow/releases/latest', {
+      headers: { Accept: 'application/vnd.github.v3+json' },
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        const latest = (json.tag_name || '').replace(/^v/, '');
+        if (!latest) throw new Error('No tag found');
+        const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-Setup-${latest}.exe`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `NoteFlow-Setup-${latest}.exe`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        console.log('[NoteFlow] Direct download triggered:', downloadUrl);
+      })
+      .catch(() => {
+        // Fallback: open releases page
+        window.open('https://github.com/yagoid/noteflow/releases/latest', '_blank', 'noopener,noreferrer');
+      })
+      .finally(() => {
+        btn.innerHTML = originalHTML;
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
       });
-    }
-  });
+  }
+
+  const heroDownloadBtn = document.getElementById('hero-download-btn');
+  if (heroDownloadBtn) {
+    heroDownloadBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      console.log('[NoteFlow] Download clicked from: hero-download-btn');
+      triggerDirectDownload();
+    });
+  }
+
+  const mainDownloadBtn = document.getElementById('main-download-btn');
+  if (mainDownloadBtn) {
+    mainDownloadBtn.addEventListener('click', () => {
+      console.log('[NoteFlow] Releases link clicked from: main-download-btn');
+    });
+  }
 
 })();

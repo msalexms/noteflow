@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
+import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { Editor } from './Editor'
 import type { NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
-  Pin, Archive, Trash2, Copy, Eye, Edit3,
-  Plus, X, Check, Pencil, ExternalLink
+  Pin, Trash2, Copy, Eye, Edit3,
+  Plus, X, Check, Pencil, ExternalLink, Lock,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
+import { EncryptionModal } from '../EncryptionModal'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -28,10 +30,14 @@ export function NoteEditor() {
   const note = useNotesStore((s) => s.notes.find((n) => n.id === s.activeNoteId) ?? null)
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
-  const archiveNote = useNotesStore((s) => s.archiveNote)
+  const unlockNote = useNotesStore((s) => s.unlockNote)
+  const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
 
   // Active section by id (not index — stable across reorders)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
+
+  // Editor font size (from shared store)
+  const { fontSize, changeFontSize, resetFontSize } = useEditorSettingsStore()
 
   // Raw (markdown source) mode buffer
   const [rawContent, setRawContent] = useState('')
@@ -56,11 +62,16 @@ export function NoteEditor() {
   // Confirm modal
   const [modal, setModal] = useState<ModalState | null>(null)
 
+  // Unlock modal for encrypted notes
+  const [showUnlockModal, setShowUnlockModal] = useState(false)
+
   // Drag and drop state
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
+  const pendingSectionRef = useRef<string | null>(null)
+  const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -72,12 +83,36 @@ export function NoteEditor() {
   // ── Reset when the active note changes ─────────────────────────────────────
   useEffect(() => {
     if (!note) return
-    const firstId = note.sections[0]?.id ?? null
-    setActiveSectionId(firstId)
-    setRawContent(note.sections[0]?.content ?? '')
+    const pending = pendingSectionRef.current
+    const targetId = (pending && note.sections.find((s) => s.id === pending))
+      ? pending
+      : note.sections[0]?.id ?? null
+    pendingSectionRef.current = null
+    setActiveSectionId(targetId)
+    setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
     setRenamingId(null)
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Handle section request from sidebar ────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { noteId, sectionId } = (e as CustomEvent<{ noteId: string; sectionId: string }>).detail
+      if (noteRef.current?.id === noteId) {
+        // Same note: switch section directly
+        const section = noteRef.current.sections.find((s) => s.id === sectionId)
+        if (section) {
+          setRawContent(section.content)
+          setActiveSectionId(sectionId)
+        }
+      } else {
+        // Different note: store for when the note.id effect fires
+        pendingSectionRef.current = sectionId
+      }
+    }
+    window.addEventListener('noteflow:request-section', handler)
+    return () => window.removeEventListener('noteflow:request-section', handler)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-focus title field when new note is created ───────────────────────
   useEffect(() => {
@@ -129,6 +164,13 @@ export function NoteEditor() {
   const activeSectionIdRef = useRef(activeSectionId)
   useEffect(() => { activeSectionIdRef.current = activeSectionId }, [activeSectionId])
 
+  // Auto-show unlock modal when switching to a locked encrypted note
+  useEffect(() => {
+    if (note?.encryption && !sessionPasswords[note.id]) {
+      setShowUnlockModal(true)
+    }
+  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Auto-focus title on new note ───────────────────────────────────────────
   useEffect(() => {
     if (note && (note.title === '' || note.title === 'Untitled') && note.sections.length === 1 && note.sections[0].content === '') {
@@ -162,6 +204,35 @@ export function NoteEditor() {
       onConfirm: () => { setModal(null); deleteNote(note.id) },
     })
   }, [note, deleteNote])
+
+  const handleRawImageInsert = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter(f => f.type.startsWith('image/'))
+    if (imageFiles.length === 0 || !activeSection) return
+    let insertText = ''
+    for (const file of imageFiles) {
+      const src = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      insertText += `![${file.name}](${src})\n`
+    }
+    const textarea = rawTextareaRef.current
+    const pos = textarea?.selectionStart ?? rawContent.length
+    const newValue = rawContent.substring(0, pos) + insertText + rawContent.substring(pos)
+    setRawContent(newValue)
+    if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
+    rawDebounceRef.current = setTimeout(() => {
+      if (activeSection && noteRef.current) {
+        updateNote(noteRef.current.id, {
+          sections: noteRef.current.sections.map((s) =>
+            s.id === activeSection.id ? { ...s, content: newValue } : s,
+          ),
+        })
+      }
+    }, 600)
+  }, [rawContent, activeSection, updateNote]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Delete key on the note (only when editor is NOT focused) ──────────────
   useEffect(() => {
@@ -393,20 +464,35 @@ export function NoteEditor() {
   }
 
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newDisplay = e.target.value
+
+    // Restore base64 data URIs from original rawContent (matched in order)
+    const origSrcs: string[] = []
+    rawContent.replace(/!\[[^\]]*\]\((data:[^)]+)\)/g, (_, src) => { origSrcs.push(src); return '' })
+    let idx = 0
+    const newContent = newDisplay.replace(/(!\[[^\]]*\])\(\[image\]\)/g, (_, prefix) => {
+      const src = origSrcs[idx++]
+      return src ? `${prefix}(${src})` : `${prefix}([image])`
+    })
+
     if (activeSection) pushToUndoStack(activeSection.id, rawContent)
-    const val = e.target.value
-    setRawContent(val)
+    setRawContent(newContent)
     if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
     rawDebounceRef.current = setTimeout(() => {
       if (activeSection && noteRef.current) {
         updateNote(noteRef.current.id, {
           sections: noteRef.current.sections.map((s) =>
-            s.id === activeSection.id ? { ...s, content: val } : s,
+            s.id === activeSection.id ? { ...s, content: newContent } : s,
           ),
         })
       }
     }, 600)
   }
+
+  const displayContent = rawContent.replace(
+    /!\[([^\]]*)\]\(data:[^)]+\)/g,
+    (_, alt) => `![${alt}]([image])`
+  )
 
   const handleRawKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const sectionId = activeSection?.id
@@ -439,6 +525,7 @@ export function NoteEditor() {
     }
   }
 
+
   const handleRawBlur = () => {
     if (rawDebounceRef.current) clearTimeout(rawDebounceRef.current)
     if (activeSection && activeSection.content !== rawContent) {
@@ -448,6 +535,42 @@ export function NoteEditor() {
         ),
       })
     }
+  }
+
+  // ── Encrypted note — locked view ───────────────────────────────────────────
+  if (note.encryption && !sessionPasswords[note.id]) {
+    return (
+      <>
+        <div className="flex flex-col h-full">
+          <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
+            <span className="text-xl font-bold font-mono text-text">
+              {note.title || 'Untitled'}
+            </span>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
+            <Lock size={28} className="opacity-20" />
+            <p className="text-sm font-mono">This note is encrypted</p>
+            <button
+              onClick={() => setShowUnlockModal(true)}
+              className="text-xs font-mono text-accent hover:underline opacity-70 hover:opacity-100 transition-opacity"
+            >
+              Click to unlock
+            </button>
+          </div>
+        </div>
+        {showUnlockModal && (
+          <EncryptionModal
+            mode="unlock"
+            noteTitle={note.title}
+            onConfirm={async (password) => {
+              await unlockNote(note.id, password)
+              setShowUnlockModal(false)
+            }}
+            onCancel={() => setShowUnlockModal(false)}
+          />
+        )}
+      </>
+    )
   }
 
   return (
@@ -463,7 +586,15 @@ export function NoteEditor() {
         />
       )}
 
-      <div className="flex flex-col h-full" onKeyDown={(e) => e.stopPropagation()}>
+      <div
+        className="flex flex-col h-full"
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.ctrlKey && (e.key === '=' || e.key === '+')) { e.preventDefault(); changeFontSize(1) }
+          if (e.ctrlKey && e.key === '-') { e.preventDefault(); changeFontSize(-1) }
+          if (e.ctrlKey && e.key === '0') { e.preventDefault(); resetFontSize() }
+        }}
+      >
         <div className="flex items-center gap-1 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
           <div className="flex items-center gap-1.5 flex-1 overflow-x-auto min-w-0 pr-1">
             {note.sections.map((section) => {
@@ -594,13 +725,6 @@ export function NoteEditor() {
               <Pin size={13} />
             </button>
             <button
-              onClick={() => archiveNote(note.id)}
-              title={note.archived ? 'Unarchive note' : 'Archive note'}
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
-            >
-              <Archive size={13} />
-            </button>
-            <button
               onClick={openDeleteNoteModal}
               title="Delete note (Del)"
               className="p-1.5 rounded text-xs text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
@@ -645,11 +769,26 @@ export function NoteEditor() {
         <div className="flex-1 overflow-hidden">
           {rawMode ? (
             <textarea
-              value={rawContent}
+              ref={rawTextareaRef}
+              value={displayContent}
               onChange={handleRawChange}
               onBlur={handleRawBlur}
               onKeyDown={handleRawKeyDown}
-              className="w-full h-full p-4 bg-transparent text-sm font-mono text-text
+              onPaste={(e) => {
+                const imageItems = Array.from(e.clipboardData.items).filter(i => i.type.startsWith('image/'))
+                if (imageItems.length === 0) return
+                e.preventDefault()
+                handleRawImageInsert(imageItems.map(i => i.getAsFile()).filter(Boolean) as File[])
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                const files = Array.from(e.dataTransfer.files)
+                if (!files.some(f => f.type.startsWith('image/'))) return
+                e.preventDefault()
+                handleRawImageInsert(files)
+              }}
+              style={{ fontSize: `${fontSize}px` }}
+              className="w-full h-full p-4 bg-transparent font-mono text-text
                          border-none outline-none resize-none caret-accent leading-relaxed"
               spellCheck={false}
             />
@@ -659,6 +798,7 @@ export function NoteEditor() {
               content={activeSection?.content ?? ''}
               onChange={handleSectionContentChange}
               placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
+              fontSize={fontSize}
             />
           )}
         </div>

@@ -23,7 +23,7 @@
 
 import yaml from 'js-yaml'
 import { nanoid } from 'nanoid'
-import type { Note, NoteMeta, NoteSection } from '../types'
+import type { Note, NoteEncryption, NoteMeta, NoteSection } from '../types'
 
 // ---------------------------------------------------------------------------
 // Parse
@@ -41,6 +41,22 @@ export function parseNote(raw: string, filePath: string): Note {
     }
   }
 
+  // Parse encryption block if present
+  let encryption: NoteEncryption | undefined
+  if (data.encryption && typeof data.encryption === 'object') {
+    const enc = data.encryption as Record<string, unknown>
+    if (enc.alg === 'aes-256-gcm+pbkdf2') {
+      encryption = {
+        alg:        'aes-256-gcm+pbkdf2',
+        salt:       String(enc.salt       ?? ''),
+        iv:         String(enc.iv         ?? ''),
+        ciphertext: String(enc.ciphertext ?? ''),
+      }
+      if (enc.iterations) encryption.iterations = Number(enc.iterations)
+      if (enc.hashAlg === 'SHA-512') encryption.hashAlg = 'SHA-512'
+    }
+  }
+
   const meta: NoteMeta = {
     id:       String(data.id    ?? nanoid(8)),
     title:    String(data.title ?? extractTitle(body) ?? 'Untitled'),
@@ -49,6 +65,12 @@ export function parseNote(raw: string, filePath: string): Note {
     updated:  String(data.updated ?? new Date().toISOString()),
     archived: Boolean(data.archived ?? false),
     pinned:   Boolean(data.pinned   ?? false),
+    ...(encryption && { encryption }),
+  }
+
+  // Encrypted notes have no readable sections — skip parsing
+  if (encryption) {
+    return { ...meta, sections: [], raw, filePath }
   }
 
   let sections: NoteSection[]
@@ -87,6 +109,22 @@ export function parseNote(raw: string, filePath: string): Note {
 // ---------------------------------------------------------------------------
 
 export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): string {
+  // Encrypted path: omit sections, write encryption block, empty body
+  if (note.encryption) {
+    const fm: Record<string, unknown> = {
+      id:         note.id,
+      title:      note.title,
+      tags:       note.tags,
+      created:    note.created,
+      updated:    new Date().toISOString(),
+      encryption: note.encryption,
+    }
+    if (note.archived) fm.archived = true
+    if (note.pinned)   fm.pinned   = true
+    const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
+    return `---\n${yamlStr}---\n`
+  }
+
   const fm: Record<string, unknown> = {
     id:      note.id,
     title:   note.title,

@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react'
 import type { Editor } from '@tiptap/react'
 import {
   Bold,
@@ -29,6 +30,31 @@ interface ToolbarButton {
 }
 
 export function EditorToolbar({ editor }: ToolbarProps) {
+  const [linkInputOpen, setLinkInputOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const linkInputRef = useRef<HTMLInputElement>(null)
+
+  const openLinkInput = () => {
+    const existing = editor.getAttributes('link').href ?? ''
+    setLinkUrl(existing)
+    setLinkInputOpen(true)
+    setTimeout(() => { linkInputRef.current?.focus(); linkInputRef.current?.select() }, 0)
+  }
+
+  const commitLink = () => {
+    const url = linkUrl.trim()
+    if (url) editor.chain().focus().setLink({ href: url }).run()
+    else editor.chain().focus().unsetLink().run()
+    setLinkInputOpen(false)
+    setLinkUrl('')
+  }
+
+  const cancelLink = () => {
+    setLinkInputOpen(false)
+    setLinkUrl('')
+    editor.chain().focus().run()
+  }
+
   const buttons: (ToolbarButton | 'sep')[] = [
     {
       icon: <Heading1 size={14} />,
@@ -108,8 +134,8 @@ export function EditorToolbar({ editor }: ToolbarProps) {
     {
       icon: <Link size={14} />,
       action: () => {
-        const url = window.prompt('URL:')
-        if (url) editor.chain().focus().setLink({ href: url }).run()
+        if (editor.isActive('link')) editor.chain().focus().unsetLink().run()
+        else openLinkInput()
       },
       isActive: editor.isActive('link'),
       title: 'Insert link (Ctrl+K)',
@@ -128,26 +154,58 @@ export function EditorToolbar({ editor }: ToolbarProps) {
   ]
 
   return (
-    <div className="flex items-center gap-0.5 px-3 py-1.5 border-b border-border bg-surface-1 flex-wrap">
-      {buttons.map((btn, i) => {
-        if (btn === 'sep') {
-          return <div key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
-        }
-        return (
+    <div className="border-b border-border bg-surface-1">
+      <div className="flex items-center gap-0.5 px-3 py-1.5 flex-wrap">
+        {buttons.map((btn, i) => {
+          if (btn === 'sep') {
+            return <div key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
+          }
+          return (
+            <button
+              key={btn.title}
+              onClick={btn.action}
+              title={btn.title}
+              className={`p-1.5 rounded text-xs transition-colors font-mono
+                ${btn.isActive
+                  ? 'bg-accent/20 text-accent'
+                  : 'text-text-muted hover:text-text hover:bg-surface-3'
+                }`}
+            >
+              {btn.icon}
+            </button>
+          )
+        })}
+      </div>
+
+      {linkInputOpen && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border">
+          <Link size={11} className="text-text-muted flex-shrink-0" />
+          <input
+            ref={linkInputRef}
+            type="url"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitLink() }
+              if (e.key === 'Escape') cancelLink()
+            }}
+            placeholder="https://..."
+            className="flex-1 bg-transparent text-xs font-mono text-text placeholder-text-muted/40 outline-none caret-accent"
+          />
           <button
-            key={btn.title}
-            onClick={btn.action}
-            title={btn.title}
-            className={`p-1.5 rounded text-xs transition-colors font-mono
-              ${btn.isActive
-                ? 'bg-accent/20 text-accent'
-                : 'text-text-muted hover:text-text hover:bg-surface-3'
-              }`}
+            onMouseDown={(e) => { e.preventDefault(); commitLink() }}
+            className="text-xs font-mono text-accent hover:text-text transition-colors px-1"
           >
-            {btn.icon}
+            Set
           </button>
-        )
-      })}
+          <button
+            onMouseDown={(e) => { e.preventDefault(); cancelLink() }}
+            className="text-xs font-mono text-text-muted hover:text-text transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }

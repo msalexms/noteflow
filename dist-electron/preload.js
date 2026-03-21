@@ -22,6 +22,13 @@ const api = {
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
     maximize: () => electron_1.ipcRenderer.send('window:maximize'),
     close: () => electron_1.ipcRenderer.send('window:close'),
+    // Updates
+    checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
+    openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),
+    // Export / Import
+    exportNotes: (entries) => electron_1.ipcRenderer.invoke('notes:export', entries),
+    parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
+    writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

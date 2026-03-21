@@ -1,6 +1,8 @@
 import { create } from 'zustand'
+import { nanoid } from 'nanoid'
 import type { Note, NoteSection } from '../types'
 import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags } from '../lib/noteUtils'
+import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 function normalize(s: string): string {
@@ -25,9 +27,13 @@ interface NotesState {
   isLoading: boolean
   newlyCreatedNoteId: string | null
 
+  // Session-unlocked encrypted notes (in-memory only, not persisted)
+  sessionPasswords: Record<string, string>
+
   // Actions
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
+  duplicateNote: (id: string) => Promise<Note>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'pinned'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
@@ -41,6 +47,10 @@ interface NotesState {
   setNewlyCreatedNoteId: (id: string | null) => void
   syncNote: (filePath: string) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
+  encryptNote: (id: string, password: string, options?: EncryptionOptions) => Promise<void>
+  unlockNote: (id: string, password: string) => Promise<void>   // temporary in-session unlock
+  lockNote: (id: string) => void                                 // re-lock without removing encryption
+  removeNoteEncryption: (id: string, password: string) => Promise<void>  // permanent decrypt
 
   // Derived helpers
   getActiveNote: () => Note | null
@@ -60,6 +70,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   commandPaletteOpen: false,
   isLoading: false,
   newlyCreatedNoteId: null,
+  sessionPasswords: {},
 
   loadNotes: async () => {
     set({ isLoading: true })
@@ -120,9 +131,62 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     return note
   },
 
+  duplicateNote: async (id) => {
+    const source = get().notes.find((n) => n.id === id)
+    if (!source) throw new Error(`Note ${id} not found`)
+    const newId = nanoid(8)
+    const now = new Date().toISOString()
+    const draft: Omit<Note, 'filePath' | 'raw'> = {
+      id: newId,
+      title: source.title ? `${source.title} (copy)` : 'Untitled (copy)',
+      tags: [...source.tags],
+      created: now,
+      updated: now,
+      archived: false,
+      pinned: false,
+      sections: source.sections.map((s) => ({ ...s, id: nanoid(8) })),
+    }
+    const dir = get().notesDir
+    const filename = noteFilename(draft.id, draft.title)
+    const filePath = `${dir}/${filename}`
+    const raw = serializeNote(draft as Note)
+    const note: Note = { ...draft, filePath, raw }
+    await window.noteflow.writeNote(filePath, raw)
+    set((s) => ({ notes: [note, ...s.notes], activeNoteId: note.id, newlyCreatedNoteId: note.id }))
+    return note
+  },
+
   updateNote: async (id, patch) => {
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
+
+    if (note.encryption) {
+      if (patch.sections !== undefined) {
+        // Section edits only allowed when session-unlocked
+        const password = get().sessionPasswords[id]
+        if (!password) return
+        const newSections = patch.sections
+        const allContent = newSections.map((s: NoteSection) => s.content).join('\n')
+        const tags = extractTags(allContent)
+        const encryption = await encryptSections(newSections, password)
+        const updated: Note = {
+          ...note, ...patch, sections: newSections, tags, encryption,
+          updated: new Date().toISOString(),
+        }
+        const raw = serializeNote(updated)
+        updated.raw = raw
+        await window.noteflow.writeNote(note.filePath, raw)
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+        return
+      }
+      // Non-section patches (pinned, title) always allowed for encrypted notes
+      const updated: Note = { ...note, ...patch, updated: new Date().toISOString() }
+      const raw = serializeNote(updated)
+      updated.raw = raw
+      await window.noteflow.writeNote(note.filePath, raw)
+      set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+      return
+    }
 
     const newSections = patch.sections ?? note.sections
     const allContent = newSections.map((s: NoteSection) => s.content).join('\n')
@@ -154,7 +218,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     set((s) => {
       const remaining = s.notes.filter((n) => n.id !== id)
       const nextActive = remaining.find((n) => !n.archived) ?? remaining[0] ?? null
-      return { notes: remaining, activeNoteId: nextActive?.id ?? null }
+      const { [id]: _, ...sessionPasswords } = s.sessionPasswords
+      return { notes: remaining, activeNoteId: nextActive?.id ?? null, sessionPasswords }
     })
   },
 
@@ -198,6 +263,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   pruneEmptyNote: async (id) => {
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
+    if (note.encryption) return  // never auto-delete encrypted notes
     const titleIsDefault = !note.title.trim() || note.title.trim() === 'Untitled'
     const isEmpty =
       titleIsDefault &&
@@ -212,6 +278,57 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       return nextActive !== null
         ? { notes: remaining, activeNoteId: nextActive.id }
         : { notes: remaining }
+    })
+  },
+
+  encryptNote: async (id, password, options) => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!note || note.encryption) return
+    const encryption = await encryptSections(note.sections, password, options)
+    const updated: Note = { ...note, sections: [], encryption, updated: new Date().toISOString() }
+    const raw = serializeNote(updated)
+    updated.raw = raw
+    await window.noteflow.writeNote(note.filePath, raw)
+    set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+  },
+
+  unlockNote: async (id, password) => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!note || !note.encryption) return
+    // Throws on wrong password — caller is responsible for catching
+    const sections = await decryptSections(note.encryption, password)
+    // Keep encryption intact on disk; only update in-memory sections
+    set((s) => ({
+      notes: s.notes.map((n) => n.id === id ? { ...n, sections } : n),
+      sessionPasswords: { ...s.sessionPasswords, [id]: password },
+    }))
+  },
+
+  lockNote: (id) => {
+    set((s) => {
+      const { [id]: _, ...sessionPasswords } = s.sessionPasswords
+      return {
+        notes: s.notes.map((n) => n.id === id ? { ...n, sections: [] } : n),
+        sessionPasswords,
+      }
+    })
+  },
+
+  removeNoteEncryption: async (id, password) => {
+    const note = get().notes.find((n) => n.id === id)
+    if (!note || !note.encryption) return
+    // Throws on wrong password — caller is responsible for catching
+    const sections = await decryptSections(note.encryption, password)
+    const updated: Note = { ...note, sections, encryption: undefined, updated: new Date().toISOString() }
+    const raw = serializeNote(updated)
+    updated.raw = raw
+    await window.noteflow.writeNote(note.filePath, raw)
+    set((s) => {
+      const { [id]: _, ...sessionPasswords } = s.sessionPasswords
+      return {
+        notes: s.notes.map((n) => (n.id === id ? updated : n)),
+        sessionPasswords,
+      }
     })
   },
 

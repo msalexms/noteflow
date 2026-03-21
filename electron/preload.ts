@@ -41,6 +41,20 @@ const api = {
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
 
+  // Updates
+  checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }> =>
+    ipcRenderer.invoke('app:check-update'),
+  openUrl: (url: string): Promise<void> =>
+    ipcRenderer.invoke('app:open-url', url),
+
+  // Export / Import
+  exportNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('notes:export', entries),
+  parseImportFile: (): Promise<{ ok: boolean; file?: { version: number; exported: string; app: string; notes: Array<{ filename: string; content: string }> }; error?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('notes:parse-import-file'),
+  writeImportedNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ written: string[]; errors: string[] }> =>
+    ipcRenderer.invoke('notes:write-imported', entries),
+
   // Events from main → renderer
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)

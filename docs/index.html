@@ -126,7 +126,7 @@
 
         <div class="hero__actions">
           <a href="https://github.com/yagoid/noteflow/releases/latest" class="btn btn--primary" id="hero-download-btn"
-            target="_blank" rel="noopener noreferrer">
+            rel="noopener noreferrer">
             <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -236,15 +236,14 @@
             <div class="feature-card__icon" aria-hidden="true">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                 stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 11 12 14 22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                <circle cx="12" cy="16" r="1" fill="currentColor" />
               </svg>
             </div>
-            <h3 class="feature-card__title">Task lists with checkboxes</h3>
-            <p class="feature-card__desc">Add interactive task lists to any note. Check off items as you go. Completed
-              tasks are visually struck through so the remaining work stays clear.</p>
-            <code
-              class="feature-card__code"><span class="code-done">☑ Deploy to production</span><br>☐ Write unit tests</code>
+            <h3 class="feature-card__title">Encrypted notes</h3>
+            <p class="feature-card__desc">Lock any note with a password. Encrypted notes are stored as ciphertext on disk — only you can read them. No master key, no recovery backdoor.</p>
+            <code class="feature-card__code">🔒 passwords.md &nbsp;·&nbsp; 🔒 tokens.md</code>
           </article>
 
           <article class="feature-card" role="listitem">
@@ -443,15 +442,15 @@
             </div>
 
             <div class="download__actions">
-              <a href="https://github.com/yagoid/noteflow/releases/latest" class="btn btn--primary btn--large"
+              <a href="https://github.com/yagoid/noteflow/releases" class="btn btn--primary btn--large"
                 id="main-download-btn" target="_blank" rel="noopener noreferrer">
                 <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                   stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                  <rect x="9" y="3" width="6" height="4" rx="1" />
+                  <path d="M9 12h6M9 16h4" />
                 </svg>
-                Download NoteFlow.exe
+                View Releases
               </a>
               <a href="https://github.com/yagoid/noteflow" class="btn btn--ghost" target="_blank"
                 rel="noopener noreferrer">
@@ -469,7 +468,7 @@
                 <rect x="2" y="3" width="20" height="14" rx="2" />
                 <path d="M8 21h8M12 17v4" />
               </svg>
-              Windows 10 / 11 · x64 · ~80 MB
+              Windows 10 / 11 · x64 · ~90 MB
             </p>
           </div>
 

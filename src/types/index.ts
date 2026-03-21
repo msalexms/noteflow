@@ -9,6 +9,15 @@ export interface NoteSection {
 // Legacy fixed type kept only for default section creation
 export type NoteType = 'note' | 'task' | 'question'
 
+export interface NoteEncryption {
+  alg: 'aes-256-gcm+pbkdf2'
+  salt: string        // base64url — PBKDF2 salt (length = saltBytes used at encrypt time)
+  iv: string          // base64url, 12 bytes — AES-GCM nonce
+  ciphertext: string  // base64url — ciphertext + 16-byte GCM tag
+  iterations?: number               // PBKDF2 rounds; omitted when default (310_000)
+  hashAlg?: 'SHA-256' | 'SHA-512'  // PBKDF2 hash; omitted when default ('SHA-256')
+}
+
 export interface NoteMeta {
   id: string
   title: string
@@ -17,6 +26,7 @@ export interface NoteMeta {
   updated: string
   archived: boolean
   pinned: boolean
+  encryption?: NoteEncryption  // present iff note is encrypted
 }
 
 export interface Note extends NoteMeta {
@@ -30,6 +40,31 @@ export interface NoteFileMeta {
   path: string
   mtime: string
   ctime: string
+}
+
+// ── Export / Import ───────────────────────────────────────────────────────────
+
+export interface NoteflowExportEntry {
+  filename: string
+  content: string  // raw YAML frontmatter + markdown body
+}
+
+export interface NoteflowExportFile {
+  version: 1
+  exported: string   // ISO 8601
+  app: 'noteflow'
+  notes: NoteflowExportEntry[]
+}
+
+export type ImportConflictStrategy = 'skip' | 'overwrite' | 'keep-both'
+
+export interface ImportPreviewEntry {
+  filename: string
+  content: string
+  parsedTitle: string
+  parsedId: string
+  conflict: 'none' | 'id' | 'filename'
+  strategy: ImportConflictStrategy
 }
 
 // Extend window with our electron bridge
@@ -54,6 +89,11 @@ declare global {
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void
+      checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
+      openUrl: (url: string) => Promise<void>
+      exportNotes: (entries: NoteflowExportEntry[]) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
+      parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
+      writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
     }
   }
 }

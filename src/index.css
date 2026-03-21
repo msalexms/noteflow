@@ -77,7 +77,7 @@ button {
   padding: 1.25rem 1.5rem 4rem;
   outline: none;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: var(--prose-font-size, 13px);
   line-height: 1.75;
   color: rgb(var(--text));
   caret-color: rgb(var(--accent));
@@ -177,6 +177,11 @@ button {
   user-select: none;
 }
 
+.prose-editor .ProseMirror ul[data-type="taskList"] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .prose-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"] {
   appearance: none;
   width: 14px;
@@ -219,6 +224,16 @@ button {
   color: rgb(var(--cyan));
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* Images */
+.prose-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 0.25rem 0;
+  display: block;
 }
 
 /* Horizontal Rule */
