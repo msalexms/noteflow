@@ -72,7 +72,6 @@ button {
 }
 
 .prose-editor .ProseMirror {
-  height: 100%;
   min-height: 100%;
   padding: 1.25rem 1.5rem 4rem;
   outline: none;
@@ -130,6 +129,7 @@ button {
   padding: 1rem;
   margin: 1rem 0;
   overflow-x: auto;
+  position: relative;
 }
 
 .prose-editor .ProseMirror pre code {
@@ -164,20 +164,20 @@ button {
   padding-left: 0;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] li {
+.prose-editor .ProseMirror ul[data-type="taskList"] > li {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.15rem 0;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] li > label {
+.prose-editor .ProseMirror ul[data-type="taskList"] > li > label {
   flex-shrink: 0;
   margin-top: 2px;
   user-select: none;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] li > div {
+.prose-editor .ProseMirror ul[data-type="taskList"] > li > div {
   flex: 1;
   min-width: 0;
 }
@@ -209,7 +209,7 @@ button {
   font-weight: bold;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+.prose-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
   color: rgb(var(--text-muted));
   text-decoration: line-through;
 }
@@ -256,6 +256,20 @@ button {
 .hljs-punctuation                { color: #89ddff; }
 .hljs-tag                        { color: #f7768e; }
 .hljs-attribute                  { color: #e0af68; }
+
+/* ── Image resize handle ─────────────────────────────────────────────────── */
+.resize-handle {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  background: rgb(var(--accent));
+  border-radius: 2px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
 
 /* ── Drag region ─────────────────────────────────────────────────────────── */
 .drag { -webkit-app-region: drag; }

@@ -7,7 +7,7 @@ import Italic from '@tiptap/extension-italic'
 import Underline from '@tiptap/extension-underline'
 import Strike from '@tiptap/extension-strike'
 import Code from '@tiptap/extension-code'
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { CodeBlockWithCopy } from './CodeBlockWithCopy'
 import Heading from '@tiptap/extension-heading'
 import BulletList from '@tiptap/extension-bullet-list'
 import OrderedList from '@tiptap/extension-ordered-list'
@@ -15,7 +15,7 @@ import ListItem from '@tiptap/extension-list-item'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Link from '@tiptap/extension-link'
-import Image from '@tiptap/extension-image'
+import { ResizableImage } from './ResizableImage'
 import HardBreak from '@tiptap/extension-hard-break'
 import HorizontalRule from '@tiptap/extension-horizontal-rule'
 import History from '@tiptap/extension-history'
@@ -69,7 +69,7 @@ export function Editor({
       Underline,
       Strike,
       Code,
-      CodeBlockLowlight.configure({ lowlight }),
+      CodeBlockWithCopy.configure({ lowlight }),
       Heading.configure({ levels: [1, 2, 3] }),
       BulletList,
       OrderedList,
@@ -77,7 +77,7 @@ export function Editor({
       TaskList,
       TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false }),
-      Image.configure({ inline: true, allowBase64: true }),
+      ResizableImage.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
       HardBreak,
       History,
@@ -108,11 +108,13 @@ export function Editor({
     return () => editor.view.dom.removeEventListener('click', handler)
   }, [editor])
 
-  // Sync external content changes (e.g. switching notes)
-  // IMPORTANT: compare normalized markdown to avoid overwriting valid content
-  // with a superficially-different representation (which would eat line breaks).
+  // Sync external content changes (e.g. sync from another window).
+  // IMPORTANT: never reset content while the editor is focused — the debounced
+  // save creates a window where the store lags behind the editor state, causing
+  // a false mismatch that would call setContent mid-typing and jump the cursor.
   useEffect(() => {
     if (!editor) return
+    if (editor.isFocused) return
     const currentMd = htmlToMarkdown(editor.getHTML()).trim()
     const incomingMd = content.trim()
     if (currentMd !== incomingMd) {
@@ -208,8 +210,9 @@ function htmlFromMarkdown(md: string): string {
   // Normalise line endings
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
-  // Split into "blocks" on blank lines
-  const rawBlocks = src.split(/\n\n+/)
+  // Split into "blocks" on blank lines — use exactly \n\n so that multiple
+  // consecutive blank lines produce empty blocks, preserving them as <p></p>.
+  const rawBlocks = src.split(/\n\n/)
   const htmlBlocks: string[] = []
 
   for (const block of rawBlocks) {
@@ -281,7 +284,7 @@ function htmlToMarkdown(html: string): string {
       result += blockElToMd(child as Element)
     }
   }
-  return result.trim().replace(/\n{3,}/g, '\n\n')
+  return result.trim()
 }
 
 function blockElToMd(el: Element): string {
@@ -309,16 +312,21 @@ function inlineElToMd(el: Element): string {
   let result = ''
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
-      result += child.textContent ?? ''
+      // &nbsp; in HTML becomes \u00A0 in textContent — restore to regular space
+      result += (child.textContent ?? '').replace(/\u00A0/g, ' ')
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const c = child as Element
       const tag = c.tagName.toLowerCase()
       if (tag === 'strong' || tag === 'b') result += `**${inlineElToMd(c)}**`
       else if (tag === 'em' || tag === 'i') result += `*${inlineElToMd(c)}*`
       else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
-      else if (tag === 'code') result += `\`${c.textContent}\``
+      else if (tag === 'code') result += `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\``
       else if (tag === 'br') result += '\n'
-      else if (tag === 'img') result += `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})`
+      else if (tag === 'img') {
+        const w = c.getAttribute('width')
+        const suffix = w ? `{width=${w}}` : ''
+        result += `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})${suffix}`
+      }
       else if (tag === 'a') result += `[${inlineElToMd(c)}](${c.getAttribute('href') ?? ''})`
       else result += inlineElToMd(c)
     }
@@ -384,7 +392,11 @@ function escapeHtml(s: string): string {
 function inlineToHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">')
+    // Preserve runs of 2+ spaces: ProseMirror collapses regular spaces when
+    // parsing HTML, so we use &nbsp; to keep them intact.
+    .replace(/ {2,}/g, (m) => '&nbsp;'.repeat(m.length))
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{width=(\d+)\})?/g, (_, alt, src, w) =>
+      w ? `<img alt="${alt}" src="${src}" width="${w}">` : `<img alt="${alt}" src="${src}">`)
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -413,7 +425,7 @@ function parseMdListItems(lines: string[]): MdListItem[] {
     const indentLen = line.match(/^(\s*)/)?.[1].length ?? 0
     const depth = Math.floor(indentLen / 2)
 
-    const taskMatch = line.match(/^\s*- \[([ x])\] (.*)$/)
+    const taskMatch = line.match(/^\s*- \[([ x])\] ?(.*)$/)
     const olMatch = line.match(/^\s*(\d+)\. (.*)$/)
     const ulMatch = line.match(/^\s*[-*+] (.*)$/)
 
