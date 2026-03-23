@@ -1,15 +1,9 @@
 import { NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
+import type { NodeViewProps } from '@tiptap/react'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useState } from 'react'
 
-interface CodeBlockViewProps {
-  node: {
-    textContent: string
-    attrs: { language: string | null }
-  }
-}
-
-function CodeBlockView({ node }: CodeBlockViewProps) {
+function CodeBlockView({ node }: NodeViewProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
