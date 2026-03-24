@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Check, Download, Minus, Palette, Settings, Square, X } from 'lucide-react'
+import { Check, Cloud, CloudOff, Download, Minus, Palette, Settings, Square, X } from 'lucide-react'
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
 import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
+import { GitHubSyncModal } from './GitHubSyncModal'
 
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
   const { fontSize, changeFontSize, resetFontSize } = useEditorSettingsStore()
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
+  const [syncModal, setSyncModal] = useState(false)
+  const [syncConnected, setSyncConnected] = useState(false)
 
   useEffect(() => {
     window.noteflow.checkUpdate().then((result) => {
@@ -18,6 +21,7 @@ export function TitleBar() {
         setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
       }
     })
+    window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
   }, [])
 
   return (
@@ -51,6 +55,19 @@ export function TitleBar() {
         <TitleBarMenu
           trigger={<Settings size={12} />}
           groups={[
+            {
+              label: 'Sync',
+              items: [
+                {
+                  id: 'github-sync',
+                  label: 'GitHub Sync...',
+                  indicator: syncConnected
+                    ? <Cloud size={10} className="text-green-400" />
+                    : <CloudOff size={10} className="text-text-muted/50" />,
+                  action: () => setSyncModal(true),
+                },
+              ],
+            },
             {
               label: 'Notes',
               items: [
@@ -136,6 +153,14 @@ export function TitleBar() {
       <ExportImportModal
         mode={exportImportModal}
         onClose={() => setExportImportModal(null)}
+      />
+    )}
+    {syncModal && (
+      <GitHubSyncModal
+        onClose={() => {
+          setSyncModal(false)
+          window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
+        }}
       />
     )}
     </>

@@ -94,6 +94,11 @@ declare global {
       exportNotes: (entries: NoteflowExportEntry[]) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
+      // GitHub Sync
+      getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string }>
+      connectGitHub: (token: string, repo: string) => Promise<{ ok: boolean; owner?: string; repo?: string; error?: string }>
+      disconnectGitHub: () => Promise<{ ok: boolean }>
+      pullNotes: () => Promise<{ pulled: number; errors: string[] }>
     }
   }
 }

@@ -55,6 +55,23 @@ const api = {
   writeImportedNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ written: string[]; errors: string[] }> =>
     ipcRenderer.invoke('notes:write-imported', entries),
 
+  // GitHub Sync
+  getSyncStatus: (): Promise<{
+    enabled: boolean
+    connected: boolean
+    owner?: string
+    repo?: string
+    lastSync?: string
+    error?: string
+  }> => ipcRenderer.invoke('sync:get-status'),
+  connectGitHub: (
+    token: string,
+    repo: string
+  ): Promise<{ ok: boolean; owner?: string; repo?: string; error?: string }> =>
+    ipcRenderer.invoke('sync:connect', token, repo),
+  disconnectGitHub: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('sync:disconnect'),
+  pullNotes: (): Promise<{ pulled: number; errors: string[] }> => ipcRenderer.invoke('sync:pull'),
+
   // Events from main → renderer
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)

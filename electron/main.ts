@@ -13,6 +13,7 @@ import path from 'path'
 import fs from 'fs'
 import https from 'https'
 import os from 'os'
+import * as githubSync from './githubSync'
 
 function getIconPath(): string {
   const iconExt = process.platform === 'win32' ? 'ico' : 'png'
@@ -66,6 +67,14 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => {
     win.show()
+    // Pull remote notes in background after window is visible
+    if (githubSync.getSyncStatus().connected) {
+      githubSync.pullNotes(NOTES_DIR).then(({ pulled }) => {
+        if (pulled > 0) {
+          win.webContents.send('notes-updated')
+        }
+      })
+    }
   })
 
   // Hide instead of close — keeps the process alive for fast re-open
@@ -228,6 +237,7 @@ ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
       // Send the filePath and the sender's webContents ID
       win.webContents.send('notes-updated', filePath, event.sender.id)
     })
+    githubSync.schedulePush(filePath, content)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -240,6 +250,7 @@ ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
     })
+    githubSync.scheduleDelete(filePath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -389,6 +400,29 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ filename:
   return { written, errors }
 })
 
+// ── GitHub Sync ───────────────────────────────────────────────────────────────
+
+ipcMain.handle('sync:get-status', () => {
+  return githubSync.getSyncStatus()
+})
+
+ipcMain.handle('sync:connect', async (_event, token: string, repo: string) => {
+  return githubSync.connectGitHub(token, repo, NOTES_DIR)
+})
+
+ipcMain.handle('sync:disconnect', () => {
+  githubSync.disconnectGitHub()
+  return { ok: true }
+})
+
+ipcMain.handle('sync:pull', async () => {
+  const result = await githubSync.pullNotes(NOTES_DIR)
+  if (result.pulled > 0) {
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+  }
+  return result
+})
+
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 
 function readSettings(): Record<string, unknown> {
@@ -444,7 +478,9 @@ ipcMain.on('window:open-sticky', (_event, noteId: string, sectionId: string) => 
 app.whenReady().then(() => {
   // Remove default menu for all windows
   Menu.setApplicationMenu(null)
-  
+
+  githubSync.loadSyncSettings()
+
   mainWindow = createWindow()
   createTray()
   registerGlobalShortcut()
