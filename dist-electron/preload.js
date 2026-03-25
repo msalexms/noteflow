@@ -17,18 +17,40 @@ const api = {
     // Settings
     getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
     setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),
+    getLoginItem: () => electron_1.ipcRenderer.invoke('app:get-login-item'),
+    setLoginItem: (enabled) => electron_1.ipcRenderer.invoke('app:set-login-item', enabled),
+    getStartupStickies: () => electron_1.ipcRenderer.invoke('settings:get-startup-stickies'),
+    setStartupStickies: (stickies) => electron_1.ipcRenderer.invoke('settings:set-startup-stickies', stickies),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
     maximize: () => electron_1.ipcRenderer.send('window:maximize'),
     close: () => electron_1.ipcRenderer.send('window:close'),
+    setSize: (w, h, minW, minH) => electron_1.ipcRenderer.send('window:set-size', w, h, minW, minH),
+    foldToCorner: (w, h) => electron_1.ipcRenderer.send('window:fold-to-corner', w, h),
+    unfold: () => electron_1.ipcRenderer.send('window:unfold'),
     // Updates
     checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
     openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),
+    downloadAndInstall: (url) => electron_1.ipcRenderer.invoke('app:download-and-install', url),
+    onUpdateProgress: (callback) => {
+        electron_1.ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent));
+    },
     // Export / Import
     exportNotes: (entries) => electron_1.ipcRenderer.invoke('notes:export', entries),
     parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
     writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),
+    // GitHub Sync
+    getSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-status'),
+    initiateGitHubAuth: (repo) => electron_1.ipcRenderer.invoke('sync:initiate', repo),
+    cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),
+    disconnectGitHub: () => electron_1.ipcRenderer.invoke('sync:disconnect'),
+    pullNotes: () => electron_1.ipcRenderer.invoke('sync:pull'),
+    onSyncAuthComplete: (cb) => {
+        const wrapper = (_event, result) => cb(result);
+        electron_1.ipcRenderer.on('sync-auth-complete', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('sync-auth-complete', wrapper);
+    },
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

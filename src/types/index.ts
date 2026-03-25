@@ -83,14 +83,23 @@ declare global {
       minimize: () => void
       maximize: () => void
       close: () => void
+      setSize: (width: number, height: number, minWidth: number, minHeight: number) => void
+      foldToCorner: (width: number, height: number) => void
+      unfold: () => void
       openSticky: (noteId: string, sectionId: string) => void
       onNewNote: (cb: () => void) => () => void
       onNotesUpdated: (cb: (filePath?: string, senderId?: number) => void) => () => void
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void
+      getLoginItem: () => Promise<{ openAtLogin: boolean }>
+      setLoginItem: (enabled: boolean) => Promise<void>
+      getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
+      setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>
+      downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
+      onUpdateProgress: (callback: (percent: number) => void) => void
       exportNotes: (entries: NoteflowExportEntry[]) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>

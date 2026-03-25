@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from '../stores/notesStore'
 import { Editor } from './Editor/Editor'
-import { X, Minus, Lock, Loader2 } from 'lucide-react'
+import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import type { NoteSection } from '../types'
 
+const FOLDED_W = 220
+const FOLDED_H = 32
+
 // Custom TitleBar for the sticky window
-function StickyTitleBar({ title }: { title: string }) {
+function StickyTitleBar({ title, onFold }: { title: string; onFold: () => void }) {
   return (
     <div
       className="h-8 bg-surface-1 border-b border-border flex items-center justify-between px-2 cursor-default select-none"
@@ -16,6 +19,13 @@ function StickyTitleBar({ title }: { title: string }) {
         {title}
       </div>
       <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <button
+          className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+          onClick={onFold}
+          title="Fold Sticky Note"
+        >
+          <ChevronUp size={12} />
+        </button>
         <button
           className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={() => window.noteflow.minimize()}
@@ -35,10 +45,48 @@ function StickyTitleBar({ title }: { title: string }) {
   )
 }
 
+// Compact folded pill shown when the sticky note is collapsed
+function FoldedPill({ title, onUnfold }: { title: string; onUnfold: () => void }) {
+  return (
+    <div
+      className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-1 border border-accent/70 rounded-full overflow-hidden shadow-[0_0_8px_0_rgb(var(--accent)/0.35)]"
+      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+    >
+      <div className="text-xs font-mono text-text-muted truncate flex-1 min-w-0">
+        {title}
+      </div>
+      <div className="flex items-center gap-0.5 flex-shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <button
+          className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+          onClick={onUnfold}
+          title="Unfold Sticky Note"
+        >
+          <ChevronDown size={12} />
+        </button>
+        <button
+          className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+          onClick={() => window.noteflow.minimize()}
+          title="Minimize"
+        >
+          <Minus size={12} />
+        </button>
+        <button
+          className="p-1 rounded-full text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
+          onClick={() => window.noteflow.close()}
+          title="Close"
+        >
+          <X size={12} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function StickyApp() {
   const [noteId, setNoteId] = useState<string | null>(null)
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [rawContent, setRawContent] = useState('')
+  const [isFolded, setIsFolded] = useState(false)
   const { loadNotes, isLoading, notes, updateNote } = useNotesStore()
 
   // Encrypted note unlock state (local — no store interaction)
@@ -121,8 +169,8 @@ export function StickyApp() {
 
   if (isLoading || !noteId || !sectionId) {
     return (
-      <div className="flex flex-col h-screen bg-surface-0">
-        <StickyTitleBar title="Loading..." />
+      <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
+        <StickyTitleBar title="Loading..." onFold={() => {}} />
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-xs font-mono text-text-muted animate-pulse">Loading sticky note...</div>
         </div>
@@ -133,8 +181,8 @@ export function StickyApp() {
   // Encrypted note — show unlock form
   if (note?.encryption && !unlockedSections) {
     return (
-      <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border">
-        <StickyTitleBar title={note.title || 'Untitled'} />
+      <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
+        <StickyTitleBar title={note.title || 'Untitled'} onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-4">
           <Lock size={20} className="text-text-muted opacity-30" />
           <p className="text-xs font-mono text-text-muted text-center">This note is encrypted</p>
@@ -166,8 +214,8 @@ export function StickyApp() {
 
   if (!note || !section) {
     return (
-      <div className="flex flex-col h-screen bg-surface-0">
-        <StickyTitleBar title="Not Found" />
+      <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
+        <StickyTitleBar title="Not Found" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
           <div className="text-sm font-mono text-red-400 mb-2">Note not found</div>
           <div className="text-xs font-mono text-text-muted">It may have been deleted.</div>
@@ -179,6 +227,17 @@ export function StickyApp() {
   // Read-only mode for unlocked encrypted notes (changes can't be persisted
   // since the sticky window's store has no session password for re-encryption)
   const isReadOnly = !!unlockedSections
+
+  const handleFold = () => {
+    window.noteflow.foldToCorner(FOLDED_W, FOLDED_H)
+    setIsFolded(true)
+  }
+
+  const handleUnfold = () => {
+    window.noteflow.unfold()
+    // Delay UI switch until the unfold animation finishes (280ms in main process)
+    setTimeout(() => setIsFolded(false), 260)
+  }
 
   const handleContentChange = (content: string) => {
     if (isReadOnly || section.content === content) return
@@ -201,9 +260,15 @@ export function StickyApp() {
     })
   }
 
+  const stickyTitle = section.name === 'New' || section.name === 'Main' ? note.title : `${note.title} - ${section.name}`
+
+  if (isFolded) {
+    return <FoldedPill title={stickyTitle} onUnfold={handleUnfold} />
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border">
-      <StickyTitleBar title={section.name === 'New' || section.name === 'Main' ? note.title : `${note.title} - ${section.name}`} />
+    <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
+      <StickyTitleBar title={stickyTitle} onFold={handleFold} />
       {isReadOnly && (
         <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
           <Lock size={9} className="text-amber-400 flex-shrink-0" />
@@ -222,7 +287,7 @@ export function StickyApp() {
             spellCheck={false}
           />
         ) : (
-          <div className="h-full overflow-y-auto p-2">
+          <div className="h-full overflow-y-auto sticky-editor">
             <Editor
               key={`${note.id}-${section.id}`}
               content={section.content ?? ''}

@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,6 +41,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const https_1 = __importDefault(require("https"));
 const os_1 = __importDefault(require("os"));
+const githubSync = __importStar(require("./githubSync"));
 function getIconPath() {
     const iconExt = process.platform === 'win32' ? 'ico' : 'png';
     return path_1.default.join(__dirname, `../public/icon.${iconExt}`);
@@ -26,7 +60,7 @@ if (fs_1.default.existsSync(OLD_NOTES_DIR) && !fs_1.default.existsSync(NOTES_DIR
 if (!fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
-function createWindow() {
+function createWindow(hidden = false) {
     const win = new electron_1.BrowserWindow({
         width: 1100,
         height: 720,
@@ -52,7 +86,17 @@ function createWindow() {
         win.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
     }
     win.once('ready-to-show', () => {
+        if (hidden)
+            return; // startup mode: stay hidden in tray
         win.show();
+        // Pull remote notes in background after window is visible
+        if (githubSync.getSyncStatus().connected) {
+            githubSync.pullNotes(NOTES_DIR).then(({ pulled }) => {
+                if (pulled > 0) {
+                    win.webContents.send('notes-updated');
+                }
+            });
+        }
     });
     // Hide instead of close — keeps the process alive for fast re-open
     win.on('close', (e) => {
@@ -63,6 +107,104 @@ function createWindow() {
     });
     return win;
 }
+/**
+ * Builds a pixel-accurate rounded-rectangle region using 1px horizontal strips.
+ * Passed to win.setShape() so Windows DWM knows the true window shape —
+ * CSS border-radius alone is ignored by the DWM when the window loses focus.
+ */
+function roundedRectRegion(w, h, r) {
+    const R = Math.min(r, Math.floor(w / 2), Math.floor(h / 2));
+    const rects = [];
+    for (let y = 0; y < R; y++) {
+        const d = R - y - 0.5;
+        const xOff = Math.max(0, R - Math.round(Math.sqrt(Math.max(0, R * R - d * d))));
+        rects.push({ x: xOff, y, width: w - 2 * xOff, height: 1 });
+        rects.push({ x: xOff, y: h - 1 - y, width: w - 2 * xOff, height: 1 });
+    }
+    if (h > 2 * R) {
+        rects.push({ x: 0, y: R, width: w, height: h - 2 * R });
+    }
+    return rects;
+}
+function applyStickyShape(win, w, h) {
+    // win.setShape() is Windows-only (DWM); no-op on Linux/macOS
+    if (process.platform !== 'win32')
+        return;
+    const [ww, hh] = w !== undefined ? [w, h] : win.getSize();
+    // Use half-height for pills (folded state ≤40px), otherwise 8px (rounded-lg)
+    const r = hh <= 40 ? Math.floor(hh / 2) : 8;
+    win.setShape(roundedRectRegion(ww, hh, r));
+}
+// Stores the pre-fold bounds per window so unfold can restore them exactly
+const prevBoundsMap = new Map();
+// Tracks all open sticky windows to cascade their initial positions
+const stickyWindows = new Set();
+// Tracks currently folded sticky windows to stack their pills vertically
+const foldedWindows = new Set();
+function getFoldedPosition(display, foldedW, foldedH) {
+    const { x, y, width } = display.workArea;
+    const targetX = x + width - foldedW - 8;
+    const GAP = 4;
+    // Find the bottom edge of the lowest folded pill already in the corner
+    let nextY = y + 40;
+    for (const w of foldedWindows) {
+        if (w.isDestroyed())
+            continue;
+        const [wx, wy] = w.getPosition();
+        const [, wh] = w.getSize();
+        if (Math.abs(wx - targetX) < 20) {
+            nextY = Math.max(nextY, wy + wh + GAP);
+        }
+    }
+    return { x: targetX, y: nextY };
+}
+function getStickyInitialPosition(winWidth, winHeight) {
+    const display = electron_1.screen.getPrimaryDisplay();
+    const { x: wa_x, y: wa_y, width: wa_w } = display.workArea;
+    const BASE_X = wa_x + Math.round((wa_w - winWidth) / 2);
+    const BASE_Y = wa_y + 60;
+    const STEP = 30;
+    for (let i = 0; i < 20; i++) {
+        const cx = BASE_X + i * STEP;
+        const cy = BASE_Y + i * STEP;
+        const overlaps = [...stickyWindows].some(w => {
+            if (w.isDestroyed())
+                return false;
+            const [wx, wy] = w.getPosition();
+            return Math.abs(wx - cx) < STEP && Math.abs(wy - cy) < STEP;
+        });
+        if (!overlaps)
+            return { x: cx, y: cy };
+    }
+    return { x: BASE_X, y: BASE_Y };
+}
+function animateStickyWindow(win, from, to, duration, onComplete) {
+    const startTime = Date.now();
+    const fromR = from.height <= 40 ? Math.floor(from.height / 2) : 8;
+    const toR = to.height <= 40 ? Math.floor(to.height / 2) : 8;
+    const tick = setInterval(() => {
+        if (win.isDestroyed()) {
+            clearInterval(tick);
+            return;
+        }
+        const t = Math.min((Date.now() - startTime) / duration, 1);
+        const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
+        const x = Math.round(from.x + (to.x - from.x) * e);
+        const y = Math.round(from.y + (to.y - from.y) * e);
+        const w = Math.round(from.width + (to.width - from.width) * e);
+        const h = Math.round(from.height + (to.height - from.height) * e);
+        const r = Math.round(fromR + (toR - fromR) * e);
+        win.setMinimumSize(1, 1);
+        win.setSize(w, h);
+        win.setPosition(x, y);
+        if (process.platform === 'win32')
+            win.setShape(roundedRectRegion(w, h, r));
+        if (t >= 1) {
+            clearInterval(tick);
+            onComplete?.();
+        }
+    }, 16);
+}
 function createStickyWindow(noteId, sectionId) {
     const win = new electron_1.BrowserWindow({
         width: 300,
@@ -70,8 +212,8 @@ function createStickyWindow(noteId, sectionId) {
         minWidth: 200,
         minHeight: 200,
         frame: false,
-        transparent: false,
-        backgroundColor: '#1a1b26',
+        transparent: true,
+        backgroundColor: '#00000000',
         titleBarStyle: 'hidden',
         show: false,
         alwaysOnTop: true,
@@ -91,7 +233,19 @@ function createStickyWindow(noteId, sectionId) {
         // In production, file:// URLs need the hash at the end
         win.loadFile(path_1.default.join(__dirname, '../dist/index.html'), { hash });
     }
+    // Apply the OS-level window shape so Windows DWM respects the rounded corners
+    // even when the window loses focus (CSS border-radius is ignored by DWM).
+    win.on('resize', () => applyStickyShape(win));
+    win.on('closed', () => {
+        prevBoundsMap.delete(win.id);
+        stickyWindows.delete(win);
+        foldedWindows.delete(win);
+    });
     win.once('ready-to-show', () => {
+        const { x, y } = getStickyInitialPosition(300, 300);
+        win.setPosition(x, y);
+        stickyWindows.add(win);
+        applyStickyShape(win);
         win.show();
     });
     return win;
@@ -125,7 +279,7 @@ function createTray() {
         { type: 'separator' },
         {
             label: 'Open notes folder',
-            click: () => electron_1.shell.openPath(NOTES_DIR),
+            click: () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)),
         },
         { type: 'separator' },
         {
@@ -164,6 +318,9 @@ function registerGlobalShortcut() {
     });
     if (!ret) {
         console.error('Failed to register global shortcut Ctrl+Shift+Space');
+        // Update tray tooltip so the user knows the shortcut is unavailable
+        // (common on Linux when an input method or another app captures it)
+        tray?.setToolTip('NoteFlow — shortcut unavailable (Ctrl+Shift+Space)');
     }
 }
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -204,6 +361,7 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
             // Send the filePath and the sender's webContents ID
             win.webContents.send('notes-updated', filePath, event.sender.id);
         });
+        githubSync.schedulePush(filePath, content);
         return { ok: true };
     }
     catch (err) {
@@ -216,6 +374,7 @@ electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             win.webContents.send('notes-updated');
         });
+        githubSync.scheduleDelete(filePath);
         return { ok: true };
     }
     catch (err) {
@@ -252,7 +411,7 @@ electron_1.ipcMain.handle('fs:read-all-notes', () => {
     }
 });
 electron_1.ipcMain.handle('fs:notes-dir', () => NOTES_DIR);
-electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR));
+electron_1.ipcMain.handle('app:open-notes-folder', () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)));
 electron_1.ipcMain.handle('app:check-update', () => {
     // if (!app.isPackaged) return { hasUpdate: false }
     return new Promise((resolve) => {
@@ -265,7 +424,13 @@ electron_1.ipcMain.handle('app:check-update', () => {
                     const latest = json.tag_name?.replace(/^v/, '');
                     const current = electron_1.app.getVersion();
                     const hasUpdate = latest && latest !== current;
-                    const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-Setup-${latest}.exe`;
+                    let downloadUrl;
+                    if (process.platform === 'linux') {
+                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`;
+                    }
+                    else {
+                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`;
+                    }
                     resolve({ hasUpdate, latestVersion: latest, downloadUrl });
                 }
                 catch {
@@ -279,6 +444,39 @@ electron_1.ipcMain.handle('app:check-update', () => {
 });
 electron_1.ipcMain.handle('app:open-url', (_event, url) => {
     electron_1.shell.openExternal(url);
+});
+electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
+    const tmpDir = electron_1.app.getPath('temp');
+    const fileName = url.split('/').pop() || 'NoteFlow-update.exe';
+    const dest = path_1.default.join(tmpDir, fileName);
+    try {
+        const response = await electron_1.net.fetch(url);
+        if (!response.ok)
+            throw new Error(`HTTP ${response.status}`);
+        const total = parseInt(response.headers.get('content-length') || '0');
+        let downloaded = 0;
+        const writer = fs_1.default.createWriteStream(dest);
+        const reader = response.body.getReader();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            writer.write(Buffer.from(value));
+            downloaded += value.length;
+            const percent = total ? Math.round((downloaded / total) * 100) : -1;
+            electron_1.BrowserWindow.getAllWindows().forEach(w => w.webContents.send('update:download-progress', percent));
+        }
+        await new Promise((resolve, reject) => {
+            writer.end();
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+        await electron_1.shell.openPath(dest);
+        return { success: true };
+    }
+    catch (err) {
+        return { success: false, error: String(err) };
+    }
 });
 electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
     const result = await electron_1.dialog.showOpenDialog(mainWindow, {
@@ -355,6 +553,33 @@ electron_1.ipcMain.handle('notes:write-imported', async (_event, entries) => {
     });
     return { written, errors };
 });
+// ── GitHub Sync ───────────────────────────────────────────────────────────────
+electron_1.ipcMain.handle('sync:get-status', () => {
+    return githubSync.getSyncStatus();
+});
+electron_1.ipcMain.handle('sync:initiate', async (_event, repo) => {
+    return githubSync.initiateDeviceFlow(repo, NOTES_DIR, (result) => {
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync-auth-complete', result));
+        if (result.ok) {
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+        }
+    });
+});
+electron_1.ipcMain.handle('sync:cancel-auth', () => {
+    githubSync.cancelDeviceFlow();
+    return { ok: true };
+});
+electron_1.ipcMain.handle('sync:disconnect', () => {
+    githubSync.disconnectGitHub();
+    return { ok: true };
+});
+electron_1.ipcMain.handle('sync:pull', async () => {
+    const result = await githubSync.pullNotes(NOTES_DIR);
+    if (result.pulled > 0) {
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+    }
+    return result;
+});
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {
@@ -373,6 +598,35 @@ electron_1.ipcMain.on('settings:get-theme', (event) => {
 electron_1.ipcMain.on('settings:set-theme', (_event, themeId) => {
     const settings = readSettings();
     settings.theme = themeId;
+    writeSettings(settings);
+});
+electron_1.ipcMain.handle('app:get-login-item', () => {
+    const openAtLogin = (readSettings().openAtLogin ?? false);
+    return { openAtLogin };
+});
+electron_1.ipcMain.handle('app:set-login-item', (_event, enabled) => {
+    const settings = readSettings();
+    settings.openAtLogin = enabled;
+    writeSettings(settings);
+    try {
+        electron_1.app.setLoginItemSettings({
+            openAtLogin: enabled,
+            path: process.execPath,
+            args: enabled ? ['--noteflow-startup'] : [],
+        });
+        return { ok: true };
+    }
+    catch (err) {
+        console.error('Failed to set login item:', err);
+        return { ok: false, error: String(err) };
+    }
+});
+electron_1.ipcMain.handle('settings:get-startup-stickies', () => {
+    return (readSettings().startupStickies ?? []);
+});
+electron_1.ipcMain.handle('settings:set-startup-stickies', (_event, stickies) => {
+    const settings = readSettings();
+    settings.startupStickies = stickies;
     writeSettings(settings);
 });
 // Window controls
@@ -401,11 +655,60 @@ electron_1.ipcMain.on('window:close', (event) => {
 electron_1.ipcMain.on('window:open-sticky', (_event, noteId, sectionId) => {
     createStickyWindow(noteId, sectionId);
 });
+electron_1.ipcMain.on('window:set-size', (event, width, height, minW, minH) => {
+    const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (!win)
+        return;
+    win.setMinimumSize(minW, minH);
+    win.setSize(width, height);
+});
+electron_1.ipcMain.on('window:fold-to-corner', (event, foldedW, foldedH) => {
+    const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (!win)
+        return;
+    const from = win.getBounds();
+    prevBoundsMap.set(win.id, from);
+    foldedWindows.add(win);
+    const display = electron_1.screen.getDisplayNearestPoint(from);
+    const { x: toX, y: toY } = getFoldedPosition(display, foldedW, foldedH);
+    const to = { x: toX, y: toY, width: foldedW, height: foldedH };
+    animateStickyWindow(win, from, to, 300);
+});
+electron_1.ipcMain.on('window:unfold', (event) => {
+    const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (!win)
+        return;
+    const prev = prevBoundsMap.get(win.id);
+    if (!prev)
+        return;
+    foldedWindows.delete(win);
+    const from = win.getBounds();
+    animateStickyWindow(win, from, prev, 280, () => {
+        if (!win.isDestroyed()) {
+            win.setMinimumSize(200, 200);
+            applyStickyShape(win);
+        }
+    });
+    prevBoundsMap.delete(win.id);
+});
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 electron_1.app.whenReady().then(() => {
     // Remove default menu for all windows
     electron_1.Menu.setApplicationMenu(null);
-    mainWindow = createWindow();
+    githubSync.loadSyncSettings();
+    const isStartupMode = process.argv.includes('--noteflow-startup');
+    const startupStickies = (readSettings().startupStickies ?? []);
+    if (isStartupMode && startupStickies.length > 0) {
+        // Launched at system startup with sticky notes configured:
+        // keep main window hidden in tray and open the selected sticky notes
+        mainWindow = createWindow(true);
+        for (const { noteId, sectionId } of startupStickies) {
+            createStickyWindow(noteId, sectionId);
+        }
+    }
+    else {
+        mainWindow = createWindow();
+    }
     createTray();
     registerGlobalShortcut();
     electron_1.app.on('activate', () => {

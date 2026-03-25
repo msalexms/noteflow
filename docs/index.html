@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NoteFlow — Fast Notes & Sticky Notes for Windows Developers</title>
   <meta name="description"
-    content="NoteFlow is a keyboard-first note-taking app for Windows developers. Markdown support, task lists, floating sticky notes, tabs, and fast search. No cloud, no nonsense." />
+    content="NoteFlow is a keyboard-first note-taking app for Windows developers. Markdown support, task lists, floating sticky notes, tabs, fast search, and optional private GitHub sync. Your notes, your data." />
   <meta name="keywords"
     content="noteflow, windows notes app, developer notes, markdown notes windows, quick notes developer, electron notes app" />
   <meta name="author" content="yagoid" />
@@ -21,7 +21,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:title" content="NoteFlow — Fast Notes for Windows Developers" />
   <meta property="og:description"
-    content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
+    content="Keyboard-first notes for developers. Markdown, task lists, tabs. Local files, optional private GitHub sync." />
   <meta property="og:url" content="https://yagoid.github.io/noteflow/" />
   <meta property="og:image" content="https://yagoid.github.io/noteflow/og-image.png" />
   <meta property="og:image:width" content="1200" />
@@ -31,7 +31,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="NoteFlow — Fast Notes for Windows Developers" />
   <meta name="twitter:description"
-    content="Keyboard-first notes for developers. Markdown, task lists, tabs. No cloud, no fluff." />
+    content="Keyboard-first notes for developers. Markdown, task lists, tabs. Local files, optional private GitHub sync." />
   <meta name="twitter:image" content="https://yagoid.github.io/noteflow/og-image.png" />
 
   <!-- Structured Data: SoftwareApplication -->
@@ -121,7 +121,7 @@
 
         <p class="hero__subtitle">
           A keyboard-first note tool for Windows developers.<br>
-          Markdown, tabs, <strong>floating sticky notes</strong>. No cloud. No clutter.
+          Markdown, tabs, <strong>floating sticky notes</strong>. Local files, optional <strong>private GitHub sync</strong>. No clutter.
         </p>
 
         <div class="hero__actions">
@@ -270,10 +270,9 @@
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
             </div>
-            <h3 class="feature-card__title">100% local & private</h3>
-            <p class="feature-card__desc">Your notes never leave your machine. No accounts, no sync, no telemetry.
-              Everything is stored locally on Windows. Period.</p>
-            <code class="feature-card__code">%APPDATA%\noteflow\notes\</code>
+            <h3 class="feature-card__title">Private by design</h3>
+            <p class="feature-card__desc">Notes are stored as plain <code>.md</code> files on your machine. Optionally sync to a <strong>private GitHub repository that only you control</strong> — no third-party cloud, no shared servers, no telemetry.</p>
+            <code class="feature-card__code">~/noteflow-notes/*.md  ↔  github.com/you/repo</code>
           </article>
 
           <article class="feature-card" role="listitem">
@@ -390,10 +389,16 @@
                 <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
-                <td>Completely local (no cloud)</td>
+                <td>No third-party cloud accounts</td>
                 <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
                 <td><span class="cross" aria-label="No">✗</span></td>
                 <td><span class="check" aria-label="Yes">✓</span></td>
+              </tr>
+              <tr>
+                <td>Optional private GitHub backup</td>
+                <td class="compare__col--highlight"><span class="check" aria-label="Yes">✓</span></td>
+                <td><span class="cross" aria-label="No">✗</span></td>
+                <td><span class="cross" aria-label="No">✗</span></td>
               </tr>
               <tr>
                 <td>Multiple themes (4 built-in)</td>
@@ -506,7 +511,7 @@
           <span class="footer__logo">
             <span class="nav__logo-icon" aria-hidden="true">■</span> NOTEFLOW
           </span>
-          <p class="footer__tagline">Fast. Local. Developer-native.</p>
+          <p class="footer__tagline">Fast. Private. Developer-native.</p>
         </div>
 
         <nav class="footer__links" aria-label="Footer links">

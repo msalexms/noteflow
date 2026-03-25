@@ -3,8 +3,8 @@
 
   # NoteFlow
 
-  **Fast notes for Windows developers.**  
-  *No cloud, no accounts, no telemetry. Just you and your thoughts.*
+  **Fast notes for Windows & Linux developers.**
+  *Local files, optional private GitHub sync. No telemetry. Just you and your thoughts.*
 
   [![GitHub Release](https://img.shields.io/github/v/release/yagoid/noteflow?style=flat-square&color=3de8c2)](https://github.com/yagoid/noteflow/releases/latest)
   [![License](https://img.shields.io/github/license/yagoid/noteflow?style=flat-square)](LICENSE)
@@ -15,9 +15,9 @@
 
 ## What is NoteFlow?
 
-NoteFlow is a keyboard-first, lightweight note-taking application designed **exclusively for Windows**. 
+NoteFlow is a keyboard-first, lightweight note-taking application for **Windows and Linux**.
 
-It was built specifically for software engineers, power users, or anyone simply tired of the clunky, pre-installed Windows Sticky Notes apps and looking for something faster than heavy tools like Notion. 
+It was built specifically for software engineers, power users, or anyone simply tired of the clunky, pre-installed Windows Sticky Notes apps and looking for something faster than heavy tools like Notion.
 
 If you just need to scratch down a quick task list, jot down some code snippets, or drop a quick markdown heading—this is the tool for you.
 
@@ -27,8 +27,9 @@ If you just need to scratch down a quick task list, jot down some code snippets,
 - **Interactive Task Lists**: Add checkboxes to any note, check them off, and keep track of your daily sprint or tasks.
 - **Multi-tab workflow**: Open multiple notes at once in tabs and switch context instantly without losing your place.
 - **Instant Search**: Find any note by title or content in milliseconds.
-- **100% Local & Private**: Your notes never leave your machine. No cloud syncing, no accounts, no tracking.
-- **Developer Aesthetic**: A dark theme, monospace font (JetBrains Mono), and minimal chrome that feels at home next to your IDE.
+- **Private by design**: Notes are stored as plain `.md` files on your machine. Optionally sync to a **private GitHub repository you own** — no third-party cloud, no shared servers, no tracking.
+- **GitHub Sync**: Connect your GitHub account once and all notes automatically push to a private repository. Pull changes on startup to keep notes in sync across devices.
+- **Developer Aesthetic**: 4 built-in themes (Carbon, Midnight Blue, Tokyo Night, Arctic Day), monospace font (JetBrains Mono), and minimal chrome that feels at home next to your IDE.
 
 ## Download
 
@@ -54,10 +55,11 @@ npm install
 npm run dev
 ```
 
-To build the executable for Windows:
+To build the installers:
 
 ```bash
 npm run dist
+# Generates: NoteFlow-X.Y.Z-Setup.exe (Windows) and noteflow_X.Y.Z_amd64.deb (Linux)
 ```
 
 ## License

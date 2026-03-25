@@ -3,6 +3,27 @@ import fs from 'fs'
 import path from 'path'
 import https from 'https'
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const README_CONTENT = `# Your notes are synced with GitHub
+
+Your NoteFlow notes are automatically backed up to a **private GitHub repository** — only you can access them.
+
+## Your privacy is protected
+
+This repository is **private**. As long as it stays that way, nobody else can see or access your notes.
+
+## How sync works
+
+- Every time you create, edit, or delete a note in NoteFlow, changes are pushed here automatically.
+- When you open NoteFlow, it pulls any remote changes so your notes stay in sync across devices.
+- You can also trigger a manual sync from the GitHub panel in the app.
+
+---
+
+You are reading this note inside NoteFlow. It lives in your GitHub repository as \`README.md\` and will stay in sync like any other note.
+`
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface GitHubSyncSettings {
@@ -169,6 +190,9 @@ async function ensureRepo(token: string, owner: string, repo: string): Promise<v
     })
     // Brief pause for GitHub to initialize the repo
     await new Promise((r) => setTimeout(r, 1500))
+
+    // Replace default README with informative content
+    await upsertRemoteFile(token, owner, repo, 'README.md', README_CONTENT)
   }
 }
 
@@ -230,7 +254,8 @@ async function upsertRemoteFile(
     // File doesn't exist yet — will be created
   }
 
-  const label = filename.replace(/\.md$/, '').replace(/^[^-]+-[^-]+-/, '')
+  const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m)
+  const label = titleMatch ? titleMatch[1].trim() : filename.replace(/\.md$/, '')
   await githubRequest(
     token,
     'PUT',
@@ -396,6 +421,7 @@ function schedulePoll(
           writeSettings(settings)
 
           await pullNotes(notesDir)
+          await pushAllNotes(notesDir)
           onComplete({ ok: true, owner, repo })
         } catch (err: unknown) {
           const error = err instanceof Error ? err.message : String(err)
@@ -488,6 +514,35 @@ export async function pullNotes(notesDir: string): Promise<{ pulled: number; err
   }
 
   return { pulled, errors }
+}
+
+export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; errors: string[] }> {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
+
+  const token = decryptToken(s.encryptedToken)
+  let pushed = 0
+  const errors: string[] = []
+
+  let files: string[]
+  try {
+    files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+  } catch {
+    return { pushed: 0, errors: [] }
+  }
+
+  for (const filename of files) {
+    try {
+      const content = fs.readFileSync(path.join(notesDir, filename), 'utf-8')
+      await upsertRemoteFile(token, s.owner!, s.repo!, filename, content)
+      pushed++
+    } catch (err) {
+      errors.push(filename)
+      console.error(`[GitHubSync] pushAll failed for ${filename}:`, String(err))
+    }
+  }
+
+  return { pushed, errors }
 }
 
 export function schedulePush(filePath: string, content: string): void {

@@ -289,6 +289,9 @@ export function GitHubSyncModal({ onClose }: Props) {
                   disabled={isLoading}
                   className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-accent/50 disabled:opacity-40"
                 />
+                <p className="text-[10px] font-mono text-text-muted/60 mt-1">
+                  Will be created as private if it doesn&apos;t exist.
+                </p>
               </div>
               <button
                 onClick={handleInitiate}

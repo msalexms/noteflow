@@ -34,18 +34,32 @@ const api = {
   // Settings
   getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),
   setTheme: (id: string)      => ipcRenderer.send('settings:set-theme', id),
+  getLoginItem: (): Promise<{ openAtLogin: boolean }> => ipcRenderer.invoke('app:get-login-item'),
+  setLoginItem: (enabled: boolean): Promise<void> => ipcRenderer.invoke('app:set-login-item', enabled),
+  getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
+  setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  setSize: (w: number, h: number, minW: number, minH: number) =>
+    ipcRenderer.send('window:set-size', w, h, minW, minH),
+  foldToCorner: (w: number, h: number) =>
+    ipcRenderer.send('window:fold-to-corner', w, h),
+  unfold: () => ipcRenderer.send('window:unfold'),
 
   // Updates
   checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }> =>
     ipcRenderer.invoke('app:check-update'),
   openUrl: (url: string): Promise<void> =>
     ipcRenderer.invoke('app:open-url', url),
+  downloadAndInstall: (url: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('app:download-and-install', url),
+  onUpdateProgress: (callback: (percent: number) => void) => {
+    ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent))
+  },
 
   // Export / Import
   exportNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>

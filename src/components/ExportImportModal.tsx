@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, PackageOpen, X } from 'lucide-react'
+import { Check, PackageOpen, X } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useNotesStore } from '../stores/notesStore'
 import { noteFilename, parseNote, serializeNote } from '../lib/noteUtils'
+import { getTagColor } from '../lib/tagColors'
 import type { ImportConflictStrategy, ImportPreviewEntry, NoteflowExportEntry } from '../types'
 
 interface Props {
@@ -78,10 +79,6 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
 
   // Which note IDs are selected
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(
-    () => new Set(activeNoteId ? [activeNoteId] : [])
-  )
-  // Which notes have their sections expanded in the UI
-  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(
     () => new Set(activeNoteId ? [activeNoteId] : [])
   )
   // Granular section selection: noteId → Set<sectionId>. If absent, all sections selected.
@@ -244,31 +241,16 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
         ) : (
           visibleNotes.map((note) => {
             const isSelected = selectedNoteIds.has(note.id)
-            const isExpanded = expandedNoteIds.has(note.id)
             const hasMutipleSections = note.sections.length > 1
 
             return (
               <div key={note.id}>
-                <div className="flex items-center gap-2 px-4 py-1.5 hover:bg-surface-2 group">
+                <div className="flex items-center gap-2 px-4 py-1.5 hover:bg-surface-2">
                   <Checkbox
                     checked={isSelected}
                     onChange={() => toggleNote(note.id)}
                   />
-                  {hasMutipleSections ? (
-                    <button
-                      onClick={() => setExpandedNoteIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(note.id)) next.delete(note.id)
-                        else next.add(note.id)
-                        return next
-                      })}
-                      className="text-text-muted hover:text-text flex-shrink-0"
-                    >
-                      {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                    </button>
-                  ) : (
-                    <span className="w-[11px] flex-shrink-0" />
-                  )}
+                  <span className="w-[11px] flex-shrink-0" />
                   <span className="flex-1 text-xs font-mono text-text truncate">
                     {note.title || 'Untitled'}
                   </span>
@@ -277,22 +259,25 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
                   </span>
                 </div>
 
-                {isExpanded && (
-                  <div className="pl-12 pb-1">
-                    {note.sections.map((section) => (
-                      <div
-                        key={section.id}
-                        className="flex items-center gap-2 px-4 py-1 hover:bg-surface-2"
-                      >
-                        <Checkbox
-                          checked={isSectionSelected(note.id, section.id)}
-                          onChange={() => toggleSection(note.id, section.id)}
-                        />
-                        <span className="text-xs font-mono text-text-muted">
+                {hasMutipleSections && (
+                  <div className="flex flex-wrap gap-1 pl-10 pr-4 pb-2">
+                    {note.sections.map((section) => {
+                      const active = isSectionSelected(note.id, section.id)
+                      return (
+                        <button
+                          key={section.id}
+                          onClick={() => toggleSection(note.id, section.id)}
+                          className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-all"
+                          style={
+                            active
+                              ? { ...getTagColor(section.name), opacity: 1, outline: '1px solid currentColor' }
+                              : { ...getTagColor(section.name), opacity: 0.35 }
+                          }
+                        >
                           {section.name}
-                        </span>
-                      </div>
-                    ))}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
               </div>

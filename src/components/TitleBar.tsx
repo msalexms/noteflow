@@ -6,14 +6,18 @@ import { useEditorSettingsStore } from '../stores/editorSettingsStore'
 import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
 import { GitHubSyncModal } from './GitHubSyncModal'
+import { StartupSettingsModal } from './StartupSettingsModal'
 
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
   const { fontSize, changeFontSize, resetFontSize } = useEditorSettingsStore()
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState(0)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
   const [syncModal, setSyncModal] = useState(false)
   const [syncConnected, setSyncConnected] = useState(false)
+  const [startupModal, setStartupModal] = useState(false)
 
   useEffect(() => {
     window.noteflow.checkUpdate().then((result) => {
@@ -22,7 +26,19 @@ export function TitleBar() {
       }
     })
     window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
+    window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
   }, [])
+
+  const handleUpdate = async () => {
+    if (!updateInfo || downloading) return
+    setDownloading(true)
+    setDownloadProgress(0)
+    const result = await window.noteflow.downloadAndInstall(updateInfo.downloadUrl)
+    if (!result.success) {
+      window.noteflow.openUrl(updateInfo.downloadUrl)
+    }
+    setDownloading(false)
+  }
 
   return (
     <>
@@ -45,16 +61,31 @@ export function TitleBar() {
       >
         {updateInfo && (
           <button
-            onClick={() => window.noteflow.openUrl(updateInfo.downloadUrl)}
-            className="flex items-center px-2 h-full text-accent hover:text-text transition-colors"
-            title={`Update available: v${updateInfo.latestVersion}`}
+            onClick={handleUpdate}
+            disabled={downloading}
+            className="flex items-center gap-1 px-2 h-full text-accent hover:text-text transition-colors disabled:opacity-60"
+            title={downloading ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}` : `Update available: v${updateInfo.latestVersion}`}
           >
-            <Download size={12} />
+            {downloading ? (
+              <span className="text-[10px] font-mono">{downloadProgress > 0 ? `${downloadProgress}%` : '…'}</span>
+            ) : (
+              <Download size={12} />
+            )}
           </button>
         )}
         <TitleBarMenu
           trigger={<Settings size={12} />}
           groups={[
+            {
+              label: 'App',
+              items: [
+                {
+                  id: 'startup',
+                  label: 'Startup settings...',
+                  action: () => setStartupModal(true),
+                },
+              ],
+            },
             {
               label: 'Sync',
               items: [
@@ -162,6 +193,9 @@ export function TitleBar() {
           window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
         }}
       />
+    )}
+    {startupModal && (
+      <StartupSettingsModal onClose={() => setStartupModal(false)} />
     )}
     </>
   )

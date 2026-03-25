@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { Note, NoteSection } from '../types'
-import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags } from '../lib/noteUtils'
+import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags, isDefaultNoteTitle } from '../lib/noteUtils'
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
@@ -241,7 +241,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (prev && prev !== id) {
       const prevNote = get().notes.find((n) => n.id === prev)
       if (prevNote) {
-        const titleIsDefault = !prevNote.title.trim() || prevNote.title.trim() === 'Untitled'
+        const titleIsDefault = isDefaultNoteTitle(prevNote.title)
         const isEmpty =
           titleIsDefault &&
           prevNote.sections.every((s) => !s.content.trim())
@@ -264,7 +264,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const note = get().notes.find((n) => n.id === id)
     if (!note) return
     if (note.encryption) return  // never auto-delete encrypted notes
-    const titleIsDefault = !note.title.trim() || note.title.trim() === 'Untitled'
+    const titleIsDefault = isDefaultNoteTitle(note.title)
     const isEmpty =
       titleIsDefault &&
       note.sections.every((s) => !s.content.trim())

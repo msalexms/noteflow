@@ -1,6 +1,6 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink } from 'lucide-react'
 import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
@@ -56,6 +56,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     x: number
     y: number
     noteId: string
+    sectionId: string | null
   } | null>(null)
 
   // Confirm modal state
@@ -252,8 +253,9 @@ return (
                     e.preventDefault()
                     setContextMenu({
                       x: e.clientX,
-                      y: Math.min(e.clientY, window.innerHeight - 150),
-                      noteId: note.id
+                      y: Math.min(e.clientY, window.innerHeight - 200),
+                      noteId: note.id,
+                      sectionId: null
                     })
                   }}
                   className={`relative w-full text-left px-4 py-2 transition-colors h-[60px] flex flex-col justify-center
@@ -288,6 +290,16 @@ return (
                             detail: { noteId: note.id, sectionId: section.id }
                           }))
                           setActiveNote(note.id)
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setContextMenu({
+                            x: e.clientX,
+                            y: Math.min(e.clientY, window.innerHeight - 200),
+                            noteId: note.id,
+                            sectionId: section.id
+                          })
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
@@ -394,6 +406,22 @@ return (
               <Copy size={12} />
               Duplicate note
             </button>
+            {(!note.encryption || !!sessionPasswords[note.id]) && (
+              <>
+                <div className="h-px bg-border my-1" />
+                <button
+                  onClick={() => {
+                    const targetSectionId = contextMenu.sectionId ?? note.sections[0]?.id
+                    if (targetSectionId) window.noteflow.openSticky(note.id, targetSectionId)
+                    setContextMenu(null)
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                >
+                  <ExternalLink size={12} />
+                  Open as Sticky Note
+                </button>
+              </>
+            )}
             <div className="h-px bg-border my-1" />
             <button
               onClick={() => {

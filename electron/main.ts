@@ -8,6 +8,8 @@ import {
   ipcMain,
   shell,
   dialog,
+  net,
+  screen,
 } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -39,7 +41,7 @@ if (!fs.existsSync(NOTES_DIR)) {
   fs.mkdirSync(NOTES_DIR, { recursive: true })
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(hidden = false): BrowserWindow {
   const win = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -66,6 +68,7 @@ function createWindow(): BrowserWindow {
   }
 
   win.once('ready-to-show', () => {
+    if (hidden) return  // startup mode: stay hidden in tray
     win.show()
     // Pull remote notes in background after window is visible
     if (githubSync.getSyncStatus().connected) {
@@ -88,6 +91,107 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+/**
+ * Builds a pixel-accurate rounded-rectangle region using 1px horizontal strips.
+ * Passed to win.setShape() so Windows DWM knows the true window shape —
+ * CSS border-radius alone is ignored by the DWM when the window loses focus.
+ */
+function roundedRectRegion(w: number, h: number, r: number): { x: number; y: number; width: number; height: number }[] {
+  const R = Math.min(r, Math.floor(w / 2), Math.floor(h / 2))
+  const rects: { x: number; y: number; width: number; height: number }[] = []
+  for (let y = 0; y < R; y++) {
+    const d = R - y - 0.5
+    const xOff = Math.max(0, R - Math.round(Math.sqrt(Math.max(0, R * R - d * d))))
+    rects.push({ x: xOff, y, width: w - 2 * xOff, height: 1 })
+    rects.push({ x: xOff, y: h - 1 - y, width: w - 2 * xOff, height: 1 })
+  }
+  if (h > 2 * R) {
+    rects.push({ x: 0, y: R, width: w, height: h - 2 * R })
+  }
+  return rects
+}
+
+function applyStickyShape(win: BrowserWindow, w?: number, h?: number) {
+  // win.setShape() is Windows-only (DWM); no-op on Linux/macOS
+  if (process.platform !== 'win32') return
+  const [ww, hh] = w !== undefined ? [w, h!] : win.getSize()
+  // Use half-height for pills (folded state ≤40px), otherwise 8px (rounded-lg)
+  const r = hh <= 40 ? Math.floor(hh / 2) : 8
+  win.setShape(roundedRectRegion(ww, hh, r))
+}
+
+// Stores the pre-fold bounds per window so unfold can restore them exactly
+const prevBoundsMap = new Map<number, { x: number; y: number; width: number; height: number }>()
+
+// Tracks all open sticky windows to cascade their initial positions
+const stickyWindows = new Set<BrowserWindow>()
+
+// Tracks currently folded sticky windows to stack their pills vertically
+const foldedWindows = new Set<BrowserWindow>()
+
+function getFoldedPosition(display: Electron.Display, foldedW: number, foldedH: number): { x: number; y: number } {
+  const { x, y, width } = display.workArea
+  const targetX = x + width - foldedW - 8
+  const GAP = 4
+  // Find the bottom edge of the lowest folded pill already in the corner
+  let nextY = y + 40
+  for (const w of foldedWindows) {
+    if (w.isDestroyed()) continue
+    const [wx, wy] = w.getPosition()
+    const [, wh] = w.getSize()
+    if (Math.abs(wx - targetX) < 20) {
+      nextY = Math.max(nextY, wy + wh + GAP)
+    }
+  }
+  return { x: targetX, y: nextY }
+}
+
+function getStickyInitialPosition(winWidth: number, winHeight: number): { x: number; y: number } {
+  const display = screen.getPrimaryDisplay()
+  const { x: wa_x, y: wa_y, width: wa_w } = display.workArea
+  const BASE_X = wa_x + Math.round((wa_w - winWidth) / 2)
+  const BASE_Y = wa_y + 60
+  const STEP = 30
+  for (let i = 0; i < 20; i++) {
+    const cx = BASE_X + i * STEP
+    const cy = BASE_Y + i * STEP
+    const overlaps = [...stickyWindows].some(w => {
+      if (w.isDestroyed()) return false
+      const [wx, wy] = w.getPosition()
+      return Math.abs(wx - cx) < STEP && Math.abs(wy - cy) < STEP
+    })
+    if (!overlaps) return { x: cx, y: cy }
+  }
+  return { x: BASE_X, y: BASE_Y }
+}
+
+function animateStickyWindow(
+  win: BrowserWindow,
+  from: { x: number; y: number; width: number; height: number },
+  to:   { x: number; y: number; width: number; height: number },
+  duration: number,
+  onComplete?: () => void
+) {
+  const startTime = Date.now()
+  const fromR = from.height <= 40 ? Math.floor(from.height / 2) : 8
+  const toR   = to.height   <= 40 ? Math.floor(to.height   / 2) : 8
+  const tick = setInterval(() => {
+    if (win.isDestroyed()) { clearInterval(tick); return }
+    const t = Math.min((Date.now() - startTime) / duration, 1)
+    const e = 1 - Math.pow(1 - t, 3)  // ease-out cubic
+    const x = Math.round(from.x + (to.x - from.x) * e)
+    const y = Math.round(from.y + (to.y - from.y) * e)
+    const w = Math.round(from.width  + (to.width  - from.width)  * e)
+    const h = Math.round(from.height + (to.height - from.height) * e)
+    const r = Math.round(fromR + (toR - fromR) * e)
+    win.setMinimumSize(1, 1)
+    win.setSize(w, h)
+    win.setPosition(x, y)
+    if (process.platform === 'win32') win.setShape(roundedRectRegion(w, h, r))
+    if (t >= 1) { clearInterval(tick); onComplete?.() }
+  }, 16)
+}
+
 function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 300,
@@ -95,8 +199,8 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
     minWidth: 200,
     minHeight: 200,
     frame: false,
-    transparent: false,
-    backgroundColor: '#1a1b26',
+    transparent: true,
+    backgroundColor: '#00000000',
     titleBarStyle: 'hidden',
     show: false,
     alwaysOnTop: true,
@@ -118,7 +222,20 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
     win.loadFile(path.join(__dirname, '../dist/index.html'), { hash })
   }
 
+  // Apply the OS-level window shape so Windows DWM respects the rounded corners
+  // even when the window loses focus (CSS border-radius is ignored by DWM).
+  win.on('resize', () => applyStickyShape(win))
+  win.on('closed', () => {
+    prevBoundsMap.delete(win.id)
+    stickyWindows.delete(win)
+    foldedWindows.delete(win)
+  })
+
   win.once('ready-to-show', () => {
+    const { x, y } = getStickyInitialPosition(300, 300)
+    win.setPosition(x, y)
+    stickyWindows.add(win)
+    applyStickyShape(win)
     win.show()
   })
 
@@ -156,7 +273,7 @@ function createTray() {
     { type: 'separator' },
     {
       label: 'Open notes folder',
-      click: () => shell.openPath(NOTES_DIR),
+      click: () => shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)),
     },
     { type: 'separator' },
     {
@@ -195,6 +312,9 @@ function registerGlobalShortcut() {
   })
   if (!ret) {
     console.error('Failed to register global shortcut Ctrl+Shift+Space')
+    // Update tray tooltip so the user knows the shortcut is unavailable
+    // (common on Linux when an input method or another app captures it)
+    tray?.setToolTip('NoteFlow — shortcut unavailable (Ctrl+Shift+Space)')
   }
 }
 
@@ -287,7 +407,9 @@ ipcMain.handle('fs:read-all-notes', () => {
 
 ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
 
-ipcMain.handle('app:open-notes-folder', () => shell.openPath(NOTES_DIR))
+ipcMain.handle('app:open-notes-folder', () =>
+  shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err))
+)
 
 ipcMain.handle('app:check-update', () => {
   // if (!app.isPackaged) return { hasUpdate: false }
@@ -304,7 +426,12 @@ ipcMain.handle('app:check-update', () => {
             const latest = json.tag_name?.replace(/^v/, '')
             const current = app.getVersion()
             const hasUpdate = latest && latest !== current
-            const downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-Setup-${latest}.exe`
+            let downloadUrl: string
+            if (process.platform === 'linux') {
+              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`
+            } else {
+              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`
+            }
             resolve({ hasUpdate, latestVersion: latest, downloadUrl })
           } catch {
             resolve({ hasUpdate: false })
@@ -319,6 +446,44 @@ ipcMain.handle('app:check-update', () => {
 
 ipcMain.handle('app:open-url', (_event, url: string) => {
   shell.openExternal(url)
+})
+
+ipcMain.handle('app:download-and-install', async (_event, url: string) => {
+  const tmpDir = app.getPath('temp')
+  const fileName = url.split('/').pop() || 'NoteFlow-update.exe'
+  const dest = path.join(tmpDir, fileName)
+
+  try {
+    const response = await net.fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const total = parseInt(response.headers.get('content-length') || '0')
+    let downloaded = 0
+    const writer = fs.createWriteStream(dest)
+    const reader = response.body!.getReader()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      writer.write(Buffer.from(value))
+      downloaded += value.length
+      const percent = total ? Math.round((downloaded / total) * 100) : -1
+      BrowserWindow.getAllWindows().forEach(w =>
+        w.webContents.send('update:download-progress', percent)
+      )
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      writer.end()
+      writer.on('finish', resolve)
+      writer.on('error', reject)
+    })
+
+    await shell.openPath(dest)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
 })
 
 ipcMain.handle('app:choose-notes-dir', async () => {
@@ -459,6 +624,38 @@ ipcMain.on('settings:set-theme', (_event, themeId: string) => {
   writeSettings(settings)
 })
 
+ipcMain.handle('app:get-login-item', () => {
+  const openAtLogin = (readSettings().openAtLogin ?? false) as boolean
+  return { openAtLogin }
+})
+
+ipcMain.handle('app:set-login-item', (_event, enabled: boolean) => {
+  const settings = readSettings()
+  settings.openAtLogin = enabled
+  writeSettings(settings)
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      path: process.execPath,
+      args: enabled ? ['--noteflow-startup'] : [],
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error('Failed to set login item:', err)
+    return { ok: false, error: String(err) }
+  }
+})
+
+ipcMain.handle('settings:get-startup-stickies', () => {
+  return (readSettings().startupStickies ?? [])
+})
+
+ipcMain.handle('settings:set-startup-stickies', (_event, stickies: Array<{ noteId: string; sectionId: string }>) => {
+  const settings = readSettings()
+  settings.startupStickies = stickies
+  writeSettings(settings)
+})
+
 // Window controls
 ipcMain.on('window:minimize', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize()
@@ -485,7 +682,48 @@ ipcMain.on('window:open-sticky', (_event, noteId: string, sectionId: string) => 
   createStickyWindow(noteId, sectionId)
 })
 
+ipcMain.on('window:set-size', (event, width: number, height: number, minW: number, minH: number) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  win.setMinimumSize(minW, minH)
+  win.setSize(width, height)
+})
+
+ipcMain.on('window:fold-to-corner', (event, foldedW: number, foldedH: number) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  const from = win.getBounds()
+  prevBoundsMap.set(win.id, from)
+  foldedWindows.add(win)
+  const display = screen.getDisplayNearestPoint(from)
+  const { x: toX, y: toY } = getFoldedPosition(display, foldedW, foldedH)
+  const to = { x: toX, y: toY, width: foldedW, height: foldedH }
+  animateStickyWindow(win, from, to, 300)
+})
+
+ipcMain.on('window:unfold', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  const prev = prevBoundsMap.get(win.id)
+  if (!prev) return
+  foldedWindows.delete(win)
+  const from = win.getBounds()
+  animateStickyWindow(win, from, prev, 280, () => {
+    if (!win.isDestroyed()) {
+      win.setMinimumSize(200, 200)
+      applyStickyShape(win)
+    }
+  })
+  prevBoundsMap.delete(win.id)
+})
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
+
+// Ensure single instance — second-instance event brings the existing window to front
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+}
 
 app.whenReady().then(() => {
   // Remove default menu for all windows
@@ -493,7 +731,20 @@ app.whenReady().then(() => {
 
   githubSync.loadSyncSettings()
 
-  mainWindow = createWindow()
+  const isStartupMode = process.argv.includes('--noteflow-startup')
+  const startupStickies = (readSettings().startupStickies ?? []) as Array<{ noteId: string; sectionId: string }>
+
+  if (isStartupMode && startupStickies.length > 0) {
+    // Launched at system startup with sticky notes configured:
+    // keep main window hidden in tray and open the selected sticky notes
+    mainWindow = createWindow(true)
+    for (const { noteId, sectionId } of startupStickies) {
+      createStickyWindow(noteId, sectionId)
+    }
+  } else {
+    mainWindow = createWindow()
+  }
+
   createTray()
   registerGlobalShortcut()
 

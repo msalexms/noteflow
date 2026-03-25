@@ -6,8 +6,16 @@ on:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
 
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
 
     permissions:
       contents: write
@@ -26,37 +34,59 @@ jobs:
         run: npm ci
 
       - name: Derive app version from tag
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          if (-not $tag.StartsWith('v')) {
-            throw "Tag '$tag' must start with 'v'"
-          }
-
-          $version = $tag.Substring(1)
-          if (-not $version) {
-            throw "Tag '$tag' does not contain a version"
-          }
-
-          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
-            throw "Version '$version' is not a valid semver-like value"
-          }
-
-          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Using app version '$version' from tag '$tag'"
+          tag="${{ github.ref_name }}"
+          if [[ ! "$tag" =~ ^v ]]; then
+            echo "Tag '$tag' must start with 'v'" && exit 1
+          fi
+          version="${tag#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version '$version' is not a valid semver-like value" && exit 1
+          fi
+          echo "APP_VERSION=$version" >> $GITHUB_ENV
+          echo "Using app version '$version' from tag '$tag'"
 
       - name: Sync package.json version
+        shell: bash
         run: |
-          npm pkg set version=$env:APP_VERSION
-          $pkgVersion = node -p "require('./package.json').version"
-          if ($pkgVersion -ne $env:APP_VERSION) {
-            throw "package.json version '$pkgVersion' does not match '$env:APP_VERSION'"
-          }
-          Write-Host "package.json version synced to '$pkgVersion'"
+          npm pkg set version="$APP_VERSION"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$pkg_version" != "$APP_VERSION" ]; then
+            echo "package.json version '$pkg_version' does not match '$APP_VERSION'" && exit 1
+          fi
+          echo "package.json version synced to '$pkg_version'"
 
       - name: Build Electron App
         run: npm run dist
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: release/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-win
+          path: release-win
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-linux
+          path: release-linux
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -65,6 +95,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            release/*.exe
-            release/*.exe.blockmap
-            release/latest.yml
+            release-win/*.exe
+            release-win/*.exe.blockmap
+            release-win/latest.yml
+            release-linux/*.deb
+            release-linux/latest-linux.yml

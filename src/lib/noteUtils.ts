@@ -158,12 +158,23 @@ export function defaultSections(): NoteSection[] {
   ]
 }
 
+export function defaultNoteTitle(): string {
+  const d = new Date()
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}-${mm}-${d.getFullYear()}`
+}
+
+export function isDefaultNoteTitle(title: string): boolean {
+  return !title.trim() || title.trim() === 'Untitled' || /^\d{2}-\d{2}-\d{4}$/.test(title.trim())
+}
+
 export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {
   const id  = nanoid(8)
   const now = new Date().toISOString()
   return {
     id,
-    title:    'Untitled',
+    title:    defaultNoteTitle(),
     tags:     [],
     created:  now,
     updated:  now,
@@ -216,5 +227,5 @@ export function noteFilename(id: string, title: string): string {
     .trim()
     .replace(/\s+/g, '-')
     .slice(0, 40)
-  return `${slug || 'untitled'}-${id}.md`
+  return `${slug ? `${slug}-` : ''}${id}.md`
 }

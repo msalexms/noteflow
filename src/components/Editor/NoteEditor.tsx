@@ -171,13 +171,11 @@ export function NoteEditor() {
     }
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auto-focus title on new note ───────────────────────────────────────────
+  // ── Auto-focus editor on new note ──────────────────────────────────────────
   useEffect(() => {
-    if (note && (note.title === '' || note.title === 'Untitled') && note.sections.length === 1 && note.sections[0].content === '') {
-      // Use requestAnimationFrame to ensure focus is set after the render/mount transitions
+    if (note && note.sections.length === 1 && note.sections[0].content === '') {
       requestAnimationFrame(() => {
-        titleRef.current?.focus()
-        titleRef.current?.select()
+        rawTextareaRef.current?.focus()
       })
     }
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
