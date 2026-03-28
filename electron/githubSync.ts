@@ -240,7 +240,8 @@ async function upsertRemoteFile(
   owner: string,
   repo: string,
   filename: string,
-  content: string
+  content: string,
+  _retrying = false
 ): Promise<void> {
   let sha: string | undefined
   try {
@@ -256,16 +257,27 @@ async function upsertRemoteFile(
 
   const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m)
   const label = titleMatch ? titleMatch[1].trim() : filename.replace(/\.md$/, '')
-  await githubRequest(
-    token,
-    'PUT',
-    `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`,
-    {
-      message: sha ? `update: ${label}` : `add: ${label}`,
-      content: Buffer.from(content).toString('base64'),
-      ...(sha ? { sha } : {}),
+  try {
+    await githubRequest(
+      token,
+      'PUT',
+      `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`,
+      {
+        message: sha ? `update: ${label}` : `add: ${label}`,
+        content: Buffer.from(content).toString('base64'),
+        ...(sha ? { sha } : {}),
+      }
+    )
+  } catch (err: unknown) {
+    // SHA conflict: another push updated the file between our GET and PUT.
+    // Re-fetch the current SHA and retry once.
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!_retrying && (msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409'))) {
+      await upsertRemoteFile(token, owner, repo, filename, content, true)
+      return
     }
-  )
+    throw err
+  }
 }
 
 async function removeRemoteFile(
@@ -466,15 +478,17 @@ export function disconnectGitHub(): void {
   writeSettings(settings)
 }
 
-export async function pullNotes(notesDir: string): Promise<{ pulled: number; errors: string[] }> {
+export async function pullNotes(notesDir: string): Promise<{ pulled: number; deleted: number; errors: string[]; updatedFiles: string[]; hadDeletions: boolean }> {
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
-    return { pulled: 0, errors: [] }
+    return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false }
   }
 
   const token = decryptToken(s.encryptedToken)
   let pulled = 0
+  let deleted = 0
   const errors: string[] = []
+  const updatedFiles: string[] = []
 
   try {
     const remoteFiles = await listRemoteNotes(token, s.owner, s.repo)
@@ -496,11 +510,47 @@ export async function pullNotes(notesDir: string): Promise<{ pulled: number; err
         }
 
         fs.writeFileSync(localPath, remote.content, 'utf-8')
+        updatedFiles.push(localPath)
         pulled++
       } catch (err) {
         errors.push(`${file.name}: ${String(err)}`)
       }
     }
+
+    // Delete local notes that no longer exist on remote.
+    // Safety rule: only delete if the local file's `updated` timestamp is older
+    // than the last sync — meaning it was known to the remote at some point and
+    // was since deleted. Files newer than lastSync were created locally after the
+    // last sync and haven't been pushed yet, so we must not touch them.
+    const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null
+    if (lastSyncTime !== null) {
+      const remoteFilenames = new Set(remoteFiles.map((f) => f.name))
+      let localFilenames: string[] = []
+      try {
+        localFilenames = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+      } catch { /* ignore */ }
+
+      for (const localFilename of localFilenames) {
+        if (remoteFilenames.has(localFilename)) continue
+        const localPath = path.join(notesDir, localFilename)
+        try {
+          const localContent = fs.readFileSync(localPath, 'utf-8')
+          const localUpdated = extractUpdatedTimestamp(localContent)
+          if (!localUpdated) continue // can't determine age — skip to be safe
+          if (new Date(localUpdated).getTime() > lastSyncTime) continue // created locally after last sync, not yet pushed
+          fs.unlinkSync(localPath)
+          deleted++
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Pull groups.json if it exists in the remote repo
+    try {
+      const remoteGroups = await getRemoteFile(token, s.owner, s.repo, 'groups.json')
+      if (remoteGroups) {
+        fs.writeFileSync(path.join(notesDir, 'groups.json'), remoteGroups.content, 'utf-8')
+      }
+    } catch { /* ignore — groups.json is optional */ }
 
     syncSettings = { ...s, lastSync: new Date().toISOString() }
     const settings = readSettings()
@@ -513,7 +563,7 @@ export async function pullNotes(notesDir: string): Promise<{ pulled: number; err
     errors.push(msg)
   }
 
-  return { pulled, errors }
+  return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0 }
 }
 
 export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; errors: string[] }> {
@@ -545,13 +595,17 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
   return { pushed, errors }
 }
 
-export function schedulePush(filePath: string, content: string): void {
+export function schedulePush(filePath: string, content: string, onComplete?: (error?: string) => void): void {
   const s = syncSettings ?? loadSyncSettings()
-  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+    onComplete?.()
+    return
+  }
 
   const filename = path.basename(filePath)
 
-  // Debounce: reset timer if already queued for this file
+  // Debounce: reset timer if already queued for this file.
+  // Previous onComplete is intentionally discarded — the new call supersedes it.
   const existing = pushTimers.get(filename)
   if (existing) clearTimeout(existing)
 
@@ -565,9 +619,11 @@ export function schedulePush(filePath: string, content: string): void {
       settings.githubSync = syncSettings
       writeSettings(settings)
       syncError = undefined
+      onComplete?.()
     } catch (err: unknown) {
       syncError = err instanceof Error ? err.message : String(err)
       console.error('[GitHubSync] push failed:', syncError)
+      onComplete?.(syncError)
     }
   }, 3000) // 3s debounce — avoids spamming API while typing
 

@@ -188,7 +188,7 @@ async function getRemoteFile(token, owner, repo, filename) {
         return null;
     }
 }
-async function upsertRemoteFile(token, owner, repo, filename, content) {
+async function upsertRemoteFile(token, owner, repo, filename, content, _retrying = false) {
     let sha;
     try {
         const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`));
@@ -199,11 +199,23 @@ async function upsertRemoteFile(token, owner, repo, filename, content) {
     }
     const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
     const label = titleMatch ? titleMatch[1].trim() : filename.replace(/\.md$/, '');
-    await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`, {
-        message: sha ? `update: ${label}` : `add: ${label}`,
-        content: Buffer.from(content).toString('base64'),
-        ...(sha ? { sha } : {}),
-    });
+    try {
+        await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`, {
+            message: sha ? `update: ${label}` : `add: ${label}`,
+            content: Buffer.from(content).toString('base64'),
+            ...(sha ? { sha } : {}),
+        });
+    }
+    catch (err) {
+        // SHA conflict: another push updated the file between our GET and PUT.
+        // Re-fetch the current SHA and retry once.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!_retrying && (msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409'))) {
+            await upsertRemoteFile(token, owner, repo, filename, content, true);
+            return;
+        }
+        throw err;
+    }
 }
 async function removeRemoteFile(token, owner, repo, filename) {
     try {
@@ -357,11 +369,13 @@ function disconnectGitHub() {
 async function pullNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
-        return { pulled: 0, errors: [] };
+        return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false };
     }
     const token = decryptToken(s.encryptedToken);
     let pulled = 0;
+    let deleted = 0;
     const errors = [];
+    const updatedFiles = [];
     try {
         const remoteFiles = await listRemoteNotes(token, s.owner, s.repo);
         for (const file of remoteFiles) {
@@ -379,12 +393,51 @@ async function pullNotes(notesDir) {
                         continue;
                 }
                 fs_1.default.writeFileSync(localPath, remote.content, 'utf-8');
+                updatedFiles.push(localPath);
                 pulled++;
             }
             catch (err) {
                 errors.push(`${file.name}: ${String(err)}`);
             }
         }
+        // Delete local notes that no longer exist on remote.
+        // Safety rule: only delete if the local file's `updated` timestamp is older
+        // than the last sync — meaning it was known to the remote at some point and
+        // was since deleted. Files newer than lastSync were created locally after the
+        // last sync and haven't been pushed yet, so we must not touch them.
+        const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null;
+        if (lastSyncTime !== null) {
+            const remoteFilenames = new Set(remoteFiles.map((f) => f.name));
+            let localFilenames = [];
+            try {
+                localFilenames = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+            }
+            catch { /* ignore */ }
+            for (const localFilename of localFilenames) {
+                if (remoteFilenames.has(localFilename))
+                    continue;
+                const localPath = path_1.default.join(notesDir, localFilename);
+                try {
+                    const localContent = fs_1.default.readFileSync(localPath, 'utf-8');
+                    const localUpdated = extractUpdatedTimestamp(localContent);
+                    if (!localUpdated)
+                        continue; // can't determine age — skip to be safe
+                    if (new Date(localUpdated).getTime() > lastSyncTime)
+                        continue; // created locally after last sync, not yet pushed
+                    fs_1.default.unlinkSync(localPath);
+                    deleted++;
+                }
+                catch { /* ignore */ }
+            }
+        }
+        // Pull groups.json if it exists in the remote repo
+        try {
+            const remoteGroups = await getRemoteFile(token, s.owner, s.repo, 'groups.json');
+            if (remoteGroups) {
+                fs_1.default.writeFileSync(path_1.default.join(notesDir, 'groups.json'), remoteGroups.content, 'utf-8');
+            }
+        }
+        catch { /* ignore — groups.json is optional */ }
         syncSettings = { ...s, lastSync: new Date().toISOString() };
         const settings = readSettings();
         settings.githubSync = syncSettings;
@@ -396,7 +449,7 @@ async function pullNotes(notesDir) {
         syncError = msg;
         errors.push(msg);
     }
-    return { pulled, errors };
+    return { pulled, deleted, errors, updatedFiles, hadDeletions: deleted > 0 };
 }
 async function pushAllNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
@@ -425,12 +478,15 @@ async function pushAllNotes(notesDir) {
     }
     return { pushed, errors };
 }
-function schedulePush(filePath, content) {
+function schedulePush(filePath, content, onComplete) {
     const s = syncSettings ?? loadSyncSettings();
-    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
+        onComplete?.();
         return;
+    }
     const filename = path_1.default.basename(filePath);
-    // Debounce: reset timer if already queued for this file
+    // Debounce: reset timer if already queued for this file.
+    // Previous onComplete is intentionally discarded — the new call supersedes it.
     const existing = pushTimers.get(filename);
     if (existing)
         clearTimeout(existing);
@@ -444,10 +500,12 @@ function schedulePush(filePath, content) {
             settings.githubSync = syncSettings;
             writeSettings(settings);
             syncError = undefined;
+            onComplete?.();
         }
         catch (err) {
             syncError = err instanceof Error ? err.message : String(err);
             console.error('[GitHubSync] push failed:', syncError);
+            onComplete?.(syncError);
         }
     }, 3000); // 3s debounce — avoids spamming API while typing
     pushTimers.set(filename, timer);

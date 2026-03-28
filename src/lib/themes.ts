@@ -124,4 +124,4 @@ export const THEMES: Theme[] = [
   },
 ]
 
-export const DEFAULT_THEME_ID = 'tokyo-night'
+export const DEFAULT_THEME_ID = 'carbon'

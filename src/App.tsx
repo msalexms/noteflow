@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from './stores/notesStore'
+import { useGroupsStore } from './stores/groupsStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
@@ -15,6 +16,7 @@ export function App() {
   const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
 
   const { loadNotes, isLoading, createNote, setCommandPaletteOpen } = useNotesStore()
+  const loadGroups = useGroupsStore((s) => s.loadGroups)
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -23,7 +25,7 @@ export function App() {
   const dragStartW = useRef(SIDEBAR_DEFAULT)
 
   // ── Initial load ──────────────────────────────────────────────────────────
-  useEffect(() => { loadNotes() }, [loadNotes])
+  useEffect(() => { loadNotes(); loadGroups() }, [loadNotes, loadGroups])
 
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {

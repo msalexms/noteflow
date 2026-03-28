@@ -65,6 +65,7 @@ export function parseNote(raw: string, filePath: string): Note {
     updated:  String(data.updated ?? new Date().toISOString()),
     archived: Boolean(data.archived ?? false),
     pinned:   Boolean(data.pinned   ?? false),
+    ...(data.group && typeof data.group === 'string' && { group: data.group }),
     ...(encryption && { encryption }),
   }
 
@@ -141,6 +142,7 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
 
   if (note.archived) fm.archived = true
   if (note.pinned)   fm.pinned   = true
+  if (note.group)    fm.group    = note.group
 
   const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
   // Markdown body = first section content (readable in external editors)

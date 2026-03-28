@@ -18,6 +18,20 @@ export interface NoteEncryption {
   hashAlg?: 'SHA-256' | 'SHA-512'  // PBKDF2 hash; omitted when default ('SHA-256')
 }
 
+// ── Groups ────────────────────────────────────────────────────────────────────
+
+// Same CSS var names as COLOR_VARS in tagColors.ts
+export type GroupColor =
+  '--accent' | '--accent-2' | '--red' | '--cyan' |
+  '--purple' | '--text' | '--orange' | '--pink'
+
+export interface NoteGroup {
+  id: string        // nanoid(8)
+  name: string      // user-visible label
+  color: GroupColor // CSS var → rgb(var(<color>))
+  order: number     // sort order ascending
+}
+
 export interface NoteMeta {
   id: string
   title: string
@@ -26,6 +40,7 @@ export interface NoteMeta {
   updated: string
   archived: boolean
   pinned: boolean
+  group?: string       // groupId — undefined = ungrouped
   encryption?: NoteEncryption  // present iff note is encrypted
 }
 
@@ -96,6 +111,8 @@ declare global {
       setLoginItem: (enabled: boolean) => Promise<void>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
+      getGroups: () => Promise<NoteGroup[]>
+      setGroups: (groups: NoteGroup[]) => Promise<void>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
@@ -110,6 +127,7 @@ declare global {
       disconnectGitHub: () => Promise<{ ok: boolean }>
       pullNotes: () => Promise<{ pulled: number; errors: string[] }>
       onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
+      onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
     }
   }
 }

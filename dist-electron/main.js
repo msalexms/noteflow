@@ -50,6 +50,49 @@ const isDev = process.env.NODE_ENV === 'development' || !electron_1.app.isPackag
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let autoSyncTimer = null;
+const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+// ── Push state tracking ───────────────────────────────────────────────────────
+// Tracks filenames whose debounced push is still pending or in-flight.
+// When the set transitions from empty→non-empty or non-empty→empty we notify
+// all renderer windows so the sync button can show an uploading indicator.
+const pendingPushFiles = new Set();
+function notifyPushState() {
+    const state = pendingPushFiles.size > 0 ? 'pushing' : 'idle';
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync:push-state', state));
+}
+function startAutoSync() {
+    if (autoSyncTimer)
+        return;
+    autoSyncTimer = setInterval(async () => {
+        if (!githubSync.getSyncStatus().connected)
+            return;
+        try {
+            const result = await githubSync.pullNotes(NOTES_DIR);
+            if (result.hadDeletions) {
+                // A note was removed remotely — need a full reload to update the sidebar
+                electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+            }
+            else {
+                // Broadcast only the files that actually changed — avoids full reload
+                for (const filePath of result.updatedFiles) {
+                    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+                        win.webContents.send('notes-updated', filePath, null);
+                    });
+                }
+            }
+        }
+        catch (err) {
+            console.error('[AutoSync] pull failed:', String(err));
+        }
+    }, AUTO_SYNC_INTERVAL_MS);
+}
+function stopAutoSync() {
+    if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+        autoSyncTimer = null;
+    }
+}
 const OLD_NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'scratch-notes');
 const NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'noteflow-notes');
 // Migrate old notes folder to new name if it exists AND the new one doesn't
@@ -61,6 +104,7 @@ if (!fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
 function createWindow(hidden = false) {
+    const scaleFactor = electron_1.screen.getPrimaryDisplay().scaleFactor;
     const win = new electron_1.BrowserWindow({
         width: 1100,
         height: 720,
@@ -76,6 +120,7 @@ function createWindow(hidden = false) {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            zoomFactor: scaleFactor,
         },
     });
     if (isDev) {
@@ -206,6 +251,7 @@ function animateStickyWindow(win, from, to, duration, onComplete) {
     }, 16);
 }
 function createStickyWindow(noteId, sectionId) {
+    const scaleFactor = electron_1.screen.getPrimaryDisplay().scaleFactor;
     const win = new electron_1.BrowserWindow({
         width: 300,
         height: 300,
@@ -222,6 +268,7 @@ function createStickyWindow(noteId, sectionId) {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            zoomFactor: scaleFactor,
         },
     });
     // Hash routing pattern for the sticky page
@@ -361,7 +408,18 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
             // Send the filePath and the sender's webContents ID
             win.webContents.send('notes-updated', filePath, event.sender.id);
         });
-        githubSync.schedulePush(filePath, content);
+        if (githubSync.getSyncStatus().connected) {
+            const filename = path_1.default.basename(filePath);
+            pendingPushFiles.add(filename);
+            notifyPushState();
+            githubSync.schedulePush(filePath, content, () => {
+                pendingPushFiles.delete(filename);
+                notifyPushState();
+            });
+        }
+        else {
+            githubSync.schedulePush(filePath, content);
+        }
         return { ok: true };
     }
     catch (err) {
@@ -562,6 +620,7 @@ electron_1.ipcMain.handle('sync:initiate', async (_event, repo) => {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync-auth-complete', result));
         if (result.ok) {
             electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+            startAutoSync();
         }
     });
 });
@@ -570,13 +629,22 @@ electron_1.ipcMain.handle('sync:cancel-auth', () => {
     return { ok: true };
 });
 electron_1.ipcMain.handle('sync:disconnect', () => {
+    stopAutoSync();
     githubSync.disconnectGitHub();
     return { ok: true };
 });
 electron_1.ipcMain.handle('sync:pull', async () => {
     const result = await githubSync.pullNotes(NOTES_DIR);
-    if (result.pulled > 0) {
+    if (result.hadDeletions || result.pulled === 0) {
+        // Full reload: covers deletions AND the case where the file was already on disk
+        // (written by auto-sync) but the UI missed the event — manual sync should always
+        // bring the store in sync with disk.
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+    }
+    else {
+        for (const filePath of result.updatedFiles) {
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null));
+        }
     }
     return result;
 });
@@ -628,6 +696,21 @@ electron_1.ipcMain.handle('settings:set-startup-stickies', (_event, stickies) =>
     const settings = readSettings();
     settings.startupStickies = stickies;
     writeSettings(settings);
+});
+electron_1.ipcMain.handle('groups:get', () => {
+    const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
+    try {
+        return JSON.parse(fs_1.default.readFileSync(groupsPath, 'utf-8'));
+    }
+    catch {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('groups:set', (_event, groups) => {
+    const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
+    const content = JSON.stringify(groups, null, 2);
+    fs_1.default.writeFileSync(groupsPath, content, 'utf-8');
+    githubSync.schedulePush(groupsPath, content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {
@@ -692,10 +775,17 @@ electron_1.ipcMain.on('window:unfold', (event) => {
     prevBoundsMap.delete(win.id);
 });
 // ── App lifecycle ─────────────────────────────────────────────────────────────
+// Ensure single instance — second-instance event brings the existing window to front
+const gotTheLock = electron_1.app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    electron_1.app.quit();
+}
 electron_1.app.whenReady().then(() => {
     // Remove default menu for all windows
     electron_1.Menu.setApplicationMenu(null);
     githubSync.loadSyncSettings();
+    if (githubSync.getSyncStatus().connected)
+        startAutoSync();
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
     if (isStartupMode && startupStickies.length > 0) {

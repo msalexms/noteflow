@@ -21,6 +21,8 @@ const api = {
     setLoginItem: (enabled) => electron_1.ipcRenderer.invoke('app:set-login-item', enabled),
     getStartupStickies: () => electron_1.ipcRenderer.invoke('settings:get-startup-stickies'),
     setStartupStickies: (stickies) => electron_1.ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+    getGroups: () => electron_1.ipcRenderer.invoke('groups:get'),
+    setGroups: (groups) => electron_1.ipcRenderer.invoke('groups:set', groups),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),
@@ -50,6 +52,11 @@ const api = {
         const wrapper = (_event, result) => cb(result);
         electron_1.ipcRenderer.on('sync-auth-complete', wrapper);
         return () => electron_1.ipcRenderer.removeListener('sync-auth-complete', wrapper);
+    },
+    onSyncPushState: (cb) => {
+        const wrapper = (_event, state) => cb(state);
+        electron_1.ipcRenderer.on('sync:push-state', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('sync:push-state', wrapper);
     },
     // Events from main → renderer
     onNewNote: (cb) => {

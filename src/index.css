@@ -56,7 +56,7 @@ button {
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.001); }
 ::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
 

@@ -34,7 +34,7 @@ interface NotesState {
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
   duplicateNote: (id: string) => Promise<Note>
-  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'pinned'>>) => Promise<void>
+  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'pinned' | 'group'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   setActiveNote: (id: string | null) => void

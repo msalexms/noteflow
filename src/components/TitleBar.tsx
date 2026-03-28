@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Check, Cloud, CloudOff, Download, Minus, Palette, Settings, Square, X } from 'lucide-react'
+import { Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
@@ -16,8 +16,13 @@ export function TitleBar() {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
   const [syncModal, setSyncModal] = useState(false)
-  const [syncConnected, setSyncConnected] = useState(false)
+  type SyncStatus = { enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string }
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ enabled: false, connected: false })
+  const [syncing, setSyncing] = useState(false)
+  const [pushing, setPushing] = useState(false)
   const [startupModal, setStartupModal] = useState(false)
+
+  const refreshSyncStatus = () => window.noteflow.getSyncStatus().then(setSyncStatus)
 
   useEffect(() => {
     window.noteflow.checkUpdate().then((result) => {
@@ -25,9 +30,32 @@ export function TitleBar() {
         setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
       }
     })
-    window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
+    refreshSyncStatus()
     window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
+    const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
+    const unsubPush = window.noteflow.onSyncPushState((state) => {
+      setPushing(state === 'pushing')
+      if (state === 'idle') refreshSyncStatus()
+    })
+    return () => { unsubNotes(); unsubPush() }
   }, [])
+
+  const formatLastSync = (iso?: string) => {
+    if (!iso) return 'Never'
+    const d = new Date(iso)
+    const now = new Date()
+    const sameDay = d.toDateString() === now.toDateString()
+    const hhmm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return sameDay ? hhmm : `${d.toLocaleDateString([], { day: '2-digit', month: '2-digit' })} ${hhmm}`
+  }
+
+  const handleSync = async () => {
+    if (syncing) return
+    setSyncing(true)
+    await window.noteflow.pullNotes()
+    await refreshSyncStatus()
+    setSyncing(false)
+  }
 
   const handleUpdate = async () => {
     if (!updateInfo || downloading) return
@@ -73,6 +101,32 @@ export function TitleBar() {
             )}
           </button>
         )}
+        {syncStatus.connected && (
+          <button
+            onClick={handleSync}
+            disabled={syncing || pushing}
+            className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
+            title={
+              syncing
+                ? 'Syncing...'
+                : pushing
+                ? 'Uploading changes...'
+                : syncStatus.error
+                ? `Sync error: ${syncStatus.error}`
+                : `${syncStatus.owner}/${syncStatus.repo} · Last sync: ${formatLastSync(syncStatus.lastSync)}\nClick to sync`
+            }
+          >
+            {syncing ? (
+              <RefreshCw size={12} className="animate-spin text-accent" />
+            ) : pushing ? (
+              <Cloud size={12} className="animate-pulse text-green-400" />
+            ) : syncStatus.error ? (
+              <Cloud size={12} className="text-amber-400" />
+            ) : (
+              <Cloud size={12} className="text-green-400" />
+            )}
+          </button>
+        )}
         <TitleBarMenu
           trigger={<Settings size={12} />}
           groups={[
@@ -92,7 +146,7 @@ export function TitleBar() {
                 {
                   id: 'github-sync',
                   label: 'GitHub Sync...',
-                  indicator: syncConnected
+                  indicator: syncStatus.connected
                     ? <Cloud size={10} className="text-green-400" />
                     : <CloudOff size={10} className="text-text-muted/50" />,
                   action: () => setSyncModal(true),
@@ -190,7 +244,7 @@ export function TitleBar() {
       <GitHubSyncModal
         onClose={() => {
           setSyncModal(false)
-          window.noteflow.getSyncStatus().then((s) => setSyncConnected(s.connected))
+          refreshSyncStatus()
         }}
       />
     )}

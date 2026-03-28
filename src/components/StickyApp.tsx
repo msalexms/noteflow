@@ -275,7 +275,7 @@ export function StickyApp() {
           <span className="text-[10px] font-mono text-amber-400/80">read-only</span>
         </div>
       )}
-      <div className="flex-1 overflow-hidden" onKeyDown={(e) => e.stopPropagation()}>
+      <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
         {(section.isRawMode || isReadOnly) ? (
           <textarea
             value={isReadOnly ? section.content : rawContent}

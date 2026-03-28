@@ -140,7 +140,10 @@ export function NoteEditor() {
   }, [note?.id])
 
   // ── Sync raw buffer with store updates (external changes) ──────────────────
+  // Skip if the textarea is focused — same guard as TipTap uses — to avoid
+  // resetting the cursor position while the user is actively typing.
   useEffect(() => {
+    if (rawTextareaRef.current === document.activeElement) return
     if (activeSection && activeSection.content !== rawContent) {
       setRawContent(activeSection.content)
     }
@@ -593,7 +596,7 @@ export function NoteEditor() {
           if (e.ctrlKey && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
-        <div className="flex items-center gap-1 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
+        <div className="flex items-center gap-3 px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0">
           <div className="flex items-center gap-1.5 flex-1 overflow-x-auto min-w-0 pr-1">
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
@@ -752,7 +755,7 @@ export function NoteEditor() {
           </span>
         </div>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden mr-1">
           {rawMode ? (
             <textarea
               ref={rawTextareaRef}

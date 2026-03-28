@@ -38,6 +38,8 @@ const api = {
   setLoginItem: (enabled: boolean): Promise<void> => ipcRenderer.invoke('app:set-login-item', enabled),
   getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
   setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+  getGroups: (): Promise<unknown[]> => ipcRenderer.invoke('groups:get'),
+  setGroups: (groups: unknown[]): Promise<void> => ipcRenderer.invoke('groups:set', groups),
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
@@ -91,6 +93,11 @@ const api = {
     const wrapper = (_event: any, result: { ok: boolean; owner?: string; repo?: string; error?: string }) => cb(result)
     ipcRenderer.on('sync-auth-complete', wrapper)
     return () => ipcRenderer.removeListener('sync-auth-complete', wrapper)
+  },
+  onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => {
+    const wrapper = (_event: any, state: 'pushing' | 'idle') => cb(state)
+    ipcRenderer.on('sync:push-state', wrapper)
+    return () => ipcRenderer.removeListener('sync:push-state', wrapper)
   },
 
   // Events from main → renderer
