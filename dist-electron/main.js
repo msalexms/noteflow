@@ -95,10 +95,25 @@ function stopAutoSync() {
     }
 }
 const OLD_NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'scratch-notes');
-const NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'noteflow-notes');
-// Migrate old notes folder to new name if it exists AND the new one doesn't
+// On Linux, follow XDG Base Directory Specification using ~/.local/share as base.
+// We intentionally avoid process.env.XDG_DATA_HOME because snap/flatpak runtimes
+// override it to their sandboxed paths, which would make notes inaccessible outside
+// the dev environment.
+const NOTES_DIR = process.platform === 'linux'
+    ? path_1.default.join(os_1.default.homedir(), '.local', 'share', 'noteflow-notes')
+    : path_1.default.join(os_1.default.homedir(), 'noteflow-notes');
+// Migrate old ~/scratch-notes → new NOTES_DIR
 if (fs_1.default.existsSync(OLD_NOTES_DIR) && !fs_1.default.existsSync(NOTES_DIR)) {
+    fs_1.default.mkdirSync(path_1.default.dirname(NOTES_DIR), { recursive: true });
     fs_1.default.renameSync(OLD_NOTES_DIR, NOTES_DIR);
+}
+// On Linux: migrate legacy ~/noteflow-notes → ~/.local/share/noteflow-notes
+if (process.platform === 'linux') {
+    const legacyLinuxDir = path_1.default.join(os_1.default.homedir(), 'noteflow-notes');
+    if (fs_1.default.existsSync(legacyLinuxDir) && !fs_1.default.existsSync(NOTES_DIR)) {
+        fs_1.default.mkdirSync(path_1.default.dirname(NOTES_DIR), { recursive: true });
+        fs_1.default.renameSync(legacyLinuxDir, NOTES_DIR);
+    }
 }
 // Ensure notes directory exists
 if (!fs_1.default.existsSync(NOTES_DIR)) {

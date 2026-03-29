@@ -74,11 +74,28 @@ function stopAutoSync(): void {
 }
 
 const OLD_NOTES_DIR = path.join(os.homedir(), 'scratch-notes')
-const NOTES_DIR = path.join(os.homedir(), 'noteflow-notes')
 
-// Migrate old notes folder to new name if it exists AND the new one doesn't
+// On Linux, follow XDG Base Directory Specification using ~/.local/share as base.
+// We intentionally avoid process.env.XDG_DATA_HOME because snap/flatpak runtimes
+// override it to their sandboxed paths, which would make notes inaccessible outside
+// the dev environment.
+const NOTES_DIR = process.platform === 'linux'
+  ? path.join(os.homedir(), '.local', 'share', 'noteflow-notes')
+  : path.join(os.homedir(), 'noteflow-notes')
+
+// Migrate old ~/scratch-notes → new NOTES_DIR
 if (fs.existsSync(OLD_NOTES_DIR) && !fs.existsSync(NOTES_DIR)) {
+  fs.mkdirSync(path.dirname(NOTES_DIR), { recursive: true })
   fs.renameSync(OLD_NOTES_DIR, NOTES_DIR)
+}
+
+// On Linux: migrate legacy ~/noteflow-notes → ~/.local/share/noteflow-notes
+if (process.platform === 'linux') {
+  const legacyLinuxDir = path.join(os.homedir(), 'noteflow-notes')
+  if (fs.existsSync(legacyLinuxDir) && !fs.existsSync(NOTES_DIR)) {
+    fs.mkdirSync(path.dirname(NOTES_DIR), { recursive: true })
+    fs.renameSync(legacyLinuxDir, NOTES_DIR)
+  }
 }
 
 // Ensure notes directory exists
