@@ -31,6 +31,13 @@ let tray: Tray | null = null
 let isQuitting = false
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 
+// Track files recently written by the app so fs.watch can ignore them
+const recentInternalWrites = new Set<string>()
+function markInternalWrite(filename: string) {
+  recentInternalWrites.add(filename)
+  setTimeout(() => recentInternalWrites.delete(filename), 1500)
+}
+
 const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 // ── Push state tracking ───────────────────────────────────────────────────────
@@ -419,6 +426,7 @@ ipcMain.handle('fs:read-note', (_event, filePath: string) => {
 ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
   try {
     fs.writeFileSync(filePath, content, 'utf-8')
+    markInternalWrite(path.basename(filePath))
     // Broadcast to all windows
     BrowserWindow.getAllWindows().forEach((win) => {
       // Send the filePath and the sender's webContents ID
@@ -441,6 +449,7 @@ ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
 
 ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
   try {
+    markInternalWrite(path.basename(filePath))
     fs.unlinkSync(filePath)
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
@@ -454,6 +463,8 @@ ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
 
 ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
   try {
+    markInternalWrite(path.basename(oldPath))
+    markInternalWrite(path.basename(newPath))
     fs.renameSync(oldPath, newPath)
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
@@ -870,6 +881,16 @@ app.whenReady().then(() => {
 
   createTray()
   registerGlobalShortcut()
+
+  // Watch for external file changes (CLI, sync from another device, etc.)
+  fs.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
+    if (!filename?.endsWith('.md')) return
+    if (recentInternalWrites.has(filename)) return
+    const filePath = path.join(NOTES_DIR, filename)
+    BrowserWindow.getAllWindows().forEach(win => {
+      win.webContents.send('notes-updated', filePath, null)
+    })
+  })
 
   app.on('activate', () => {
     showWindow()

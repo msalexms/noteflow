@@ -86,6 +86,9 @@
       "icon": "public/icon.ico",
       "artifactName": "${productName}-${version}-Setup.${ext}"
     },
+    "nsis": {
+      "include": "build/nsis-include.nsh"
+    },
     "linux": {
       "target": [
         "deb"
@@ -113,8 +116,20 @@
         "libdrm2",
         "libgbm1",
         "libxkbcommon0"
-      ]
+      ],
+      "afterInstall": "build/linux-postinstall.sh",
+      "afterRemove": "build/linux-postremove.sh"
     },
+    "extraResources": [
+      {
+        "from": "cli/noteflow.js",
+        "to": "cli/noteflow.js"
+      },
+      {
+        "from": "cli/noteflow.cmd",
+        "to": "cli/noteflow.cmd"
+      }
+    ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
