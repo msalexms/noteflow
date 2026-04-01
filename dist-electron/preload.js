@@ -21,6 +21,8 @@ const api = {
     setLoginItem: (enabled) => electron_1.ipcRenderer.invoke('app:set-login-item', enabled),
     getStartupStickies: () => electron_1.ipcRenderer.invoke('settings:get-startup-stickies'),
     setStartupStickies: (stickies) => electron_1.ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+    getUiState: () => electron_1.ipcRenderer.invoke('settings:get-ui-state'),
+    setUiState: (patch) => electron_1.ipcRenderer.invoke('settings:set-ui-state', patch),
     getGroups: () => electron_1.ipcRenderer.invoke('groups:get'),
     setGroups: (groups) => electron_1.ipcRenderer.invoke('groups:set', groups),
     // Window controls

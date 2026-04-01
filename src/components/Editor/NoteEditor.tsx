@@ -84,14 +84,20 @@ export function NoteEditor() {
   useEffect(() => {
     if (!note) return
     const pending = pendingSectionRef.current
-    const targetId = (pending && note.sections.find((s) => s.id === pending))
-      ? pending
-      : note.sections[0]?.id ?? null
+    const initialSection = useNotesStore.getState().pendingInitialSectionId
+    const targetId =
+      (pending && note.sections.find((s) => s.id === pending))
+        ? pending
+        : (initialSection && note.sections.find((s) => s.id === initialSection))
+        ? initialSection
+        : note.sections[0]?.id ?? null
     pendingSectionRef.current = null
+    if (initialSection) useNotesStore.setState({ pendingInitialSectionId: null })
     setActiveSectionId(targetId)
     setRawContent(note.sections.find((s) => s.id === targetId)?.content ?? '')
     setTitleDraft(note.title)
     setRenamingId(null)
+    if (targetId) window.noteflow.setUiState({ activeSectionId: targetId })
   }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handle section request from sidebar ────────────────────────────────────
@@ -409,6 +415,7 @@ export function NoteEditor() {
     const newContent = note.sections.find((s) => s.id === sectionId)?.content ?? ''
     setRawContent(newContent)
     setActiveSectionId(sectionId)
+    window.noteflow.setUiState({ activeSectionId: sectionId })
   }
 
   const handleAddSection = () => {

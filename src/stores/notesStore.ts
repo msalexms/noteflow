@@ -30,6 +30,9 @@ interface NotesState {
   // Session-unlocked encrypted notes (in-memory only, not persisted)
   sessionPasswords: Record<string, string>
 
+  // Used once on startup to restore the last active section
+  pendingInitialSectionId: string | null
+
   // Actions
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
@@ -71,23 +74,33 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   isLoading: false,
   newlyCreatedNoteId: null,
   sessionPasswords: {},
+  pendingInitialSectionId: null,
 
   loadNotes: async () => {
     set({ isLoading: true })
     try {
-      const dir = await window.noteflow.getNotesDir()
+      const [dir, allFiles, uiState] = await Promise.all([
+        window.noteflow.getNotesDir(),
+        window.noteflow.readAllNotes(),
+        window.noteflow.getUiState(),
+      ])
       set({ notesDir: dir })
 
-      const allFiles = await window.noteflow.readAllNotes()
       const notes: Note[] = allFiles
         .filter(({ content }) => content !== null)
         .map(({ path, content }) => parseNote(content!, path))
 
-      set({ notes, isLoading: false })
+      const savedNoteId = uiState.activeNoteId
+      const activeNoteId = (savedNoteId && notes.find((n) => n.id === savedNoteId))
+        ? savedNoteId
+        : notes[0]?.id ?? null
 
-      if (notes.length > 0 && !get().activeNoteId) {
-        set({ activeNoteId: notes[0].id })
-      }
+      set({
+        notes,
+        isLoading: false,
+        activeNoteId,
+        pendingInitialSectionId: uiState.activeSectionId ?? null,
+      })
     } catch (err) {
       console.error('Failed to load notes:', err)
       set({ isLoading: false })
@@ -251,6 +264,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       }
     }
     set({ activeNoteId: id })
+    if (id) window.noteflow.setUiState({ activeNoteId: id })
   },
   setSearchQuery:       (q)   => set({ searchQuery: q }),
   setFilterSection:     (s)   => set({ filterSection: s }),

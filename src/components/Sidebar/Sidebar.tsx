@@ -194,15 +194,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             })
           }}
           className={`relative w-full text-left px-4 py-2 transition-colors h-[64px] flex flex-col justify-center
-            ${isActive ? 'bg-accent/10' : 'hover:bg-surface-2'}`}
+            ${isActive && !group ? 'bg-accent/10' : ''} ${!isActive ? 'hover:bg-surface-2' : ''}`}
           style={{
             borderRight: group
               ? `1px solid rgb(var(${group.color}) / 0.6)`
               : '2px solid transparent',
+            ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
           }}
         >
           {isActive && (
-            <div className="absolute left-1 top-2.5 bottom-2.5 w-[1px] bg-accent rounded-full" />
+            <div
+              className="absolute left-1 top-2.5 bottom-2.5 w-[1px] rounded-full"
+              style={{ background: group ? `rgb(var(${group.color}))` : 'rgb(var(--accent))' }}
+            />
           )}
           <div className="flex items-center gap-1 min-w-0">
             {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}

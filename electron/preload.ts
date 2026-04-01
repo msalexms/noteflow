@@ -38,6 +38,10 @@ const api = {
   setLoginItem: (enabled: boolean): Promise<void> => ipcRenderer.invoke('app:set-login-item', enabled),
   getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
   setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
+  getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }> =>
+    ipcRenderer.invoke('settings:get-ui-state'),
+  setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }): Promise<void> =>
+    ipcRenderer.invoke('settings:set-ui-state', patch),
   getGroups: (): Promise<unknown[]> => ipcRenderer.invoke('groups:get'),
   setGroups: (groups: unknown[]): Promise<void> => ipcRenderer.invoke('groups:set', groups),
 

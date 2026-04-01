@@ -111,6 +111,8 @@ declare global {
       setLoginItem: (enabled: boolean) => Promise<void>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
+      getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }>
+      setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }) => Promise<void>
       getGroups: () => Promise<NoteGroup[]>
       setGroups: (groups: NoteGroup[]) => Promise<void>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>

@@ -14,6 +14,8 @@ export function TitleBar() {
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [upToDate, setUpToDate] = useState(false)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
   const [syncModal, setSyncModal] = useState(false)
   type SyncStatus = { enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string }
@@ -55,6 +57,20 @@ export function TitleBar() {
     await window.noteflow.pullNotes()
     await refreshSyncStatus()
     setSyncing(false)
+  }
+
+  const handleCheckUpdate = async () => {
+    if (checkingUpdate) return
+    setCheckingUpdate(true)
+    setUpToDate(false)
+    const result = await window.noteflow.checkUpdate()
+    if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
+      setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
+    } else {
+      setUpToDate(true)
+      setTimeout(() => setUpToDate(false), 3000)
+    }
+    setCheckingUpdate(false)
   }
 
   const handleUpdate = async () => {
@@ -137,6 +153,33 @@ export function TitleBar() {
                   id: 'startup',
                   label: 'Startup settings...',
                   action: () => setStartupModal(true),
+                },
+                {
+                  id: 'check-update',
+                  node: (
+                    <button
+                      onClick={handleCheckUpdate}
+                      disabled={checkingUpdate}
+                      className="w-full flex items-center gap-2 text-left hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {(checkingUpdate || upToDate || updateInfo) && (
+                        <span className="w-[10px] flex-shrink-0 flex items-center justify-center">
+                          {checkingUpdate
+                            ? <RefreshCw size={10} className="animate-spin" />
+                            : upToDate
+                            ? <Check size={10} className="text-green-400" />
+                            : <Download size={10} className="text-accent" />}
+                        </span>
+                      )}
+                      {checkingUpdate
+                        ? 'Checking...'
+                        : upToDate
+                        ? 'Up to date'
+                        : updateInfo
+                        ? `Update available (v${updateInfo.latestVersion})`
+                        : 'Check for updates'}
+                    </button>
+                  ),
                 },
               ],
             },

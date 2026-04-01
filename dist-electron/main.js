@@ -52,6 +52,12 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let autoSyncTimer = null;
+// Track files recently written by the app so fs.watch can ignore them
+const recentInternalWrites = new Set();
+function markInternalWrite(filename) {
+    recentInternalWrites.add(filename);
+    setTimeout(() => recentInternalWrites.delete(filename), 1500);
+}
 const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 // ── Push state tracking ───────────────────────────────────────────────────────
 // Tracks filenames whose debounced push is still pending or in-flight.
@@ -419,6 +425,7 @@ electron_1.ipcMain.handle('fs:read-note', (_event, filePath) => {
 electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
     try {
         fs_1.default.writeFileSync(filePath, content, 'utf-8');
+        markInternalWrite(path_1.default.basename(filePath));
         // Broadcast to all windows
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             // Send the filePath and the sender's webContents ID
@@ -439,6 +446,7 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
 });
 electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
     try {
+        markInternalWrite(path_1.default.basename(filePath));
         fs_1.default.unlinkSync(filePath);
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             win.webContents.send('notes-updated');
@@ -452,6 +460,8 @@ electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
 });
 electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
     try {
+        markInternalWrite(path_1.default.basename(oldPath));
+        markInternalWrite(path_1.default.basename(newPath));
         fs_1.default.renameSync(oldPath, newPath);
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             win.webContents.send('notes-updated');
@@ -726,6 +736,14 @@ electron_1.ipcMain.handle('settings:set-startup-stickies', (_event, stickies) =>
     settings.startupStickies = stickies;
     writeSettings(settings);
 });
+electron_1.ipcMain.handle('settings:get-ui-state', () => {
+    return (readSettings().uiState ?? {});
+});
+electron_1.ipcMain.handle('settings:set-ui-state', (_event, patch) => {
+    const settings = readSettings();
+    settings.uiState = { ...(settings.uiState ?? {}), ...patch };
+    writeSettings(settings);
+});
 electron_1.ipcMain.handle('groups:get', () => {
     const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
     try {
@@ -836,6 +854,17 @@ electron_1.app.whenReady().then(() => {
     }
     createTray();
     registerGlobalShortcut();
+    // Watch for external file changes (CLI, sync from another device, etc.)
+    fs_1.default.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
+        if (!filename?.endsWith('.md'))
+            return;
+        if (recentInternalWrites.has(filename))
+            return;
+        const filePath = path_1.default.join(NOTES_DIR, filename);
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('notes-updated', filePath, null);
+        });
+    });
     electron_1.app.on('activate', () => {
         showWindow();
     });

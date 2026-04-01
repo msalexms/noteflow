@@ -769,6 +769,16 @@ ipcMain.handle('settings:set-startup-stickies', (_event, stickies: Array<{ noteI
   writeSettings(settings)
 })
 
+ipcMain.handle('settings:get-ui-state', () => {
+  return (readSettings().uiState ?? {}) as { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }
+})
+
+ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }) => {
+  const settings = readSettings()
+  settings.uiState = { ...(settings.uiState as object ?? {}), ...patch }
+  writeSettings(settings)
+})
+
 ipcMain.handle('groups:get', () => {
   const groupsPath = path.join(NOTES_DIR, 'groups.json')
   try {

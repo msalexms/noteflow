@@ -18,8 +18,12 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
   collapsedGroupIds: new Set(),
 
   loadGroups: async () => {
-    const raw = await window.noteflow.getGroups()
-    set({ groups: raw as NoteGroup[] })
+    const [raw, uiState] = await Promise.all([
+      window.noteflow.getGroups(),
+      window.noteflow.getUiState(),
+    ])
+    const collapsed = new Set<string>(uiState.collapsedGroupIds ?? [])
+    set({ groups: raw as NoteGroup[], collapsedGroupIds: collapsed })
   },
 
   createGroup: async (name, color) => {
@@ -54,6 +58,7 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
       const next = new Set(s.collapsedGroupIds)
       if (next.has(id)) next.delete(id)
       else next.add(id)
+      window.noteflow.setUiState({ collapsedGroupIds: [...next] })
       return { collapsedGroupIds: next }
     })
   },
