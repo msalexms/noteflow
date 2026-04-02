@@ -104,6 +104,10 @@ const api = {
     return () => ipcRenderer.removeListener('sync:push-state', wrapper)
   },
 
+  // Alarms
+  scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) =>
+    ipcRenderer.send('alarms:schedule', alarms),
+
   // Events from main → renderer
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)

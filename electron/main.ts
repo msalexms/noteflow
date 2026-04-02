@@ -11,6 +11,7 @@ import {
   net,
   screen,
   powerMonitor,
+  Notification,
 } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -50,6 +51,58 @@ function notifyPushState(): void {
   const state: 'pushing' | 'idle' = pendingPushFiles.size > 0 ? 'pushing' : 'idle'
   BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync:push-state', state))
 }
+
+// ── Alarm engine ─────────────────────────────────────────────────────────────
+
+interface AlarmEntry {
+  noteTitle: string
+  taskText:  string
+  alarmAt:   string  // ISO timestamp 'YYYY-MM-DDTHH:MM:00'
+}
+
+const registeredAlarms = new Map<string, AlarmEntry>()
+const firedAlarms      = new Set<string>()
+
+function alarmKey(e: AlarmEntry): string {
+  return `${e.alarmAt}|${e.noteTitle}|${e.taskText}`
+}
+
+function checkAlarms(): void {
+  const now = new Date()
+  for (const [key, entry] of registeredAlarms) {
+    if (firedAlarms.has(key)) continue
+    if (now >= new Date(entry.alarmAt)) {
+      firedAlarms.add(key)
+      try {
+        if (Notification.isSupported()) {
+          new Notification({
+            title: `📅 ${entry.noteTitle}`,
+            body:  entry.taskText,
+            silent: false,
+          }).show()
+        }
+      } catch (err) {
+        console.error('[Alarms] Notification failed:', err)
+      }
+    }
+  }
+}
+
+let alarmTimer: ReturnType<typeof setInterval> | null = null
+
+function startAlarmEngine(): void {
+  if (alarmTimer) return
+  alarmTimer = setInterval(checkAlarms, 60_000)
+}
+
+ipcMain.on('alarms:schedule', (_event, incoming: AlarmEntry[]) => {
+  registeredAlarms.clear()
+  for (const e of incoming) {
+    registeredAlarms.set(alarmKey(e), e)
+  }
+  // Immediately fire any alarms that are already due (including missed ones)
+  checkAlarms()
+})
 
 function startAutoSync(): void {
   if (autoSyncTimer) return
@@ -891,6 +944,7 @@ app.whenReady().then(() => {
 
   createTray()
   registerGlobalShortcut()
+  startAlarmEngine()
 
   // Watch for external file changes (CLI, sync from another device, etc.)
   fs.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {

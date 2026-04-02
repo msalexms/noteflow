@@ -13,7 +13,7 @@ import BulletList from '@tiptap/extension-bullet-list'
 import OrderedList from '@tiptap/extension-ordered-list'
 import ListItem from '@tiptap/extension-list-item'
 import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
+import { DeadlineTaskItem } from './DeadlineTaskItem'
 import Link from '@tiptap/extension-link'
 import { ResizableImage } from './ResizableImage'
 import HardBreak from '@tiptap/extension-hard-break'
@@ -75,7 +75,7 @@ export function Editor({
       OrderedList,
       ListItem,
       TaskList,
-      TaskItem.configure({ nested: true }),
+      DeadlineTaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false }),
       ResizableImage.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
@@ -368,8 +368,12 @@ function listElToMd(listEl: Element, depth: number): string {
     }
 
     if (isTaskItem || isTaskList) {
-      const checked = li.getAttribute('data-checked') === 'true'
-      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}\n`
+      const checked   = li.getAttribute('data-checked') === 'true'
+      const due       = li.getAttribute('data-due')
+      const alarm     = li.getAttribute('data-alarm')
+      const dueAnn    = due   ? ` 📅${due}`   : ''
+      const alarmAnn  = alarm ? ` ⏰${alarm}` : ''
+      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}${dueAnn}${alarmAnn}\n`
     } else if (isOl) {
       result += `${prefix}${olIndex++}. ${text}\n`
     } else {
@@ -412,7 +416,20 @@ interface MdListItem {
   type: 'ul' | 'ol' | 'task'
   checked: boolean
   text: string
+  due: string | null
+  alarm: string | null
   children: MdListItem[]
+}
+
+function extractDeadlineAnnotations(raw: string): { text: string; due: string | null; alarm: string | null } {
+  let text = raw
+  let due: string | null = null
+  let alarm: string | null = null
+  const dueMatch = text.match(/📅(\d{4}-\d{2}-\d{2})/)
+  if (dueMatch) { due = dueMatch[1]; text = text.replace(dueMatch[0], '').trim() }
+  const alarmMatch = text.match(/⏰(\d{2}:\d{2})/)
+  if (alarmMatch) { alarm = alarmMatch[1]; text = text.replace(alarmMatch[0], '').trim() }
+  return { text, due, alarm }
 }
 
 function parseMdListItems(lines: string[]): MdListItem[] {
@@ -431,11 +448,12 @@ function parseMdListItems(lines: string[]): MdListItem[] {
 
     let item: MdListItem
     if (taskMatch) {
-      item = { type: 'task', checked: taskMatch[1] === 'x', text: taskMatch[2], children: [] }
+      const { text: cleanText, due, alarm } = extractDeadlineAnnotations(taskMatch[2])
+      item = { type: 'task', checked: taskMatch[1] === 'x', text: cleanText, due, alarm, children: [] }
     } else if (olMatch) {
-      item = { type: 'ol', checked: false, text: olMatch[2], children: [] }
+      item = { type: 'ol', checked: false, text: olMatch[2], due: null, alarm: null, children: [] }
     } else if (ulMatch) {
-      item = { type: 'ul', checked: false, text: ulMatch[1], children: [] }
+      item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, children: [] }
     } else {
       continue
     }
@@ -466,7 +484,9 @@ function renderMdListItems(items: MdListItem[]): string {
   const innerHtml = items.map(item => {
     const childHtml = item.children.length > 0 ? renderMdListItems(item.children) : ''
     if (item.type === 'task') {
-      return `<li data-checked="${item.checked}" data-type="taskItem"><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
+      const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
+      const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
+      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
     }
     return `<li><p>${inlineToHtml(item.text)}</p>${childHtml}</li>`
   }).join('')

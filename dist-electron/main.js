@@ -68,6 +68,47 @@ function notifyPushState() {
     const state = pendingPushFiles.size > 0 ? 'pushing' : 'idle';
     electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync:push-state', state));
 }
+const registeredAlarms = new Map();
+const firedAlarms = new Set();
+function alarmKey(e) {
+    return `${e.alarmAt}|${e.noteTitle}|${e.taskText}`;
+}
+function checkAlarms() {
+    const now = new Date();
+    for (const [key, entry] of registeredAlarms) {
+        if (firedAlarms.has(key))
+            continue;
+        if (now >= new Date(entry.alarmAt)) {
+            firedAlarms.add(key);
+            try {
+                if (electron_1.Notification.isSupported()) {
+                    new electron_1.Notification({
+                        title: `📅 ${entry.noteTitle}`,
+                        body: entry.taskText,
+                        silent: false,
+                    }).show();
+                }
+            }
+            catch (err) {
+                console.error('[Alarms] Notification failed:', err);
+            }
+        }
+    }
+}
+let alarmTimer = null;
+function startAlarmEngine() {
+    if (alarmTimer)
+        return;
+    alarmTimer = setInterval(checkAlarms, 60000);
+}
+electron_1.ipcMain.on('alarms:schedule', (_event, incoming) => {
+    registeredAlarms.clear();
+    for (const e of incoming) {
+        registeredAlarms.set(alarmKey(e), e);
+    }
+    // Immediately fire any alarms that are already due (including missed ones)
+    checkAlarms();
+});
 function startAutoSync() {
     if (autoSyncTimer)
         return;
@@ -854,6 +895,7 @@ electron_1.app.whenReady().then(() => {
     }
     createTray();
     registerGlobalShortcut();
+    startAlarmEngine();
     // Watch for external file changes (CLI, sync from another device, etc.)
     fs_1.default.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
         if (!filename?.endsWith('.md'))

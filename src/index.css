@@ -169,20 +169,27 @@ button {
   padding-left: 0;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] > li {
+/* TipTap 2.x wraps each NodeView in a div.node-taskItem — make it transparent */
+.prose-editor .ProseMirror ul[data-type="taskList"] > .node-taskItem {
+  display: contents;
+}
+
+/* Use descendant selector (no >) so it works with the .node-taskItem wrapper */
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.15rem 0;
+  list-style: none;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] > li > label {
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > label {
   flex-shrink: 0;
   margin-top: 2px;
   user-select: none;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] > li > div {
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > div {
   flex: 1;
   min-width: 0;
 }
@@ -214,9 +221,165 @@ button {
   font-weight: bold;
 }
 
-.prose-editor .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper][data-checked="true"] > div {
   color: rgb(var(--text-muted));
   text-decoration: line-through;
+}
+
+/* ── Task deadlines ─────────────────────────────────────────────────────────── */
+
+/* The NodeView renders label + task-item-body side by side inside the <li> */
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > div.task-item-body {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The task-checkbox-label replaces the default <label> emitted by the NodeView */
+.prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] > label.task-checkbox-label {
+  flex-shrink: 0;
+  margin-top: 2px;
+  user-select: none;
+}
+
+/* Calendar icon trigger — hidden by default, visible on group hover or when a date is set */
+.task-deadline-trigger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  line-height: 1;
+  align-self: center;
+}
+.group:hover .task-deadline-trigger,
+.task-deadline-trigger.has-due {
+  opacity: 1;
+}
+
+/* Calendar icon color */
+.task-deadline-icon {
+  color: rgb(var(--text-muted));
+  opacity: 0.55;
+}
+
+/* Date badge pill */
+.task-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 99px;
+  white-space: nowrap;
+  line-height: 1.6;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+.task-badge--future {
+  background: rgb(var(--accent-2) / 0.12);
+  color: rgb(var(--accent-2));
+  border: 1px solid rgb(var(--accent-2) / 0.28);
+}
+.task-badge--today {
+  background: rgb(var(--accent-3) / 0.14);
+  color: rgb(var(--accent-3));
+  border: 1px solid rgb(var(--accent-3) / 0.32);
+}
+.task-badge--overdue {
+  background: rgb(var(--red) / 0.11);
+  color: rgb(var(--red));
+  border: 1px solid rgb(var(--red) / 0.28);
+}
+
+/* Popover — rendered via React portal, positioned with fixed */
+.task-deadline-popover {
+  position: fixed;
+  z-index: 9999;
+  min-width: 216px;
+  background: rgb(var(--bg-2));
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-deadline-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-deadline-popover-row > label {
+  font-size: 0.7rem;
+  color: rgb(var(--text-muted));
+  width: 36px;
+  flex-shrink: 0;
+}
+
+.task-deadline-popover-row input[type='date'],
+.task-deadline-popover-row input[type='time'] {
+  flex: 1;
+  background: rgb(var(--bg-0));
+  border: 1px solid rgb(var(--border));
+  border-radius: 3px;
+  color: rgb(var(--text));
+  font-size: 0.75rem;
+  padding: 3px 6px;
+  outline: none;
+  /* Forces the native date/time picker popup to use dark colors in Chromium/Electron */
+  color-scheme: dark;
+}
+
+.task-deadline-popover-row input:disabled {
+  opacity: 0.32;
+}
+
+.task-deadline-popover-row input[type='date']:focus,
+.task-deadline-popover-row input[type='time']:focus {
+  border-color: rgb(var(--accent-2) / 0.5);
+}
+
+.task-deadline-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.task-deadline-btn-clear {
+  font-size: 0.7rem;
+  color: rgb(var(--text-muted));
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid rgb(var(--border));
+  cursor: pointer;
+  transition: color 0.1s ease, border-color 0.1s ease;
+}
+.task-deadline-btn-clear:hover {
+  color: rgb(var(--red));
+  border-color: rgb(var(--red) / 0.45);
+}
+
+.task-deadline-btn-done {
+  font-size: 0.7rem;
+  color: rgb(var(--accent-2));
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgb(var(--accent-2) / 0.1);
+  border: 1px solid rgb(var(--accent-2) / 0.3);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.task-deadline-btn-done:hover {
+  background: rgb(var(--accent-2) / 0.2);
 }
 
 /* Selection */

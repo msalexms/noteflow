@@ -130,6 +130,7 @@ declare global {
       pullNotes: () => Promise<{ pulled: number; errors: string[] }>
       onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
+      scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
     }
   }
 }

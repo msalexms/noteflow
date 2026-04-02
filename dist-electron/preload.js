@@ -60,6 +60,8 @@ const api = {
         electron_1.ipcRenderer.on('sync:push-state', wrapper);
         return () => electron_1.ipcRenderer.removeListener('sync:push-state', wrapper);
     },
+    // Alarms
+    scheduleAlarms: (alarms) => electron_1.ipcRenderer.send('alarms:schedule', alarms),
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

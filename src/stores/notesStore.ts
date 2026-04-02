@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import type { Note, NoteSection } from '../types'
 import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags, isDefaultNoteTitle } from '../lib/noteUtils'
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
+import { collectAlarms } from '../lib/alarmUtils'
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 function normalize(s: string): string {
@@ -101,6 +102,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         activeNoteId,
         pendingInitialSectionId: uiState.activeSectionId ?? null,
       })
+
+      // Register alarms with main process after notes are loaded
+      window.noteflow.scheduleAlarms(collectAlarms(notes))
     } catch (err) {
       console.error('Failed to load notes:', err)
       set({ isLoading: false })
@@ -190,6 +194,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         updated.raw = raw
         await window.noteflow.writeNote(note.filePath, raw)
         set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+        window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
         return
       }
       // Non-section patches (pinned, title) always allowed for encrypted notes
@@ -220,6 +225,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
     await window.noteflow.writeNote(note.filePath, raw)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
+    window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
   },
 
   deleteNote: async (id) => {
