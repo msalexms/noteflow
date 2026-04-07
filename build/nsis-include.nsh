@@ -1,4 +1,5 @@
 ; NoteFlow NSIS customization — adds/removes CLI from user PATH
+!include "WordFunc.nsh"
 
 !macro customInstall
   ; Add resources\cli to user PATH so 'noteflow' works in any terminal

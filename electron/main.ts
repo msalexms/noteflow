@@ -943,13 +943,35 @@ app.whenReady().then(() => {
   startAlarmEngine()
 
   // Watch for external file changes (CLI, sync from another device, etc.)
+  // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),
+  // and may fire before the OS has flushed the file — a 150 ms delay lets the write settle.
+  // If filename is null (Linux inotify edge case), fall back to a full reload.
+  const pendingWatchDebounce = new Map<string, ReturnType<typeof setTimeout>>()
+
   fs.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
-    if (!filename?.endsWith('.md')) return
-    if (recentInternalWrites.has(filename)) return
-    const filePath = path.join(NOTES_DIR, filename)
-    BrowserWindow.getAllWindows().forEach(win => {
-      win.webContents.send('notes-updated', filePath, null)
-    })
+    if (filename && !filename.endsWith('.md')) return
+    if (filename && recentInternalWrites.has(filename)) return
+
+    const key = filename ?? '__all__'
+    const existing = pendingWatchDebounce.get(key)
+    if (existing) clearTimeout(existing)
+
+    pendingWatchDebounce.set(key, setTimeout(() => {
+      pendingWatchDebounce.delete(key)
+
+      if (!filename) {
+        // Filename unavailable — full reload covers all cases
+        BrowserWindow.getAllWindows().forEach(win => {
+          win.webContents.send('notes-updated')
+        })
+        return
+      }
+
+      const filePath = path.join(NOTES_DIR, filename)
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('notes-updated', filePath, null)
+      })
+    }, 150))
   })
 
   app.on('activate', () => {

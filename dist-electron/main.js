@@ -893,15 +893,33 @@ electron_1.app.whenReady().then(() => {
     registerGlobalShortcut();
     startAlarmEngine();
     // Watch for external file changes (CLI, sync from another device, etc.)
+    // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),
+    // and may fire before the OS has flushed the file — a 150 ms delay lets the write settle.
+    // If filename is null (Linux inotify edge case), fall back to a full reload.
+    const pendingWatchDebounce = new Map();
     fs_1.default.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
-        if (!filename?.endsWith('.md'))
+        if (filename && !filename.endsWith('.md'))
             return;
-        if (recentInternalWrites.has(filename))
+        if (filename && recentInternalWrites.has(filename))
             return;
-        const filePath = path_1.default.join(NOTES_DIR, filename);
-        electron_1.BrowserWindow.getAllWindows().forEach(win => {
-            win.webContents.send('notes-updated', filePath, null);
-        });
+        const key = filename ?? '__all__';
+        const existing = pendingWatchDebounce.get(key);
+        if (existing)
+            clearTimeout(existing);
+        pendingWatchDebounce.set(key, setTimeout(() => {
+            pendingWatchDebounce.delete(key);
+            if (!filename) {
+                // Filename unavailable — full reload covers all cases
+                electron_1.BrowserWindow.getAllWindows().forEach(win => {
+                    win.webContents.send('notes-updated');
+                });
+                return;
+            }
+            const filePath = path_1.default.join(NOTES_DIR, filename);
+            electron_1.BrowserWindow.getAllWindows().forEach(win => {
+                win.webContents.send('notes-updated', filePath, null);
+            });
+        }, 150));
     });
     electron_1.app.on('activate', () => {
         showWindow();
