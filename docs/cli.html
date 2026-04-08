@@ -157,7 +157,7 @@
               <span>bash</span>
               <button class="docs__copy-btn" type="button" aria-label="Copy">copy</button>
             </div>
-            <pre><code>sudo apt install ./noteflow_1.4.2_amd64.deb</code></pre>
+            <pre><code>sudo apt install ./noteflow_1.5.0_amd64.deb</code></pre>
           </div>
           <p class="docs-hero__tab-note">Installing the <code>.deb</code> from Releases automatically symlinks the CLI to <code>/usr/local/bin/noteflow</code>. No extra steps.</p>
         </div>
@@ -167,7 +167,7 @@
               <span>PowerShell</span>
               <button class="docs__copy-btn" type="button" aria-label="Copy">copy</button>
             </div>
-            <pre><code>.\NoteFlow-1.4.2-Setup.exe</code></pre>
+            <pre><code>.\NoteFlow-1.5.0-Setup.exe</code></pre>
           </div>
           <p class="docs-hero__tab-note">The Windows installer adds the CLI directory to your user <code>PATH</code>. Open a new terminal and run <code>noteflow help</code>.</p>
         </div>
@@ -184,6 +184,7 @@
         <p class="docs__toc-label">// contents</p>
         <ul>
           <li><a href="#installation" class="docs__toc-link">Installation</a></li>
+          <li><a href="#ai-integration" class="docs__toc-link">AI agents</a></li>
           <li><a href="#notes-directory" class="docs__toc-link">Notes directory</a></li>
           <li><a href="#note-format" class="docs__toc-link">Note format</a></li>
           <li><a href="#commands" class="docs__toc-link">Commands</a>
@@ -203,7 +204,6 @@
           <li><a href="#github-sync" class="docs__toc-link">GitHub sync</a></li>
           <li><a href="#self-update" class="docs__toc-link">self-update</a></li>
           <li><a href="#flags" class="docs__toc-link">Global flags</a></li>
-          <li><a href="#ai-integration" class="docs__toc-link">AI / scripts</a></li>
           <li><a href="#troubleshooting" class="docs__toc-link">Troubleshooting</a></li>
         </ul>
       </aside>
@@ -229,6 +229,43 @@
 
           <div class="docs__callout">
             <strong>Requirement:</strong> Node.js ≥ 18. Verify with <code>node --version</code>. The CLI does not bundle a Node runtime; on headless systems, install it with <code>sudo apt install nodejs</code>.
+          </div>
+        </section>
+
+        <section id="ai-integration">
+          <h2>Integration with AI agents</h2>
+
+          <h3>AI Agent Skill</h3>
+          <p>Install the NoteFlow skill directly into your AI agent (Claude Code, Cursor, etc.) with a single command:</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>npx skills add yagoid/noteflow/cli</code></pre>
+          </div>
+          <div class="docs__callout">
+            Once installed, your agent can read, create, and update notes using natural language — no manual CLI commands needed. The skill definition (<code>cli/SKILL.md</code>) is also available in the repository for manual installation.
+          </div>
+
+          <h3>Typical agent flow</h3>
+          <p>Every read command supports <code>--json</code> for machine-readable output. stdout carries data, stderr carries errors, exit code is <code>0</code> on success and <code>1</code> on failure — a standard Unix contract that plays well with shell pipelines, cron jobs, and LLM tool-use loops.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>typical agent flow</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code># 1. Survey what notes exist
+noteflow list --json
+
+# 2. Read a full note with all its sections
+noteflow get "title" --json
+
+# 3. Append information to a specific section
+noteflow add "new content" --title "title" --section "Section"
+
+# 4. Sync
+noteflow push</code></pre>
           </div>
         </section>
 
@@ -467,31 +504,6 @@ noteflow logout    # disconnect</code></pre>
               <tr><td><code>--archived</code></td><td><code>list</code></td><td>Include archived notes</td></tr>
             </tbody>
           </table>
-        </section>
-
-        <section id="ai-integration">
-          <h2>Integration with AI agents &amp; scripts</h2>
-          <p>Every read command supports <code>--json</code> for machine-readable output. stdout carries data, stderr carries errors, exit code is <code>0</code> on success and <code>1</code> on failure — a standard Unix contract that plays well with shell pipelines, cron jobs, and LLM tool-use loops.</p>
-          <div class="docs__cmd">
-            <div class="docs__cmd-header">
-              <span>typical agent flow</span>
-              <button class="docs__copy-btn" type="button">copy</button>
-            </div>
-            <pre><code># 1. Survey what notes exist
-noteflow list --json
-
-# 2. Read a full note with all its sections
-noteflow get "title" --json
-
-# 3. Append information to a specific section
-noteflow add "new content" --title "title" --section "Section"
-
-# 4. Sync
-noteflow push</code></pre>
-          </div>
-          <div class="docs__callout">
-            A Claude/Agent skill definition (<code>cli/SKILL.md</code>) ships in the repository — drop it into your agent's skills directory to let an LLM use the CLI as a tool.
-          </div>
         </section>
 
         <section id="troubleshooting">
