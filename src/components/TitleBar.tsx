@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
+import { Check, Cloud, CloudOff, Download, Keyboard, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
@@ -7,6 +7,7 @@ import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
 import { GitHubSyncModal } from './GitHubSyncModal'
 import { StartupSettingsModal } from './StartupSettingsModal'
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
@@ -23,6 +24,7 @@ export function TitleBar() {
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [startupModal, setStartupModal] = useState(false)
+  const [shortcutsModal, setShortcutsModal] = useState(false)
 
   const refreshSyncStatus = () => window.noteflow.getSyncStatus().then(setSyncStatus)
 
@@ -149,6 +151,12 @@ export function TitleBar() {
             {
               label: 'App',
               items: [
+                {
+                  id: 'shortcuts',
+                  label: 'Keyboard shortcuts...',
+                  indicator: <Keyboard size={10} className="text-text-muted/50" />,
+                  action: () => setShortcutsModal(true),
+                },
                 {
                   id: 'startup',
                   label: 'Startup settings...',
@@ -293,6 +301,9 @@ export function TitleBar() {
     )}
     {startupModal && (
       <StartupSettingsModal onClose={() => setStartupModal(false)} />
+    )}
+    {shortcutsModal && (
+      <KeyboardShortcutsModal onClose={() => setShortcutsModal(false)} />
     )}
     </>
   )

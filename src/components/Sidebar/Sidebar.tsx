@@ -89,6 +89,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [editingGroupName, setEditingGroupName] = useState('')
 
+  // ── New group inline input ─────────────────────────────────────────────────
+  const [newGroupInput, setNewGroupInput] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+
   // ── Confirm modal ──────────────────────────────────────────────────────────
   const [modal, setModal] = useState<{
     title: string
@@ -352,17 +356,48 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         })}
       </div>
 
-      {/* ── New note button ─────────────────────────────────────────────────── */}
-      <div className="px-3 py-2 border-b border-border">
-        <button
-          onClick={() => createNote()}
-          title="New note (Ctrl+N)"
-          className="w-full py-1.5 rounded text-xs font-mono transition-all
-                     bg-accent/10 text-accent border border-accent/20
-                     hover:bg-accent/20 hover:border-accent/40"
-        >
-          + New note
-        </button>
+      {/* ── New note / new group buttons ────────────────────────────────────── */}
+      <div className="px-3 py-2 border-b border-border space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => createNote()}
+            title="New note (Ctrl+N)"
+            className="flex-1 py-1.5 rounded text-xs font-mono transition-all
+                       bg-accent/10 text-accent border border-accent/20
+                       hover:bg-accent/20 hover:border-accent/40"
+          >
+            + New note
+          </button>
+          <button
+            onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
+            title="New group"
+            className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
+                       hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
+          >
+            <FolderPlus size={13} />
+          </button>
+        </div>
+        {newGroupInput && (
+          <input
+            autoFocus
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter' && newGroupName.trim()) {
+                await createGroup(newGroupName.trim(), '--accent')
+                setNewGroupInput(false)
+                setNewGroupName('')
+              }
+              if (e.key === 'Escape') {
+                setNewGroupInput(false)
+                setNewGroupName('')
+              }
+            }}
+            onBlur={() => { setNewGroupInput(false); setNewGroupName('') }}
+            placeholder="Group name…"
+            className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-accent/50 rounded outline-none text-text placeholder-text-muted/40 caret-accent"
+          />
+        )}
       </div>
 
       {/* ── Notes list ──────────────────────────────────────────────────────── */}
