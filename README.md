@@ -51,6 +51,14 @@ noteflow push
 
 Full reference → [`cli/SKILL.md`](cli/SKILL.md) or [cli.html](https://yagoid.github.io/noteflow/cli.html)
 
+### AI Agent Skill
+
+Install the NoteFlow skill in your AI agent (Claude Code, Cursor, etc.) to interact with your notes from any conversation:
+
+```bash
+npx skills add yagoid/noteflow/cli
+```
+
 ## Development
 
 ```bash
