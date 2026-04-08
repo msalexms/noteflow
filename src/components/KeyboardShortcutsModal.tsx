@@ -16,7 +16,6 @@ const SECTIONS: ShortcutSection[] = [
     shortcuts: [
       { keys: ['Ctrl', 'Shift', 'Space'], description: 'Show / hide app (global)' },
       { keys: ['Ctrl', 'N'], description: 'New note' },
-      { keys: ['Ctrl', 'P'], description: 'Command palette' },
       { keys: ['Ctrl', 'F'], description: 'Focus search' },
       { keys: ['Ctrl', '\''], description: 'Toggle sidebar' },
     ],
@@ -25,7 +24,7 @@ const SECTIONS: ShortcutSection[] = [
     title: 'Sections',
     shortcuts: [
       { keys: ['Ctrl', 'T'], description: 'New section' },
-      { keys: ['Ctrl', 'W'], description: 'Close section' },
+      { keys: ['Ctrl', 'W'], description: 'Delete section' },
       { keys: ['Delete'], description: 'Delete selected note (when not editing)' },
     ],
   },
@@ -38,14 +37,13 @@ const SECTIONS: ShortcutSection[] = [
       { keys: ['Ctrl', 'I'], description: 'Italic' },
       { keys: ['Ctrl', 'U'], description: 'Underline' },
       { keys: ['Ctrl', 'E'], description: 'Inline code' },
-      { keys: ['Ctrl', 'Shift', '`'], description: 'Code block' },
-      { keys: ['Ctrl', 'K'], description: 'Insert link' },
+      { keys: ['Ctrl', 'Shift', 'B'], description: 'Code block' },
     ],
   },
   {
     title: 'Font size',
     shortcuts: [
-      { keys: ['Ctrl', '='], description: 'Increase font size' },
+      { keys: ['Ctrl', '+'], description: 'Increase font size' },
       { keys: ['Ctrl', '-'], description: 'Decrease font size' },
       { keys: ['Ctrl', '0'], description: 'Reset font size' },
     ],

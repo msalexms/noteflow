@@ -30,10 +30,6 @@ export function App() {
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+P — command palette
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
-        e.preventDefault(); setCommandPaletteOpen(true); return
-      }
       // Ctrl+N — new note (always, even when editing)
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault(); createNote(); return

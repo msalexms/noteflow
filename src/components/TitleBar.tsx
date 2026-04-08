@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Check, Cloud, CloudOff, Download, Keyboard, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
+import { Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
@@ -154,7 +154,6 @@ export function TitleBar() {
                 {
                   id: 'shortcuts',
                   label: 'Keyboard shortcuts...',
-                  indicator: <Keyboard size={10} className="text-text-muted/50" />,
                   action: () => setShortcutsModal(true),
                 },
                 {
@@ -233,7 +232,7 @@ export function TitleBar() {
                         <button
                           onClick={() => changeFontSize(1)}
                           className="w-5 h-5 flex items-center justify-center rounded hover:bg-surface-3 text-text-muted hover:text-text transition-colors"
-                          title="Increase (Ctrl+=)"
+                          title="Increase (Ctrl++)"
                         >+</button>
                       </div>
                     </div>

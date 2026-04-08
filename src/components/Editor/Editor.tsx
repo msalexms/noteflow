@@ -134,8 +134,8 @@ export function Editor({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!editor) return
-      // Ctrl+Shift+` → code block
-      if (e.ctrlKey && e.shiftKey && e.key === '`') {
+      // Ctrl+Shift+B → code block
+      if (e.ctrlKey && e.shiftKey && e.key === 'B') {
         e.preventDefault()
         editor.chain().focus().toggleCodeBlock().run()
         return

@@ -109,7 +109,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       icon: <Code2 size={14} />,
       action: () => editor.chain().focus().toggleCodeBlock().run(),
       isActive: editor.isActive('codeBlock'),
-      title: 'Code block (Ctrl+Shift+`)',
+      title: 'Code block (Ctrl+Shift+B)',
     },
     'sep',
     {
@@ -138,7 +138,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
         else openLinkInput()
       },
       isActive: editor.isActive('link'),
-      title: 'Insert link (Ctrl+K)',
+      title: 'Insert link',
     },
     'sep',
     {
