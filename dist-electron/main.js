@@ -117,8 +117,8 @@ function startAutoSync() {
             return;
         try {
             const result = await githubSync.pullNotes(NOTES_DIR);
-            if (result.hadDeletions) {
-                // A note was removed remotely — need a full reload to update the sidebar
+            if (result.hadDeletions || result.hadMetadataChanges) {
+                // Metadata and deletions require a full reload so all stores stay in sync.
                 electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
             }
             else {
@@ -166,6 +166,35 @@ if (process.platform === 'linux') {
 if (!fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
+const GROUPS_FILE = path_1.default.join(NOTES_DIR, 'groups.json');
+const SECTION_COLORS_FILE = path_1.default.join(NOTES_DIR, 'section-colors.json');
+const SECTION_COLOR_VALUES = new Set([
+    '--accent',
+    '--accent-2',
+    '--red',
+    '--cyan',
+    '--purple',
+    '--text',
+    '--orange',
+    '--pink',
+]);
+function normalizeSectionColorKey(name) {
+    return name.trim().toLowerCase();
+}
+function sanitizeSectionColors(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        return {};
+    const next = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (typeof value !== 'string' || !SECTION_COLOR_VALUES.has(value))
+            continue;
+        const normalizedKey = normalizeSectionColorKey(key);
+        if (!normalizedKey)
+            continue;
+        next[normalizedKey] = value;
+    }
+    return next;
+}
 function createWindow(hidden = false) {
     const win = new electron_1.BrowserWindow({
         width: 1100,
@@ -203,8 +232,8 @@ function createWindow(hidden = false) {
         win.show();
         // Pull remote notes in background after window is visible
         if (githubSync.getSyncStatus().connected) {
-            githubSync.pullNotes(NOTES_DIR).then(({ pulled }) => {
-                if (pulled > 0) {
+            githubSync.pullNotes(NOTES_DIR).then(({ pulled, hadDeletions, hadMetadataChanges }) => {
+                if (pulled > 0 || hadDeletions || hadMetadataChanges) {
                     win.webContents.send('notes-updated');
                 }
             });
@@ -720,7 +749,7 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
 });
 electron_1.ipcMain.handle('sync:pull', async () => {
     const result = await githubSync.pullNotes(NOTES_DIR);
-    if (result.hadDeletions || result.pulled === 0) {
+    if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
         // Full reload: covers deletions AND the case where the file was already on disk
         // (written by auto-sync) but the UI missed the event — manual sync should always
         // bring the store in sync with disk.
@@ -829,25 +858,43 @@ electron_1.ipcMain.handle('settings:set-ui-state', (_event, patch) => {
     writeSettings(settings);
 });
 electron_1.ipcMain.handle('groups:get', () => {
-    const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
     try {
-        return JSON.parse(fs_1.default.readFileSync(groupsPath, 'utf-8'));
+        return JSON.parse(fs_1.default.readFileSync(GROUPS_FILE, 'utf-8'));
     }
     catch {
         return [];
     }
 });
 electron_1.ipcMain.handle('groups:set', (event, groups) => {
-    const groupsPath = path_1.default.join(NOTES_DIR, 'groups.json');
     const content = JSON.stringify(groups, null, 2);
-    fs_1.default.writeFileSync(groupsPath, content, 'utf-8');
+    fs_1.default.writeFileSync(GROUPS_FILE, content, 'utf-8');
     // Broadcast to other windows so their groups reload immediately
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
         if (win.webContents.id !== event.sender.id) {
             win.webContents.send('notes-updated');
         }
     });
-    githubSync.schedulePush(groupsPath, content);
+    githubSync.schedulePush(GROUPS_FILE, content);
+});
+electron_1.ipcMain.handle('section-colors:get', () => {
+    try {
+        const raw = JSON.parse(fs_1.default.readFileSync(SECTION_COLORS_FILE, 'utf-8'));
+        return sanitizeSectionColors(raw);
+    }
+    catch {
+        return {};
+    }
+});
+electron_1.ipcMain.handle('section-colors:set', (event, colors) => {
+    const sanitized = sanitizeSectionColors(colors);
+    const content = JSON.stringify(sanitized, null, 2);
+    fs_1.default.writeFileSync(SECTION_COLORS_FILE, content, 'utf-8');
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('notes-updated');
+        }
+    });
+    githubSync.schedulePush(SECTION_COLORS_FILE, content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {

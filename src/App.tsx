@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
+import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
@@ -17,6 +18,7 @@ export function App() {
 
   const { loadNotes, isLoading, createNote, setCommandPaletteOpen } = useNotesStore()
   const loadGroups = useGroupsStore((s) => s.loadGroups)
+  const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -25,7 +27,11 @@ export function App() {
   const dragStartW = useRef(SIDEBAR_DEFAULT)
 
   // ── Initial load ──────────────────────────────────────────────────────────
-  useEffect(() => { loadNotes(); loadGroups() }, [loadNotes, loadGroups])
+  useEffect(() => {
+    loadNotes()
+    loadGroups()
+    loadSectionTagColors()
+  }, [loadNotes, loadGroups, loadSectionTagColors])
 
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {
@@ -79,6 +85,7 @@ export function App() {
       } else {
         loadNotes()
         loadGroups()
+        loadSectionTagColors()
       }
     })
 
@@ -86,7 +93,7 @@ export function App() {
       unbindNew()
       unbindUpdate()
     }
-  }, [createNote, loadNotes, loadGroups])
+  }, [createNote, loadNotes, loadGroups, loadSectionTagColors])
 
   // ── Resize drag handlers ──────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {

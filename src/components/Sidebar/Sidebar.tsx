@@ -1,11 +1,12 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronRight } from 'lucide-react'
-import { format, isToday, isYesterday } from 'date-fns'
+import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
+import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
-import { getTagColor } from '../../lib/tagColors'
+import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { useSidebarGroups } from './useSidebarGroups'
 import type { GroupColor } from '../../types'
@@ -29,10 +30,25 @@ function normalize(s: string): string {
     .replace(/\p{Diacritic}/gu, '')
 }
 
-const GROUP_COLORS: GroupColor[] = [
-  '--accent', '--accent-2', '--red', '--cyan',
-  '--purple', '--text', '--orange', '--pink',
-]
+function toDayKey(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function toDayKeyFromIso(iso: string): string | null {
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return null
+  return toDayKey(parsed)
+}
+
+function dayKeyToDate(dayKey: string): Date {
+  const [y, m, d] = dayKey.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
 
 export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
@@ -56,6 +72,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const createNote = useNotesStore((s) => s.createNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
+
+  const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
+  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   const groups = useGroupsStore((s) => s.groups)
   const collapsedGroupIds = useGroupsStore((s) => s.collapsedGroupIds)
@@ -111,6 +131,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   // noteId to delete after a successful unlock (for delete-encrypted-note flow)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
+
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
     const close = () => {
@@ -132,25 +155,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return () => window.removeEventListener('noteflow:focus-search', handler)
   }, [])
 
-  // ── Filtered + sorted notes ────────────────────────────────────────────────
-  const notes = useMemo(() => {
+  const baseNotes = useMemo(() => {
     return rawNotes
       .filter((n) => showArchived || !n.archived)
-      .filter((n) => {
-        if (filterDate === 'all') return true
-        const updated = new Date(n.updated)
-        const now = new Date()
-        if (filterDate === 'today') return isToday(updated)
-        if (filterDate === 'week') {
-          const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7)
-          return updated >= weekAgo
-        }
-        if (filterDate === 'month') {
-          const monthAgo = new Date(now); monthAgo.setMonth(now.getMonth() - 1)
-          return updated >= monthAgo
-        }
-        return true
-      })
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
@@ -165,7 +172,63 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
         return new Date(b.updated).getTime() - new Date(a.updated).getTime()
       })
-  }, [rawNotes, showArchived, filterDate, filterTag, searchQuery])
+  }, [rawNotes, showArchived, filterTag, searchQuery])
+
+  const notes = useMemo(() => {
+    if (selectedDayKey) {
+      return baseNotes.filter((note) => {
+        const createdDay = toDayKeyFromIso(note.created)
+        const updatedDay = toDayKeyFromIso(note.updated)
+        return createdDay === selectedDayKey || updatedDay === selectedDayKey
+      })
+    }
+
+    return baseNotes.filter((n) => {
+      if (filterDate === 'all') return true
+      const updated = new Date(n.updated)
+      const now = new Date()
+      if (filterDate === 'today') return isToday(updated)
+      if (filterDate === 'week') {
+        const weekAgo = new Date(now)
+        weekAgo.setDate(now.getDate() - 7)
+        return updated >= weekAgo
+      }
+      if (filterDate === 'month') {
+        const monthAgo = new Date(now)
+        monthAgo.setMonth(now.getMonth() - 1)
+        return updated >= monthAgo
+      }
+      return true
+    })
+  }, [baseNotes, filterDate, selectedDayKey])
+
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(calendarMonth)
+    const monthEnd = endOfMonth(calendarMonth)
+    const rangeStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+    const rangeEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+    return eachDayOfInterval({ start: rangeStart, end: rangeEnd })
+  }, [calendarMonth])
+
+  const dayMarkers = useMemo(() => {
+    const markers = new Map<string, { created: number; updated: number }>()
+    for (const note of baseNotes) {
+      const createdKey = toDayKeyFromIso(note.created)
+      if (createdKey) {
+        const current = markers.get(createdKey) ?? { created: 0, updated: 0 }
+        current.created += 1
+        markers.set(createdKey, current)
+      }
+
+      const updatedKey = toDayKeyFromIso(note.updated)
+      if (updatedKey) {
+        const current = markers.get(updatedKey) ?? { created: 0, updated: 0 }
+        current.updated += 1
+        markers.set(updatedKey, current)
+      }
+    }
+    return markers
+  }, [baseNotes])
 
   const items = useSidebarGroups(notes, groups)
 
@@ -250,7 +313,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
                 }}
                 className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
-                style={getTagColor(section.name)}
+                style={getTagColor(section.name, sectionTagColors)}
               >
                 {section.name}
               </span>
@@ -336,24 +399,123 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
 
       {/* ── Date filter ────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 px-3 py-2 border-b border-border">
-        {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-          const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
-          const active = filterDate === opt
-          return (
-            <button
-              key={opt}
-              onClick={() => setFilterDate(opt)}
-              className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
-              style={active
-                ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
-                : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-              }
-            >
-              {labels[opt]}
-            </button>
-          )
-        })}
+      <div className="border-b border-border">
+        <div className="flex gap-1 px-3 py-2">
+          {(['all', 'today', 'week', 'month'] as const).map((opt) => {
+            const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+            const active = !selectedDayKey && filterDate === opt
+            return (
+              <button
+                key={opt}
+                onClick={() => {
+                  setFilterDate(opt)
+                  setSelectedDayKey(null)
+                }}
+                className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
+                style={active
+                  ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                  : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
+                }
+              >
+                {labels[opt]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="px-3 pb-2">
+          <div className="rounded border border-border bg-surface-2/30 p-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <button
+                onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
+                className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                title="Previous month"
+              >
+                <ChevronLeft size={12} />
+              </button>
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+                <CalendarDays size={10} />
+                <span>{format(calendarMonth, 'MMMM yyyy')}</span>
+              </div>
+              <button
+                onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
+                className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+                title="Next month"
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 mb-1">
+              {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
+                <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
+                  {label}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {calendarDays.map((day) => {
+                const dayKey = toDayKey(day)
+                const marker = dayMarkers.get(dayKey)
+                const isSelected = selectedDayKey === dayKey
+                const inMonth = isSameMonth(day, calendarMonth)
+                const today = isToday(day)
+                const hasActivity = Boolean(marker && (marker.created > 0 || marker.updated > 0))
+
+                return (
+                  <button
+                    key={dayKey}
+                    onClick={() => setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))}
+                    title={hasActivity
+                      ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
+                      : format(day, 'PPP')
+                    }
+                    className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
+                    style={isSelected
+                      ? {
+                          background: 'rgb(var(--accent) / 0.22)',
+                          border: '1px solid rgb(var(--accent) / 0.5)',
+                          color: 'rgb(var(--accent))',
+                        }
+                      : {
+                          background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
+                          border: today ? '1px solid rgb(var(--accent) / 0.35)' : '1px solid rgb(var(--border) / 0.4)',
+                          color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
+                        }
+                    }
+                  >
+                    <span>{format(day, 'd')}</span>
+                    <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
+                      {marker && marker.created > 0 && (
+                        <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
+                      )}
+                      {marker && marker.updated > 0 && (
+                        <span className="w-[4px] h-[4px] rounded-full bg-accent" />
+                      )}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="flex items-center justify-between mt-2 text-[9px] font-mono text-text-muted/70">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />Created</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" />Updated</span>
+              </div>
+              {selectedDayKey && (
+                <button
+                  onClick={() => setSelectedDayKey(null)}
+                  className="text-accent hover:text-text transition-colors"
+                  title="Clear day filter"
+                >
+                  {format(dayKeyToDate(selectedDayKey), 'MMM d')} · clear
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}
@@ -484,6 +646,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         const note = rawNotes.find(n => n.id === contextMenu.noteId)
         if (!note) return null
         const currentGroup = getNoteGroupDirect(note.id)
+        const currentSection = contextMenu.sectionId
+          ? note.sections.find((section) => section.id === contextMenu.sectionId) ?? null
+          : null
+        const currentSectionColor = currentSection
+          ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
+          : undefined
         return (
           <div
             className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 overflow-hidden animate-in fade-in zoom-in duration-100"
@@ -547,6 +715,46 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               <Copy size={12} />
               Duplicate note
             </button>
+
+            {currentSection && (
+              <>
+                <div className="h-px bg-border my-1" />
+                <div className="px-3 pt-1 text-[10px] font-mono text-text-muted uppercase tracking-wider">
+                  Section color
+                </div>
+                <div className="px-3 py-2">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {GROUP_COLORS.map((color) => (
+                      <button
+                        key={`section-color-${color}`}
+                        title={color.replace('--', '')}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void setSectionTagColor(currentSection.name, color)
+                          closeAllMenus()
+                        }}
+                        className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${currentSectionColor === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
+                        style={{ background: `rgb(var(${color}))` }}
+                      />
+                    ))}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void clearSectionTagColor(currentSection.name)
+                        closeAllMenus()
+                      }}
+                      className={`px-1.5 h-4 rounded text-[9px] font-mono border transition-colors ${
+                        currentSectionColor
+                          ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
+                          : 'text-accent border-accent/50 bg-accent/10'
+                      }`}
+                    >
+                      Auto
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* ── Group section ── */}
             <div className="h-px bg-border my-1" />

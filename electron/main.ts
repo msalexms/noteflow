@@ -111,8 +111,8 @@ function startAutoSync(): void {
     if (!githubSync.getSyncStatus().connected) return
     try {
       const result = await githubSync.pullNotes(NOTES_DIR)
-      if (result.hadDeletions) {
-        // A note was removed remotely — need a full reload to update the sidebar
+      if (result.hadDeletions || result.hadMetadataChanges) {
+        // Metadata and deletions require a full reload so all stores stay in sync.
         BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
       } else {
         // Broadcast only the files that actually changed — avoids full reload
@@ -165,6 +165,36 @@ if (!fs.existsSync(NOTES_DIR)) {
   fs.mkdirSync(NOTES_DIR, { recursive: true })
 }
 
+const GROUPS_FILE = path.join(NOTES_DIR, 'groups.json')
+const SECTION_COLORS_FILE = path.join(NOTES_DIR, 'section-colors.json')
+const SECTION_COLOR_VALUES = new Set([
+  '--accent',
+  '--accent-2',
+  '--red',
+  '--cyan',
+  '--purple',
+  '--text',
+  '--orange',
+  '--pink',
+])
+
+function normalizeSectionColorKey(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+function sanitizeSectionColors(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'string' || !SECTION_COLOR_VALUES.has(value)) continue
+    const normalizedKey = normalizeSectionColorKey(key)
+    if (!normalizedKey) continue
+    next[normalizedKey] = value
+  }
+  return next
+}
+
 function createWindow(hidden = false): BrowserWindow {
   const win = new BrowserWindow({
     width: 1100,
@@ -203,8 +233,8 @@ function createWindow(hidden = false): BrowserWindow {
     win.show()
     // Pull remote notes in background after window is visible
     if (githubSync.getSyncStatus().connected) {
-      githubSync.pullNotes(NOTES_DIR).then(({ pulled }) => {
-        if (pulled > 0) {
+      githubSync.pullNotes(NOTES_DIR).then(({ pulled, hadDeletions, hadMetadataChanges }) => {
+        if (pulled > 0 || hadDeletions || hadMetadataChanges) {
           win.webContents.send('notes-updated')
         }
       })
@@ -761,7 +791,7 @@ ipcMain.handle('sync:disconnect', () => {
 
 ipcMain.handle('sync:pull', async () => {
   const result = await githubSync.pullNotes(NOTES_DIR)
-  if (result.hadDeletions || result.pulled === 0) {
+  if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
     // Full reload: covers deletions AND the case where the file was already on disk
     // (written by auto-sync) but the UI missed the event — manual sync should always
     // bring the store in sync with disk.
@@ -875,23 +905,42 @@ ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string;
 })
 
 ipcMain.handle('groups:get', () => {
-  const groupsPath = path.join(NOTES_DIR, 'groups.json')
   try {
-    return JSON.parse(fs.readFileSync(groupsPath, 'utf-8'))
+    return JSON.parse(fs.readFileSync(GROUPS_FILE, 'utf-8'))
   } catch { return [] }
 })
 
 ipcMain.handle('groups:set', (event, groups: unknown[]) => {
-  const groupsPath = path.join(NOTES_DIR, 'groups.json')
   const content = JSON.stringify(groups, null, 2)
-  fs.writeFileSync(groupsPath, content, 'utf-8')
+  fs.writeFileSync(GROUPS_FILE, content, 'utf-8')
   // Broadcast to other windows so their groups reload immediately
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win.webContents.id !== event.sender.id) {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush(groupsPath, content)
+  githubSync.schedulePush(GROUPS_FILE, content)
+})
+
+ipcMain.handle('section-colors:get', () => {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SECTION_COLORS_FILE, 'utf-8'))
+    return sanitizeSectionColors(raw)
+  } catch {
+    return {}
+  }
+})
+
+ipcMain.handle('section-colors:set', (event, colors: unknown) => {
+  const sanitized = sanitizeSectionColors(colors)
+  const content = JSON.stringify(sanitized, null, 2)
+  fs.writeFileSync(SECTION_COLORS_FILE, content, 'utf-8')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
+  githubSync.schedulePush(SECTION_COLORS_FILE, content)
 })
 
 // Window controls
