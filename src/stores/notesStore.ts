@@ -120,7 +120,44 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   syncNote: async (filePath: string) => {
     try {
       const raw = await window.noteflow.readNote(filePath)
-      if (!raw) return
+      if (!raw) {
+        const targetFilename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase()
+        if (!targetFilename) return
+
+        set((s) => {
+          const removedIds = s.notes
+            .filter((n) => n.filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() === targetFilename)
+            .map((n) => n.id)
+
+          if (removedIds.length === 0) return {}
+
+          const removedSet = new Set(removedIds)
+          const remaining = s.notes.filter((n) => !removedSet.has(n.id))
+          const nextActiveId =
+            (s.activeNoteId && !removedSet.has(s.activeNoteId) ? s.activeNoteId : null) ??
+            remaining.find((n) => !n.archived)?.id ??
+            remaining[0]?.id ??
+            null
+
+          const nextOpen = s.openNoteIds
+            .filter((openId) => !removedSet.has(openId))
+            .filter((openId) => remaining.some((n) => n.id === openId))
+
+          if (nextActiveId && !nextOpen.includes(nextActiveId)) nextOpen.unshift(nextActiveId)
+
+          const nextSessionPasswords = Object.fromEntries(
+            Object.entries(s.sessionPasswords).filter(([noteId]) => !removedSet.has(noteId))
+          )
+
+          return {
+            notes: remaining,
+            activeNoteId: nextActiveId,
+            openNoteIds: nextOpen,
+            sessionPasswords: nextSessionPasswords,
+          }
+        })
+        return
+      }
       
       const incomingNote = parseNote(raw, filePath)
       const existingNote = get().notes.find(n => n.id === incomingNote.id)
@@ -308,6 +345,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       if (unique.length === 0) {
         const fallbackId =
           (s.activeNoteId && existing.has(s.activeNoteId) ? s.activeNoteId : null) ??
+          s.notes.find((n) => !n.archived)?.id ??
           s.notes[0]?.id ??
           null
         return fallbackId
@@ -332,7 +370,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     set((s) => {
       const nextOpen = s.openNoteIds.filter((openId) => openId !== id)
       if (nextOpen.length === 0) {
-        const fallbackId = s.notes.find((n) => n.id !== id)?.id ?? null
+        const fallbackId =
+          s.notes.find((n) => n.id !== id && !n.archived)?.id ??
+          s.notes.find((n) => n.id !== id)?.id ??
+          null
         return fallbackId
           ? { openNoteIds: [fallbackId], activeNoteId: fallbackId }
           : { openNoteIds: [], activeNoteId: null }

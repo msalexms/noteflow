@@ -178,6 +178,13 @@ const SECTION_COLOR_VALUES = new Set([
     '--orange',
     '--pink',
 ]);
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['https:']);
+const ALLOWED_UPDATE_HOSTS = new Set(['github.com']);
+const ALLOWED_UPDATE_REDIRECT_HOSTS = new Set([
+    'github.com',
+    'objects.githubusercontent.com',
+    'release-assets.githubusercontent.com',
+]);
 function normalizeSectionColorKey(name) {
     return name.trim().toLowerCase();
 }
@@ -194,6 +201,65 @@ function sanitizeSectionColors(raw) {
         next[normalizedKey] = value;
     }
     return next;
+}
+function ensureSafeNoteFilename(filePath) {
+    if (typeof filePath !== 'string')
+        throw new Error('Invalid note file path');
+    const filename = path_1.default.basename(filePath).trim();
+    if (!filename || filename === '.' || filename === '..')
+        throw new Error('Invalid note filename');
+    if (filename.includes('/') || filename.includes('\\'))
+        throw new Error('Invalid note filename');
+    if (!filename.toLowerCase().endsWith('.md'))
+        throw new Error('Only markdown note files are allowed');
+    return filename;
+}
+function toSafeNotePath(filePath) {
+    const filename = ensureSafeNoteFilename(filePath);
+    return path_1.default.join(NOTES_DIR, filename);
+}
+function ensureSafeImportFilename(filename) {
+    if (typeof filename !== 'string')
+        throw new Error('Invalid import filename');
+    const trimmed = filename.trim();
+    if (!trimmed)
+        throw new Error('Import filename is empty');
+    if (trimmed.length > 160)
+        throw new Error('Import filename is too long');
+    if (path_1.default.isAbsolute(trimmed))
+        throw new Error('Absolute import paths are not allowed');
+    if (trimmed.includes('/') || trimmed.includes('\\'))
+        throw new Error('Nested import paths are not allowed');
+    if (trimmed === '.' || trimmed === '..')
+        throw new Error('Invalid import filename');
+    if (!trimmed.toLowerCase().endsWith('.md'))
+        throw new Error('Only markdown notes can be imported');
+    return trimmed;
+}
+function parseHttpsUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol))
+            return null;
+        return parsed;
+    }
+    catch {
+        return null;
+    }
+}
+function isAllowedInitialUpdateUrl(url) {
+    if (!ALLOWED_UPDATE_HOSTS.has(url.hostname))
+        return false;
+    const pathname = url.pathname.toLowerCase();
+    if (!pathname.includes('/yagoid/noteflow/releases/'))
+        return false;
+    return pathname.endsWith('.exe') || pathname.endsWith('.deb');
+}
+function isAllowedRedirectUpdateUrl(url) {
+    if (!ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname))
+        return false;
+    const pathname = url.pathname.toLowerCase();
+    return pathname.endsWith('.exe') || pathname.endsWith('.deb');
 }
 function createWindow(hidden = false) {
     const win = new electron_1.BrowserWindow({
@@ -491,7 +557,8 @@ electron_1.ipcMain.handle('fs:list-notes', () => {
 });
 electron_1.ipcMain.handle('fs:read-note', (_event, filePath) => {
     try {
-        return fs_1.default.readFileSync(filePath, 'utf-8');
+        const safePath = toSafeNotePath(filePath);
+        return fs_1.default.readFileSync(safePath, 'utf-8');
     }
     catch {
         return null;
@@ -499,19 +566,20 @@ electron_1.ipcMain.handle('fs:read-note', (_event, filePath) => {
 });
 electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
     try {
-        fs_1.default.writeFileSync(filePath, content, 'utf-8');
-        markInternalWrite(path_1.default.basename(filePath));
+        const safePath = toSafeNotePath(filePath);
+        fs_1.default.writeFileSync(safePath, content, 'utf-8');
+        markInternalWrite(path_1.default.basename(safePath));
         // Broadcast to all windows
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             // Send the filePath and the sender's webContents ID
-            win.webContents.send('notes-updated', filePath, event.sender.id);
+            win.webContents.send('notes-updated', safePath, event.sender.id);
         });
         if (githubSync.getSyncStatus().connected) {
-            const filename = path_1.default.basename(filePath);
-            githubSync.schedulePush(filePath, content, () => { pendingPushFiles.add(filename); notifyPushState(); }, () => { pendingPushFiles.delete(filename); notifyPushState(); });
+            const filename = path_1.default.basename(safePath);
+            githubSync.schedulePush(safePath, content, () => { pendingPushFiles.add(filename); notifyPushState(); }, () => { pendingPushFiles.delete(filename); notifyPushState(); });
         }
         else {
-            githubSync.schedulePush(filePath, content);
+            githubSync.schedulePush(safePath, content);
         }
         return { ok: true };
     }
@@ -521,12 +589,13 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
 });
 electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
     try {
-        markInternalWrite(path_1.default.basename(filePath));
-        fs_1.default.unlinkSync(filePath);
+        const safePath = toSafeNotePath(filePath);
+        markInternalWrite(path_1.default.basename(safePath));
+        fs_1.default.unlinkSync(safePath);
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             win.webContents.send('notes-updated');
         });
-        githubSync.scheduleDelete(filePath);
+        githubSync.scheduleDelete(safePath);
         return { ok: true };
     }
     catch (err) {
@@ -535,9 +604,11 @@ electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
 });
 electron_1.ipcMain.handle('fs:rename-note', (_event, oldPath, newPath) => {
     try {
-        markInternalWrite(path_1.default.basename(oldPath));
-        markInternalWrite(path_1.default.basename(newPath));
-        fs_1.default.renameSync(oldPath, newPath);
+        const safeOldPath = toSafeNotePath(oldPath);
+        const safeNewPath = toSafeNotePath(newPath);
+        markInternalWrite(path_1.default.basename(safeOldPath));
+        markInternalWrite(path_1.default.basename(safeNewPath));
+        fs_1.default.renameSync(safeOldPath, safeNewPath);
         electron_1.BrowserWindow.getAllWindows().forEach((win) => {
             win.webContents.send('notes-updated');
         });
@@ -595,17 +666,32 @@ electron_1.ipcMain.handle('app:check-update', () => {
         req.setTimeout(8000, () => { req.destroy(); resolve({ hasUpdate: false }); });
     });
 });
-electron_1.ipcMain.handle('app:open-url', (_event, url) => {
-    electron_1.shell.openExternal(url);
+electron_1.ipcMain.handle('app:open-url', (_event, rawUrl) => {
+    const parsed = parseHttpsUrl(rawUrl);
+    if (!parsed) {
+        console.warn('[Security] Blocked external URL:', rawUrl);
+        return;
+    }
+    electron_1.shell.openExternal(parsed.toString()).catch((err) => {
+        console.error('Failed to open external URL:', err);
+    });
 });
 electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
-    const tmpDir = electron_1.app.getPath('temp');
-    const fileName = url.split('/').pop() || 'NoteFlow-update.exe';
-    const dest = path_1.default.join(tmpDir, fileName);
     try {
-        const response = await electron_1.net.fetch(url);
+        const initialUrl = parseHttpsUrl(url);
+        if (!initialUrl || !isAllowedInitialUpdateUrl(initialUrl)) {
+            throw new Error('Blocked update URL');
+        }
+        const response = await electron_1.net.fetch(initialUrl.toString());
         if (!response.ok)
             throw new Error(`HTTP ${response.status}`);
+        const finalUrl = parseHttpsUrl(response.url);
+        if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
+            throw new Error('Blocked redirected update URL');
+        }
+        const tmpDir = electron_1.app.getPath('temp');
+        const fileName = path_1.default.basename(finalUrl.pathname) || path_1.default.basename(initialUrl.pathname) || 'NoteFlow-update.exe';
+        const dest = path_1.default.join(tmpDir, fileName);
         const total = parseInt(response.headers.get('content-length') || '0');
         let downloaded = 0;
         const writer = fs_1.default.createWriteStream(dest);
@@ -712,9 +798,14 @@ electron_1.ipcMain.handle('notes:write-imported', async (_event, entries) => {
     const errors = [];
     for (const entry of entries) {
         try {
-            const dest = path_1.default.join(NOTES_DIR, entry.filename);
+            const safeFilename = ensureSafeImportFilename(entry.filename);
+            if (typeof entry.content !== 'string') {
+                throw new Error('Import content must be a string');
+            }
+            const dest = path_1.default.join(NOTES_DIR, safeFilename);
             fs_1.default.writeFileSync(dest, entry.content, 'utf-8');
-            written.push(entry.filename);
+            markInternalWrite(safeFilename);
+            written.push(safeFilename);
         }
         catch (err) {
             errors.push(`${entry.filename}: ${String(err)}`);

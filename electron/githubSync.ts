@@ -510,7 +510,22 @@ export async function pullNotes(notesDir: string): Promise<{
     return { pulled: 0, deleted: 0, errors: [], updatedFiles: [], hadDeletions: false, hadMetadataChanges: false }
   }
 
-  const token = decryptToken(s.encryptedToken)
+  let token: string
+  try {
+    token = decryptToken(s.encryptedToken)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`
+    syncError = userFacingError
+    return {
+      pulled: 0,
+      deleted: 0,
+      errors: [userFacingError],
+      updatedFiles: [],
+      hadDeletions: false,
+      hadMetadataChanges: false,
+    }
+  }
   let pulled = 0
   let deleted = 0
   const errors: string[] = []
@@ -531,9 +546,11 @@ export async function pullNotes(notesDir: string): Promise<{
           const localContent = fs.readFileSync(localPath, 'utf-8')
           const localUpdated = extractUpdatedTimestamp(localContent)
           const remoteUpdated = extractUpdatedTimestamp(remote.content)
+          const localUpdatedTs = parseUpdatedTimestamp(localUpdated)
+          const remoteUpdatedTs = parseUpdatedTimestamp(remoteUpdated)
 
           // Skip if local is newer or equal
-          if (localUpdated && remoteUpdated && remoteUpdated <= localUpdated) continue
+          if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs) continue
         }
 
         fs.writeFileSync(localPath, remote.content, 'utf-8')
@@ -563,8 +580,9 @@ export async function pullNotes(notesDir: string): Promise<{
         try {
           const localContent = fs.readFileSync(localPath, 'utf-8')
           const localUpdated = extractUpdatedTimestamp(localContent)
-          if (!localUpdated) continue // can't determine age — skip to be safe
-          if (new Date(localUpdated).getTime() > lastSyncTime) continue // created locally after last sync, not yet pushed
+          const localUpdatedTime = parseUpdatedTimestamp(localUpdated)
+          if (localUpdatedTime === null) continue // can't determine age — skip to be safe
+          if (localUpdatedTime > lastSyncTime) continue // created locally after last sync, not yet pushed
           fs.unlinkSync(localPath)
           deleted++
         } catch { /* ignore */ }
@@ -616,7 +634,15 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
   const s = syncSettings ?? loadSyncSettings()
   if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
 
-  const token = decryptToken(s.encryptedToken)
+  let token: string
+  try {
+    token = decryptToken(s.encryptedToken)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`
+    syncError = userFacingError
+    return { pushed: 0, errors: [userFacingError] }
+  }
   let pushed = 0
   const errors: string[] = []
 
@@ -703,6 +729,12 @@ export async function scheduleDelete(filePath: string): Promise<void> {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractUpdatedTimestamp(content: string): string | null {
-  const match = content.match(/^updated:\s*['"]?([^'">\n]+)['"]?\s*$/m)
+  const match = content.match(/^updated:\s*['"]?([^'"\n]+)['"]?\s*$/m)
   return match ? match[1].trim() : null
+}
+
+function parseUpdatedTimestamp(value: string | null): number | null {
+  if (!value) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
 }

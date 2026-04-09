@@ -178,6 +178,14 @@ const SECTION_COLOR_VALUES = new Set([
   '--pink',
 ])
 
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['https:'])
+const ALLOWED_UPDATE_HOSTS = new Set(['github.com'])
+const ALLOWED_UPDATE_REDIRECT_HOSTS = new Set([
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+])
+
 function normalizeSectionColorKey(name: string): string {
   return name.trim().toLowerCase()
 }
@@ -193,6 +201,55 @@ function sanitizeSectionColors(raw: unknown): Record<string, string> {
     next[normalizedKey] = value
   }
   return next
+}
+
+function ensureSafeNoteFilename(filePath: string): string {
+  if (typeof filePath !== 'string') throw new Error('Invalid note file path')
+  const filename = path.basename(filePath).trim()
+  if (!filename || filename === '.' || filename === '..') throw new Error('Invalid note filename')
+  if (filename.includes('/') || filename.includes('\\')) throw new Error('Invalid note filename')
+  if (!filename.toLowerCase().endsWith('.md')) throw new Error('Only markdown note files are allowed')
+  return filename
+}
+
+function toSafeNotePath(filePath: string): string {
+  const filename = ensureSafeNoteFilename(filePath)
+  return path.join(NOTES_DIR, filename)
+}
+
+function ensureSafeImportFilename(filename: string): string {
+  if (typeof filename !== 'string') throw new Error('Invalid import filename')
+  const trimmed = filename.trim()
+  if (!trimmed) throw new Error('Import filename is empty')
+  if (trimmed.length > 160) throw new Error('Import filename is too long')
+  if (path.isAbsolute(trimmed)) throw new Error('Absolute import paths are not allowed')
+  if (trimmed.includes('/') || trimmed.includes('\\')) throw new Error('Nested import paths are not allowed')
+  if (trimmed === '.' || trimmed === '..') throw new Error('Invalid import filename')
+  if (!trimmed.toLowerCase().endsWith('.md')) throw new Error('Only markdown notes can be imported')
+  return trimmed
+}
+
+function parseHttpsUrl(rawUrl: string): URL | null {
+  try {
+    const parsed = new URL(rawUrl)
+    if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function isAllowedInitialUpdateUrl(url: URL): boolean {
+  if (!ALLOWED_UPDATE_HOSTS.has(url.hostname)) return false
+  const pathname = url.pathname.toLowerCase()
+  if (!pathname.includes('/yagoid/noteflow/releases/')) return false
+  return pathname.endsWith('.exe') || pathname.endsWith('.deb')
+}
+
+function isAllowedRedirectUpdateUrl(url: URL): boolean {
+  if (!ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname)) return false
+  const pathname = url.pathname.toLowerCase()
+  return pathname.endsWith('.exe') || pathname.endsWith('.deb')
 }
 
 function createWindow(hidden = false): BrowserWindow {
@@ -508,7 +565,8 @@ ipcMain.handle('fs:list-notes', () => {
 
 ipcMain.handle('fs:read-note', (_event, filePath: string) => {
   try {
-    return fs.readFileSync(filePath, 'utf-8')
+    const safePath = toSafeNotePath(filePath)
+    return fs.readFileSync(safePath, 'utf-8')
   } catch {
     return null
   }
@@ -516,21 +574,22 @@ ipcMain.handle('fs:read-note', (_event, filePath: string) => {
 
 ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
   try {
-    fs.writeFileSync(filePath, content, 'utf-8')
-    markInternalWrite(path.basename(filePath))
+    const safePath = toSafeNotePath(filePath)
+    fs.writeFileSync(safePath, content, 'utf-8')
+    markInternalWrite(path.basename(safePath))
     // Broadcast to all windows
     BrowserWindow.getAllWindows().forEach((win) => {
       // Send the filePath and the sender's webContents ID
-      win.webContents.send('notes-updated', filePath, event.sender.id)
+      win.webContents.send('notes-updated', safePath, event.sender.id)
     })
     if (githubSync.getSyncStatus().connected) {
-      const filename = path.basename(filePath)
-      githubSync.schedulePush(filePath, content,
+      const filename = path.basename(safePath)
+      githubSync.schedulePush(safePath, content,
         () => { pendingPushFiles.add(filename); notifyPushState() },
         () => { pendingPushFiles.delete(filename); notifyPushState() }
       )
     } else {
-      githubSync.schedulePush(filePath, content)
+      githubSync.schedulePush(safePath, content)
     }
     return { ok: true }
   } catch (err: unknown) {
@@ -540,12 +599,13 @@ ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
 
 ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
   try {
-    markInternalWrite(path.basename(filePath))
-    fs.unlinkSync(filePath)
+    const safePath = toSafeNotePath(filePath)
+    markInternalWrite(path.basename(safePath))
+    fs.unlinkSync(safePath)
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
     })
-    githubSync.scheduleDelete(filePath)
+    githubSync.scheduleDelete(safePath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -554,9 +614,11 @@ ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
 
 ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
   try {
-    markInternalWrite(path.basename(oldPath))
-    markInternalWrite(path.basename(newPath))
-    fs.renameSync(oldPath, newPath)
+    const safeOldPath = toSafeNotePath(oldPath)
+    const safeNewPath = toSafeNotePath(newPath)
+    markInternalWrite(path.basename(safeOldPath))
+    markInternalWrite(path.basename(safeNewPath))
+    fs.renameSync(safeOldPath, safeNewPath)
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
     })
@@ -621,18 +683,35 @@ ipcMain.handle('app:check-update', () => {
   })
 })
 
-ipcMain.handle('app:open-url', (_event, url: string) => {
-  shell.openExternal(url)
+ipcMain.handle('app:open-url', (_event, rawUrl: string) => {
+  const parsed = parseHttpsUrl(rawUrl)
+  if (!parsed) {
+    console.warn('[Security] Blocked external URL:', rawUrl)
+    return
+  }
+  shell.openExternal(parsed.toString()).catch((err) => {
+    console.error('Failed to open external URL:', err)
+  })
 })
 
 ipcMain.handle('app:download-and-install', async (_event, url: string) => {
-  const tmpDir = app.getPath('temp')
-  const fileName = url.split('/').pop() || 'NoteFlow-update.exe'
-  const dest = path.join(tmpDir, fileName)
-
   try {
-    const response = await net.fetch(url)
+    const initialUrl = parseHttpsUrl(url)
+    if (!initialUrl || !isAllowedInitialUpdateUrl(initialUrl)) {
+      throw new Error('Blocked update URL')
+    }
+
+    const response = await net.fetch(initialUrl.toString())
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const finalUrl = parseHttpsUrl(response.url)
+    if (!finalUrl || !isAllowedRedirectUpdateUrl(finalUrl)) {
+      throw new Error('Blocked redirected update URL')
+    }
+
+    const tmpDir = app.getPath('temp')
+    const fileName = path.basename(finalUrl.pathname) || path.basename(initialUrl.pathname) || 'NoteFlow-update.exe'
+    const dest = path.join(tmpDir, fileName)
 
     const total = parseInt(response.headers.get('content-length') || '0')
     let downloaded = 0
@@ -747,9 +826,14 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ filename:
   const errors: string[] = []
   for (const entry of entries) {
     try {
-      const dest = path.join(NOTES_DIR, entry.filename)
+      const safeFilename = ensureSafeImportFilename(entry.filename)
+      if (typeof entry.content !== 'string') {
+        throw new Error('Import content must be a string')
+      }
+      const dest = path.join(NOTES_DIR, safeFilename)
       fs.writeFileSync(dest, entry.content, 'utf-8')
-      written.push(entry.filename)
+      markInternalWrite(safeFilename)
+      written.push(safeFilename)
     } catch (err) {
       errors.push(`${entry.filename}: ${String(err)}`)
     }
