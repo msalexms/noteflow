@@ -248,11 +248,29 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     setGroupNameInput(null)
   }
 
+  function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string) {
+    e.dataTransfer.setData('application/x-noteflow-note-id', noteId)
+    e.dataTransfer.setData('text/plain', noteId)
+    e.dataTransfer.effectAllowed = 'copyMove'
+    window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
+      detail: { active: true, noteId },
+    }))
+  }
+
+  function handleNoteDragEnd() {
+    window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
+      detail: { active: false },
+    }))
+  }
+
   function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null) {
     const isActive = activeNoteId === note.id
     return (
       <li key={note.id}>
         <button
+          draggable
+          onDragStart={(e) => handleNoteDragStart(e, note.id)}
+          onDragEnd={handleNoteDragEnd}
           onClick={(e) => {
             if (e.ctrlKey || e.metaKey) {
               openNoteInSplit(note.id)

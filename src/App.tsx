@@ -21,11 +21,15 @@ export function App() {
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
+  const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const loadGroups = useGroupsStore((s) => s.loadGroups)
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null)
+  const [editorDropActive, setEditorDropActive] = useState(false)
+  const [stickyDropActive, setStickyDropActive] = useState(false)
   const isDragging = useRef(false)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
@@ -130,6 +134,69 @@ export function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean; noteId?: string }>).detail
+      if (detail?.active) {
+        setDraggingNoteId(detail.noteId ?? null)
+      } else {
+        setDraggingNoteId(null)
+        setEditorDropActive(false)
+        setStickyDropActive(false)
+      }
+    }
+
+    window.addEventListener('noteflow:note-drag', handler)
+    return () => window.removeEventListener('noteflow:note-drag', handler)
+  }, [])
+
+  const extractDraggedNoteId = useCallback((e: React.DragEvent) => {
+    const noteId = e.dataTransfer.getData('application/x-noteflow-note-id') || e.dataTransfer.getData('text/plain') || draggingNoteId
+    if (!noteId) return null
+    return notes.some((n) => n.id === noteId) ? noteId : null
+  }, [notes, draggingNoteId])
+
+  const clearDropUi = useCallback(() => {
+    setDraggingNoteId(null)
+    setEditorDropActive(false)
+    setStickyDropActive(false)
+  }, [])
+
+  const handleEditorDragOver = useCallback((e: React.DragEvent<HTMLElement>) => {
+    const noteId = extractDraggedNoteId(e)
+    if (!noteId) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    if (!editorDropActive) setEditorDropActive(true)
+  }, [extractDraggedNoteId, editorDropActive])
+
+  const handleEditorDragLeave = useCallback((e: React.DragEvent<HTMLElement>) => {
+    const next = e.relatedTarget as Node | null
+    if (next && e.currentTarget.contains(next)) return
+    setEditorDropActive(false)
+  }, [])
+
+  const handleEditorDrop = useCallback((e: React.DragEvent<HTMLElement>) => {
+    const noteId = extractDraggedNoteId(e)
+    if (!noteId) return
+    e.preventDefault()
+    openNoteInSplit(noteId)
+    clearDropUi()
+  }, [extractDraggedNoteId, openNoteInSplit, clearDropUi])
+
+  const handleStickyDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const noteId = extractDraggedNoteId(e)
+    if (!noteId) return
+    e.preventDefault()
+    e.stopPropagation()
+    const note = notes.find((n) => n.id === noteId)
+    const firstSectionId = note?.sections[0]?.id
+    if (firstSectionId) {
+      window.noteflow.openSticky(noteId, firstSectionId)
+    }
+    clearDropUi()
+  }, [extractDraggedNoteId, notes, clearDropUi])
+
   const visibleOpenNoteIds = useMemo(() => {
     const existingIds = new Set(notes.map((note) => note.id))
     const validOpen = openNoteIds.filter((id) => existingIds.has(id))
@@ -178,7 +245,13 @@ export function App() {
         )}
 
         {/* ── Main editor ──────────────────────────────────────────── */}
-        <main className="flex-1 overflow-hidden" style={{ background: 'rgb(var(--bg-editor))' }}>
+        <main
+          className={`flex-1 overflow-hidden relative ${editorDropActive ? 'ring-1 ring-inset ring-accent/40' : ''}`}
+          style={{ background: 'rgb(var(--bg-editor))' }}
+          onDragOver={handleEditorDragOver}
+          onDragLeave={handleEditorDragLeave}
+          onDrop={handleEditorDrop}
+        >
           {isLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -210,6 +283,38 @@ export function App() {
                 </div>
               </div>
             )
+          )}
+
+          {draggingNoteId && (
+            <>
+              <div className="absolute top-3 left-3 z-30 pointer-events-none px-2 py-1 rounded border border-accent/30 bg-surface-1/90 text-[10px] font-mono text-text-muted">
+                Suelta en el editor para abrir lado a lado
+              </div>
+
+              <div
+                className={`absolute bottom-4 right-4 z-40 pointer-events-auto px-3 py-2 rounded border text-xs font-mono transition-colors ${
+                  stickyDropActive
+                    ? 'border-accent/60 bg-accent/15 text-accent'
+                    : 'border-border bg-surface-1/95 text-text-muted'
+                }`}
+                onDragOver={(e) => {
+                  const noteId = extractDraggedNoteId(e)
+                  if (!noteId) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  e.dataTransfer.dropEffect = 'copy'
+                  if (!stickyDropActive) setStickyDropActive(true)
+                }}
+                onDragLeave={(e) => {
+                  const next = e.relatedTarget as Node | null
+                  if (next && e.currentTarget.contains(next)) return
+                  setStickyDropActive(false)
+                }}
+                onDrop={handleStickyDrop}
+              >
+                Soltar para abrir en ventana aparte
+              </div>
+            </>
           )}
         </main>
       </div>
