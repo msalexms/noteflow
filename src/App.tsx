@@ -12,6 +12,9 @@ import { StickyApp } from './components/StickyApp'
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
 const SIDEBAR_DEFAULT = 256
+const PANE_MIN_WIDTH = 360
+const PANE_MAX_WIDTH = 1200
+const PANE_DEFAULT_WIDTH = 520
 
 export function App() {
   const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
@@ -32,8 +35,16 @@ export function App() {
   const [editorDropActive, setEditorDropActive] = useState(false)
   const [stickyDropActive, setStickyDropActive] = useState(false)
   const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null)
-  const [paneDropTargetId, setPaneDropTargetId] = useState<string | null>(null)
+  const [paneDropIndex, setPaneDropIndex] = useState<number | null>(null)
+  const [paneWidths, setPaneWidths] = useState<Record<string, number>>({})
+  const [showPaneBottomScrollbar, setShowPaneBottomScrollbar] = useState(false)
+  const [paneContentWidth, setPaneContentWidth] = useState(0)
   const isDragging = useRef(false)
+  const paneResizeRef = useRef<{ paneId: string; startX: number; startWidth: number } | null>(null)
+  const paneScrollRef = useRef<HTMLDivElement | null>(null)
+  const paneBottomScrollRef = useRef<HTMLDivElement | null>(null)
+  const syncingPaneScrollRef = useRef<'top' | 'bottom' | null>(null)
+  const paneContainerRef = useRef<HTMLDivElement | null>(null)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
 
@@ -161,6 +172,116 @@ export function App() {
     return []
   }, [notes, openNoteIds, activeNoteId])
 
+  useEffect(() => {
+    setPaneWidths((prev) => {
+      let changed = false
+      const next: Record<string, number> = { ...prev }
+
+      for (const id of visibleOpenNoteIds) {
+        if (typeof next[id] !== 'number') {
+          next[id] = PANE_DEFAULT_WIDTH
+          changed = true
+        }
+      }
+
+      for (const id of Object.keys(next)) {
+        if (!visibleOpenNoteIds.includes(id)) {
+          delete next[id]
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [visibleOpenNoteIds])
+
+  const refreshPaneOverflowState = useCallback(() => {
+    const mainScroller = paneScrollRef.current
+    if (!mainScroller) return
+
+    const scrollWidth = mainScroller.scrollWidth
+    const clientWidth = mainScroller.clientWidth
+    setPaneContentWidth(scrollWidth)
+    setShowPaneBottomScrollbar(scrollWidth > clientWidth + 1)
+
+    const bottomScroller = paneBottomScrollRef.current
+    if (bottomScroller && Math.abs(bottomScroller.scrollLeft - mainScroller.scrollLeft) > 1) {
+      bottomScroller.scrollLeft = mainScroller.scrollLeft
+    }
+  }, [])
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(refreshPaneOverflowState)
+    return () => window.cancelAnimationFrame(raf)
+  }, [refreshPaneOverflowState, visibleOpenNoteIds, paneWidths, sidebarVisible, sidebarWidth, isLoading])
+
+  useEffect(() => {
+    const onResize = () => refreshPaneOverflowState()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [refreshPaneOverflowState])
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const resizing = paneResizeRef.current
+      if (!resizing) return
+      const delta = e.clientX - resizing.startX
+      const nextWidth = Math.min(PANE_MAX_WIDTH, Math.max(PANE_MIN_WIDTH, resizing.startWidth + delta))
+      setPaneWidths((prev) => {
+        if (prev[resizing.paneId] === nextWidth) return prev
+        return { ...prev, [resizing.paneId]: nextWidth }
+      })
+    }
+
+    const onUp = () => {
+      if (!paneResizeRef.current) return
+      paneResizeRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.requestAnimationFrame(refreshPaneOverflowState)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [refreshPaneOverflowState])
+
+  const beginPaneResize = useCallback((e: React.MouseEvent<HTMLElement>, paneId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startWidth = paneWidths[paneId] ?? PANE_DEFAULT_WIDTH
+    paneResizeRef.current = { paneId, startX: e.clientX, startWidth }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [paneWidths])
+
+  const handlePaneMainScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (syncingPaneScrollRef.current === 'bottom') {
+      syncingPaneScrollRef.current = null
+      return
+    }
+    const nextScrollLeft = e.currentTarget.scrollLeft
+    const bottomScroller = paneBottomScrollRef.current
+    if (!bottomScroller) return
+    syncingPaneScrollRef.current = 'top'
+    bottomScroller.scrollLeft = nextScrollLeft
+  }, [])
+
+  const handlePaneBottomScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (syncingPaneScrollRef.current === 'top') {
+      syncingPaneScrollRef.current = null
+      return
+    }
+    const nextScrollLeft = e.currentTarget.scrollLeft
+    const mainScroller = paneScrollRef.current
+    if (!mainScroller) return
+    syncingPaneScrollRef.current = 'bottom'
+    mainScroller.scrollLeft = nextScrollLeft
+  }, [])
+
   const extractDraggedNoteId = useCallback((e: React.DragEvent) => {
     const noteId = e.dataTransfer.getData('application/x-noteflow-note-id') || e.dataTransfer.getData('text/plain') || draggingNoteId
     if (!noteId) return null
@@ -179,44 +300,72 @@ export function App() {
     return visibleOpenNoteIds.includes(paneId) ? paneId : null
   }, [visibleOpenNoteIds, draggingPaneId])
 
-  const reorderOpenPanes = useCallback((draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return
-    const reordered = visibleOpenNoteIds.filter((id) => id !== draggedId)
-    const targetIndex = reordered.indexOf(targetId)
-    if (targetIndex === -1) return
-    reordered.splice(targetIndex, 0, draggedId)
-    setOpenNoteIds(reordered)
+  const getPaneDropIndexFromPointer = useCallback((clientX: number) => {
+    const container = paneContainerRef.current
+    if (!container) return visibleOpenNoteIds.length
+
+    const paneElements = Array.from(container.querySelectorAll<HTMLElement>('[data-pane-id]'))
+    for (let i = 0; i < paneElements.length; i += 1) {
+      const rect = paneElements[i].getBoundingClientRect()
+      const midpoint = rect.left + rect.width / 2
+      if (clientX < midpoint) return i
+    }
+
+    return paneElements.length
+  }, [visibleOpenNoteIds.length])
+
+  const reorderOpenPanes = useCallback((draggedId: string, targetIndex: number) => {
+    const current = [...visibleOpenNoteIds]
+    const fromIndex = current.indexOf(draggedId)
+    if (fromIndex === -1) return
+
+    const clampedTarget = Math.max(0, Math.min(targetIndex, current.length))
+    if (clampedTarget === fromIndex || clampedTarget === fromIndex + 1) return
+
+    current.splice(fromIndex, 1)
+    const adjustedTarget = clampedTarget > fromIndex ? clampedTarget - 1 : clampedTarget
+    current.splice(adjustedTarget, 0, draggedId)
+    setOpenNoteIds(current)
   }, [visibleOpenNoteIds, setOpenNoteIds])
 
   const handlePaneDragStart = useCallback((e: React.DragEvent<HTMLElement>, noteId: string) => {
     e.dataTransfer.setData('application/x-noteflow-pane-id', noteId)
     e.dataTransfer.effectAllowed = 'move'
     setDraggingPaneId(noteId)
-    setPaneDropTargetId(null)
+    setPaneDropIndex(null)
   }, [])
 
   const handlePaneDragEnd = useCallback(() => {
     setDraggingPaneId(null)
-    setPaneDropTargetId(null)
+    setPaneDropIndex(null)
   }, [])
 
-  const handlePaneDragOver = useCallback((e: React.DragEvent<HTMLElement>, targetId: string) => {
+  const handlePaneContainerDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     const draggedId = extractDraggedPaneId(e)
-    if (!draggedId || draggedId === targetId) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (paneDropTargetId !== targetId) setPaneDropTargetId(targetId)
-  }, [extractDraggedPaneId, paneDropTargetId])
-
-  const handlePaneDrop = useCallback((e: React.DragEvent<HTMLElement>, targetId: string) => {
-    const draggedId = extractDraggedPaneId(e)
-    if (!draggedId || draggedId === targetId) return
+    if (!draggedId) return
     e.preventDefault()
     e.stopPropagation()
-    reorderOpenPanes(draggedId, targetId)
+    e.dataTransfer.dropEffect = 'move'
+    const nextIndex = getPaneDropIndexFromPointer(e.clientX)
+    if (paneDropIndex !== nextIndex) setPaneDropIndex(nextIndex)
+  }, [extractDraggedPaneId, getPaneDropIndexFromPointer, paneDropIndex])
+
+  const handlePaneContainerDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const draggedId = extractDraggedPaneId(e)
+    if (!draggedId) return
+    e.preventDefault()
+    e.stopPropagation()
+    const targetIndex = paneDropIndex ?? getPaneDropIndexFromPointer(e.clientX)
+    reorderOpenPanes(draggedId, targetIndex)
     setDraggingPaneId(null)
-    setPaneDropTargetId(null)
-  }, [extractDraggedPaneId, reorderOpenPanes])
+    setPaneDropIndex(null)
+  }, [extractDraggedPaneId, paneDropIndex, getPaneDropIndexFromPointer, reorderOpenPanes])
+
+  const handlePaneContainerDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null
+    if (next && e.currentTarget.contains(next)) return
+    setPaneDropIndex(null)
+  }, [])
 
   const handleEditorDragOver = useCallback((e: React.DragEvent<HTMLElement>) => {
     const noteId = extractDraggedNoteId(e)
@@ -309,55 +458,91 @@ export function App() {
             visibleOpenNoteIds.length <= 1 ? (
               <NoteEditor noteId={visibleOpenNoteIds[0]} />
             ) : (
-              <div className="h-full overflow-x-auto overflow-y-hidden">
-                <div className="h-full min-w-full flex">
-                  {visibleOpenNoteIds.map((noteId) => {
-                    const paneNote = notes.find((n) => n.id === noteId)
-                    const paneTitle = paneNote?.title?.trim() || 'Untitled'
-                    return (
-                      <section
-                        key={noteId}
-                        onDragOver={(e) => handlePaneDragOver(e, noteId)}
-                        onDrop={(e) => handlePaneDrop(e, noteId)}
-                        className={`h-full min-w-[420px] flex-1 flex flex-col border-r border-border/70 last:border-r-0 ${
-                          noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
-                        } ${
-                          paneDropTargetId === noteId && draggingPaneId && draggingPaneId !== noteId
-                            ? 'ring-1 ring-inset ring-accent/60'
-                            : ''
-                        }`}
-                      >
-                        <div className="h-9 px-2 border-b border-border/70 bg-surface-1/70 flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-mono text-text-muted truncate" title={paneTitle}>
-                            {paneTitle}
-                          </span>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <button
-                              draggable
-                              onDragStart={(e) => handlePaneDragStart(e, noteId)}
-                              onDragEnd={handlePaneDragEnd}
-                              onClick={(e) => e.preventDefault()}
-                              className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors"
-                              title="Reorder columns"
-                            >
-                              <GripVertical size={13} />
-                            </button>
-                            <button
-                              onClick={() => closeOpenNote(noteId)}
-                              className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
-                              title="Close pane"
-                            >
-                              <X size={13} />
-                            </button>
+              <div className="h-full min-h-0 flex flex-col">
+                <div
+                  ref={paneScrollRef}
+                  onScroll={handlePaneMainScroll}
+                  className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden"
+                >
+                  <div
+                    ref={paneContainerRef}
+                    onDragOver={handlePaneContainerDragOver}
+                    onDrop={handlePaneContainerDrop}
+                    onDragLeave={handlePaneContainerDragLeave}
+                    className="h-full min-w-full flex relative"
+                  >
+                    {visibleOpenNoteIds.map((noteId, index) => {
+                      const paneNote = notes.find((n) => n.id === noteId)
+                      const paneTitle = paneNote?.title?.trim() || 'Untitled'
+                      const paneWidth = paneWidths[noteId] ?? PANE_DEFAULT_WIDTH
+                      return (
+                        <section
+                          key={noteId}
+                          data-pane-id={noteId}
+                          style={{ width: `${paneWidth}px`, minWidth: `${PANE_MIN_WIDTH}px` }}
+                          className={`relative h-full flex-shrink-0 flex flex-col border-r border-border/70 last:border-r-0 ${
+                            noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
+                          } ${
+                            draggingPaneId === noteId ? 'opacity-70' : ''
+                          }`}
+                        >
+                          {draggingPaneId && paneDropIndex === index && (
+                            <div className="absolute inset-y-0 -left-px w-[2px] bg-accent/80 pointer-events-none" />
+                          )}
+                          <div className="h-9 px-2 border-b border-border/70 bg-surface-1/70 flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-mono text-text-muted truncate" title={paneTitle}>
+                              {paneTitle}
+                            </span>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                draggable
+                                onDragStart={(e) => handlePaneDragStart(e, noteId)}
+                                onDragEnd={handlePaneDragEnd}
+                                onClick={(e) => e.preventDefault()}
+                                className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors"
+                                title="Reorder columns"
+                              >
+                                <GripVertical size={13} />
+                              </button>
+                              <button
+                                onClick={() => closeOpenNote(noteId)}
+                                className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
+                                title="Close pane"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex-1 min-h-0">
-                          <NoteEditor noteId={noteId} />
-                        </div>
-                      </section>
-                    )
-                  })}
+                          <div className="flex-1 min-h-0">
+                            <NoteEditor noteId={noteId} />
+                          </div>
+
+                          <div
+                            onMouseDown={(e) => beginPaneResize(e, noteId)}
+                            className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-accent/25 active:bg-accent/45 transition-colors z-20"
+                            title="Resize column"
+                          />
+                        </section>
+                      )
+                    })}
+
+                    {draggingPaneId && paneDropIndex === visibleOpenNoteIds.length && (
+                      <div className="absolute inset-y-0 right-0 w-[2px] bg-accent/80 pointer-events-none" />
+                    )}
+                  </div>
                 </div>
+
+                {showPaneBottomScrollbar && (
+                  <div className="h-3 border-t border-border/70 bg-surface-1/70">
+                    <div
+                      ref={paneBottomScrollRef}
+                      onScroll={handlePaneBottomScroll}
+                      className="h-full overflow-x-scroll overflow-y-hidden"
+                    >
+                      <div style={{ width: `${paneContentWidth}px`, height: '1px' }} />
+                    </div>
+                  </div>
+                )}
               </div>
             )
           )}
