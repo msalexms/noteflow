@@ -7,7 +7,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Pin, Trash2, Copy, Eye, Edit3,
-  Plus, X, Check, Pencil, ExternalLink, Lock,
+  Plus, X, Check, Pencil, ExternalLink, GripVertical, Lock, RotateCcw,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
@@ -23,6 +23,13 @@ interface ModalState {
   confirmLabel: string
   danger: boolean
   onConfirm: () => void
+}
+
+interface SectionUndoState {
+  noteId: string
+  sectionName: string
+  previousSections: NoteSection[]
+  previousActiveSectionId: string | null
 }
 
 interface NoteEditorProps {
@@ -85,10 +92,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null)
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
   const [sectionColorPickerId, setSectionColorPickerId] = useState<string | null>(null)
+  const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
   const rawTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const sectionUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSection: NoteSection | undefined = note?.sections.find(
@@ -117,6 +126,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     setSectionColorPickerId(null)
     if (targetId && isPaneActive) window.noteflow.setUiState({ activeSectionId: targetId })
   }, [note?.id, isPaneActive]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (sectionUndoTimerRef.current) {
+        clearTimeout(sectionUndoTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const close = () => setSectionColorPickerId(null)
@@ -302,20 +319,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       if (!n || n.sections.length <= 1) return
       const sectionId = activeSectionIdRef.current
       if (!sectionId) return
-      const sectionName = n.sections.find((s) => s.id === sectionId)?.name ?? 'this'
-      setModal({
-        title: 'Delete section',
-        message: `Delete the "${sectionName}" section? Its content will be lost.`,
-        confirmLabel: 'Delete',
-        danger: true,
-        onConfirm: () => {
-          setModal(null)
-          const sections = noteRef.current!.sections.filter((s) => s.id !== sectionId)
-          updateNote(noteRef.current!.id, { sections })
-          setActiveSectionId(sections[0]?.id ?? null)
-          setRawContent(sections[0]?.content ?? '')
-        },
-      })
+      deleteSectionWithUndo(sectionId)
     }
     window.addEventListener('noteflow:add-tab', handleAddTab)
     window.addEventListener('noteflow:close-tab', handleCloseTab)
@@ -460,24 +464,76 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     setRenameValue('New')
   }
 
-  const handleDeleteSection = (sectionId: string) => {
-    if (note.sections.length <= 1) return
-    const sectionName = note.sections.find((s) => s.id === sectionId)?.name ?? 'this'
-    setModal({
-      title: 'Delete section',
-      message: `Delete the "${sectionName}" section? Its content will be lost.`,
-      confirmLabel: 'Delete',
-      danger: true,
-      onConfirm: () => {
-        setModal(null)
-        const sections = noteRef.current!.sections.filter((s) => s.id !== sectionId)
-        updateNote(noteRef.current!.id, { sections })
-        if (activeSectionId === sectionId) {
-          setActiveSectionId(sections[0]?.id ?? null)
-          setRawContent(sections[0]?.content ?? '')
-        }
-      },
+  const deleteSectionWithUndo = (sectionId: string) => {
+    const currentNote = noteRef.current
+    if (!currentNote || currentNote.sections.length <= 1) return
+
+    const removeIndex = currentNote.sections.findIndex((s) => s.id === sectionId)
+    if (removeIndex === -1) return
+
+    const previousSections = currentNote.sections.map((section) => ({ ...section }))
+    const nextSections = currentNote.sections.filter((s) => s.id !== sectionId)
+    const removedSection = currentNote.sections[removeIndex]
+    const previousActiveSectionId = activeSectionIdRef.current
+
+    const fallbackSection = previousActiveSectionId === sectionId
+      ? nextSections[Math.min(removeIndex, nextSections.length - 1)] ?? nextSections[0]
+      : nextSections.find((s) => s.id === previousActiveSectionId) ?? nextSections[0]
+
+    void updateNote(currentNote.id, { sections: nextSections })
+
+    if (previousActiveSectionId === sectionId) {
+      const nextActiveId = fallbackSection?.id ?? null
+      setActiveSectionId(nextActiveId)
+      setRawContent(fallbackSection?.content ?? '')
+      if (nextActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: nextActiveId })
+    }
+
+    if (sectionUndoTimerRef.current) {
+      clearTimeout(sectionUndoTimerRef.current)
+    }
+
+    setSectionUndo({
+      noteId: currentNote.id,
+      sectionName: removedSection.name,
+      previousSections,
+      previousActiveSectionId,
     })
+
+    sectionUndoTimerRef.current = setTimeout(() => {
+      sectionUndoTimerRef.current = null
+      setSectionUndo(null)
+    }, 6000)
+  }
+
+  const undoSectionDelete = () => {
+    if (!sectionUndo) return
+    const currentNote = noteRef.current
+    if (!currentNote || currentNote.id !== sectionUndo.noteId) {
+      setSectionUndo(null)
+      return
+    }
+
+    if (sectionUndoTimerRef.current) {
+      clearTimeout(sectionUndoTimerRef.current)
+      sectionUndoTimerRef.current = null
+    }
+
+    const restoredSections = sectionUndo.previousSections.map((section) => ({ ...section }))
+    void updateNote(currentNote.id, { sections: restoredSections })
+
+    const restoreActiveId = sectionUndo.previousActiveSectionId && restoredSections.some((s) => s.id === sectionUndo.previousActiveSectionId)
+      ? sectionUndo.previousActiveSectionId
+      : restoredSections[0]?.id ?? null
+
+    setActiveSectionId(restoreActiveId)
+    setRawContent(restoredSections.find((s) => s.id === restoreActiveId)?.content ?? '')
+    if (restoreActiveId && isPaneActive) window.noteflow.setUiState({ activeSectionId: restoreActiveId })
+    setSectionUndo(null)
+  }
+
+  const handleDeleteSection = (sectionId: string) => {
+    deleteSectionWithUndo(sectionId)
   }
 
   const handleStartRename = (section: NoteSection) => {
@@ -679,6 +735,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 <div
                   key={section.id}
                   draggable
+                  title="Drag to reorder section"
                   onDragStart={(e) => handleDragStart(e, section.id)}
                   onDragOver={(e) => handleDragOver(e, section.id)}
                   onDrop={(e) => handleDrop(e, section.id)}
@@ -690,7 +747,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       : 'border border-border/40 hover:border-border/70'
                     }
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
-                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1' : ''}
+                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1 bg-accent/10 border-dashed' : ''}
                   `}
                   style={{
                     border: colorStyle.border,
@@ -736,6 +793,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       style={isActive ? { color: colorStyle.color } : undefined}
                     >
                       <span className="inline-flex items-center gap-1.5">
+                        <GripVertical size={11} className="opacity-40" />
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: colorStyle.color }} />
                         {section.name}
                       </span>
@@ -879,6 +937,21 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           </div>
         )}
 
+        {sectionUndo && sectionUndo.noteId === note.id && (
+          <div className="mx-3 mt-2 px-3 py-2 rounded border border-amber-300/35 bg-amber-300/10 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono text-text-muted min-w-0 truncate">
+              Section "{sectionUndo.sectionName}" deleted
+            </span>
+            <button
+              onClick={undoSectionDelete}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border border-amber-300/45 text-amber-200 hover:bg-amber-300/15 transition-colors"
+            >
+              <RotateCcw size={10} />
+              Undo
+            </button>
+          </div>
+        )}
+
         <div className="px-4 pt-3 pb-1 flex-shrink-0">
           <input
             ref={titleRef}
@@ -898,13 +971,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             {format(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
           </span>
           <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded border"
+            className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded border"
             style={rawMode
-              ? { color: 'rgb(var(--accent))', borderColor: 'rgb(var(--accent) / 0.35)', background: 'rgb(var(--accent) / 0.12)' }
-              : { color: 'rgb(var(--text-muted))', borderColor: 'rgb(var(--border))', background: 'transparent' }}
+              ? { color: 'rgb(var(--accent))', borderColor: 'rgb(var(--accent) / 0.45)', background: 'rgb(var(--accent) / 0.2)' }
+              : { color: 'rgb(var(--text-muted))', borderColor: 'rgb(var(--border))', background: 'rgb(var(--surface-1) / 0.45)' }}
             title="Toggle mode with Ctrl+Shift+E"
           >
-            {rawMode ? 'Raw mode · Ctrl+Shift+E' : 'Editor mode · Ctrl+Shift+E'}
+            {rawMode ? <Edit3 size={11} /> : <Eye size={11} />}
+            {rawMode ? 'RAW SOURCE · Ctrl+Shift+E' : 'RICH EDITOR · Ctrl+Shift+E'}
           </span>
         </div>
 

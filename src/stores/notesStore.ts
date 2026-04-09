@@ -51,6 +51,7 @@ interface NotesState {
   setFilterDate: (f: 'all' | 'today' | 'week' | 'month') => void
   setFilterTag: (tag: string | null) => void
   setShowArchived: (v: boolean) => void
+  clearFilters: () => void
   setCommandPaletteOpen: (v: boolean) => void
   setNewlyCreatedNoteId: (id: string | null) => void
   syncNote: (filePath: string) => Promise<void>
@@ -391,6 +392,13 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   setFilterDate:        (f)   => set({ filterDate: f }),
   setFilterTag:         (tag) => set({ filterTag: tag }),
   setShowArchived:      (v)   => set({ showArchived: v }),
+  clearFilters:         ()    => set({
+    searchQuery: '',
+    filterSection: 'all',
+    filterDate: 'all',
+    filterTag: null,
+    showArchived: false,
+  }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),
   setNewlyCreatedNoteId:(id) => set({ newlyCreatedNoteId: id }),
 

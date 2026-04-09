@@ -30,6 +30,28 @@ function normalize(s: string): string {
     .replace(/\p{Diacritic}/gu, '')
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function renderHighlightedText(text: string, query: string) {
+  const trimmed = query.trim()
+  if (!trimmed) return text
+  const matcher = new RegExp(`(${escapeRegExp(trimmed)})`, 'ig')
+  const parts = text.split(matcher)
+  if (parts.length <= 1) return text
+
+  return parts.map((part, index) => (
+    index % 2 === 1
+      ? (
+        <mark key={`${part}-${index}`} className="bg-accent/25 text-accent rounded px-[1px]">
+          {part}
+        </mark>
+      )
+      : <span key={`${part}-${index}`}>{part}</span>
+  ))
+}
+
 function toDayKey(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -71,6 +93,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setFilterTag = useNotesStore((s) => s.setFilterTag)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
+  const clearFilters = useNotesStore((s) => s.clearFilters)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
@@ -137,6 +160,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
   const [calendarExpanded, setCalendarExpanded] = useState(false)
+  const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
 
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
@@ -235,14 +259,46 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }, [baseNotes])
 
   const items = useSidebarGroups(notes, groups)
+  const visibleNoteIds = useMemo(() => {
+    const ids: string[] = []
+    for (const item of items) {
+      if (item.kind === 'group') {
+        ids.push(...item.notes.map((note) => note.id))
+      } else {
+        ids.push(item.note.id)
+      }
+    }
+    return ids
+  }, [items])
   const hasSearchFilter = searchQuery.trim().length > 0
   const hasDateFilter = filterDate !== 'all'
   const hasTagFilter = Boolean(filterTag)
   const hasDayFilter = Boolean(selectedDayKey)
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
-  const hasVisibleFilterChips = hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasVisibleFilterChips = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
   const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
+  const activeSearchNoteId =
+    hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
+      ? visibleNoteIds[keyboardResultIndex]
+      : null
+
+  useEffect(() => {
+    if (!hasSearchFilter || visibleNoteIds.length === 0) {
+      setKeyboardResultIndex(-1)
+      return
+    }
+    setKeyboardResultIndex((prev) => {
+      if (prev >= 0 && prev < visibleNoteIds.length) return prev
+      return 0
+    })
+  }, [hasSearchFilter, visibleNoteIds])
+
+  useEffect(() => {
+    if (!activeSearchNoteId) return
+    const target = document.querySelector<HTMLElement>(`[data-note-id="${activeSearchNoteId}"]`)
+    target?.scrollIntoView({ block: 'nearest' })
+  }, [activeSearchNoteId])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function getNoteGroupDirect(noteId: string) {
@@ -258,12 +314,35 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }
 
   function clearAllFilters() {
-    setSearchQuery('')
-    setFilterDate('all')
-    setFilterTag(null)
+    clearFilters()
     setSelectedDayKey(null)
     setCalendarExpanded(false)
-    setShowArchived(false)
+    setKeyboardResultIndex(-1)
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
+    if (visibleNoteIds.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setKeyboardResultIndex((prev) => (prev + 1) % visibleNoteIds.length)
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setKeyboardResultIndex((prev) => (prev <= 0 ? visibleNoteIds.length - 1 : prev - 1))
+      return
+    }
+
+    if (e.key === 'Enter') {
+      const targetId = activeSearchNoteId ?? visibleNoteIds[0]
+      if (!targetId) return
+      e.preventDefault()
+      setOpenNoteIds([targetId])
+      setActiveNote(targetId)
+    }
   }
 
   function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string) {
@@ -283,9 +362,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null) {
     const isActive = activeNoteId === note.id
+    const isSearchTarget = activeSearchNoteId === note.id
     return (
       <li key={note.id}>
         <button
+          data-note-id={note.id}
           draggable
           onDragStart={(e) => handleNoteDragStart(e, note.id)}
           onDragEnd={handleNoteDragEnd}
@@ -307,12 +388,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             })
           }}
           className={`relative w-full text-left px-4 py-2 transition-colors h-[64px] flex flex-col justify-center
-            ${isActive && !group ? 'bg-accent/10' : ''} ${!isActive ? 'hover:bg-surface-2' : ''}`}
+            ${isActive && !group ? 'bg-accent/10' : ''}
+            ${!isActive ? 'hover:bg-surface-2' : ''}
+            ${isSearchTarget ? 'ring-1 ring-inset ring-accent/50' : ''}`}
           style={{
             borderRight: group
               ? `1px solid rgb(var(${group.color}) / 0.6)`
               : '2px solid transparent',
             ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
+            ...(isSearchTarget && !isActive ? { background: 'rgb(var(--accent) / 0.08)' } : {}),
           }}
           title="Ctrl/Cmd + click to open side by side"
         >
@@ -327,7 +411,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
             <span className={`text-[13px] font-mono font-medium truncate flex-1
               ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
-              {note.title || 'Untitled'}
+              {renderHighlightedText(note.title || 'Untitled', searchQuery)}
             </span>
             <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
               {formatNoteDate(note.updated)}
@@ -367,7 +451,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6] hover:opacity-70 transition-opacity cursor-pointer"
                 style={getTagColor(section.name, sectionTagColors)}
               >
-                {section.name}
+                {renderHighlightedText(section.name, searchQuery)}
               </span>
             ))}
           </div>
@@ -435,6 +519,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             placeholder="Search... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             className="w-full pl-7 pr-7 py-1.5 bg-surface-2 border border-border rounded text-xs
                        font-mono text-text placeholder-text-muted/40 outline-none
                        focus:border-accent/50 transition-colors caret-accent"
@@ -462,7 +547,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       <div className="px-3 pb-2 border-b border-border flex items-center justify-between gap-2">
         <span className="text-[10px] font-mono text-text-muted/70">
           {notes.length} result{notes.length === 1 ? '' : 's'}
+          {hasSearchFilter && activeSearchNoteId ? ` · ${keyboardResultIndex + 1}/${notes.length}` : ''}
         </span>
+        {hasSearchFilter && notes.length > 0 && (
+          <span className="text-[10px] font-mono text-text-muted/50">↑↓ select · Enter open</span>
+        )}
         {hasActiveFilters && (
           <button
             onClick={clearAllFilters}
@@ -478,6 +567,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       {hasVisibleFilterChips && (
         <div className="px-3 py-2 border-b border-border flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] font-mono text-text-muted/60 uppercase tracking-wider">Filters</span>
+          {hasSearchFilter && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border text-text-muted hover:text-text hover:border-accent/40 transition-colors"
+              title="Clear search filter"
+            >
+              Search: {searchQuery.slice(0, 16)}{searchQuery.length > 16 ? '…' : ''}
+            </button>
+          )}
           {hasDateFilter && (
             <button
               onClick={() => setFilterDate('all')}

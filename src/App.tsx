@@ -37,13 +37,10 @@ export function App() {
   const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null)
   const [paneDropIndex, setPaneDropIndex] = useState<number | null>(null)
   const [paneWidths, setPaneWidths] = useState<Record<string, number>>({})
-  const [showPaneBottomScrollbar, setShowPaneBottomScrollbar] = useState(false)
-  const [paneContentWidth, setPaneContentWidth] = useState(0)
+  const [hasPaneOverflow, setHasPaneOverflow] = useState(false)
   const isDragging = useRef(false)
   const paneResizeRef = useRef<{ paneId: string; startX: number; startWidth: number } | null>(null)
   const paneScrollRef = useRef<HTMLDivElement | null>(null)
-  const paneBottomScrollRef = useRef<HTMLDivElement | null>(null)
-  const syncingPaneScrollRef = useRef<'top' | 'bottom' | null>(null)
   const paneContainerRef = useRef<HTMLDivElement | null>(null)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
@@ -209,13 +206,7 @@ export function App() {
 
     const scrollWidth = mainScroller.scrollWidth
     const clientWidth = mainScroller.clientWidth
-    setPaneContentWidth(scrollWidth)
-    setShowPaneBottomScrollbar(scrollWidth > clientWidth + 1)
-
-    const bottomScroller = paneBottomScrollRef.current
-    if (bottomScroller && Math.abs(bottomScroller.scrollLeft - mainScroller.scrollLeft) > 1) {
-      bottomScroller.scrollLeft = mainScroller.scrollLeft
-    }
+    setHasPaneOverflow(scrollWidth > clientWidth + 1)
   }, [])
 
   useEffect(() => {
@@ -265,30 +256,6 @@ export function App() {
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }, [paneWidths])
-
-  const handlePaneMainScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (syncingPaneScrollRef.current === 'bottom') {
-      syncingPaneScrollRef.current = null
-      return
-    }
-    const nextScrollLeft = e.currentTarget.scrollLeft
-    const bottomScroller = paneBottomScrollRef.current
-    if (!bottomScroller) return
-    syncingPaneScrollRef.current = 'top'
-    bottomScroller.scrollLeft = nextScrollLeft
-  }, [])
-
-  const handlePaneBottomScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (syncingPaneScrollRef.current === 'top') {
-      syncingPaneScrollRef.current = null
-      return
-    }
-    const nextScrollLeft = e.currentTarget.scrollLeft
-    const mainScroller = paneScrollRef.current
-    if (!mainScroller) return
-    syncingPaneScrollRef.current = 'bottom'
-    mainScroller.scrollLeft = nextScrollLeft
-  }, [])
 
   const extractDraggedNoteId = useCallback((e: React.DragEvent) => {
     const noteId = e.dataTransfer.getData('application/x-noteflow-note-id') || e.dataTransfer.getData('text/plain') || draggingNoteId
@@ -469,7 +436,6 @@ export function App() {
               <div className="h-full min-h-0 flex flex-col">
                 <div
                   ref={paneScrollRef}
-                  onScroll={handlePaneMainScroll}
                   className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden"
                 >
                   <div
@@ -495,7 +461,7 @@ export function App() {
                           }`}
                         >
                           {draggingPaneId && paneDropIndex === index && (
-                            <div className="absolute inset-y-0 -left-px w-[2px] bg-accent/80 pointer-events-none" />
+                            <div className="absolute inset-y-1 -left-[3px] w-[6px] rounded bg-accent/25 border border-accent/60 pointer-events-none" />
                           )}
                           <div className="h-9 px-2 border-b border-border/70 bg-surface-1/70 flex items-center justify-between gap-2">
                             <span className="text-[11px] font-mono text-text-muted truncate" title={paneTitle}>
@@ -507,10 +473,11 @@ export function App() {
                                 onDragStart={(e) => handlePaneDragStart(e, noteId)}
                                 onDragEnd={handlePaneDragEnd}
                                 onClick={(e) => e.preventDefault()}
-                                className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors"
+                                className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors inline-flex items-center gap-1"
                                 title="Reorder columns"
                               >
                                 <GripVertical size={13} />
+                                <span className="text-[10px] font-mono hidden xl:inline">Drag</span>
                               </button>
                               <button
                                 onClick={() => closeOpenNote(noteId)}
@@ -535,20 +502,16 @@ export function App() {
                     })}
 
                     {draggingPaneId && paneDropIndex === visibleOpenNoteIds.length && (
-                      <div className="absolute inset-y-0 right-0 w-[2px] bg-accent/80 pointer-events-none" />
+                      <div className="absolute inset-y-1 right-0 w-[6px] rounded bg-accent/25 border border-accent/60 pointer-events-none" />
                     )}
                   </div>
                 </div>
 
-                {showPaneBottomScrollbar && (
-                  <div className="h-3 border-t border-border/70 bg-surface-1/70">
-                    <div
-                      ref={paneBottomScrollRef}
-                      onScroll={handlePaneBottomScroll}
-                      className="h-full overflow-x-scroll overflow-y-hidden"
-                    >
-                      <div style={{ width: `${paneContentWidth}px`, height: '1px' }} />
-                    </div>
+                {hasPaneOverflow && (
+                  <div className="h-6 border-t border-border/70 bg-surface-1/70 flex items-center justify-center px-3">
+                    <span className="text-[10px] font-mono text-text-muted/60">
+                      Scroll horizontally for more panes · drag handle to reorder
+                    </span>
                   </div>
                 )}
               </div>
@@ -557,8 +520,16 @@ export function App() {
 
           {draggingNoteId && (
             <>
+              <div
+                className={`absolute inset-5 z-20 pointer-events-none rounded-lg border-2 border-dashed transition-colors ${
+                  editorDropActive
+                    ? 'border-accent/70 bg-accent/10'
+                    : 'border-border/80 bg-surface-1/20'
+                }`}
+              />
+
               <div className="absolute top-3 left-3 z-30 pointer-events-none px-2 py-1 rounded border border-accent/30 bg-surface-1/90 text-[10px] font-mono text-text-muted">
-                Suelta en el editor para abrir lado a lado
+                Drop in editor to open side by side
               </div>
 
               <div
