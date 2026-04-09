@@ -6,7 +6,7 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
-import { PanelLeftOpen, X } from 'lucide-react'
+import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 
 const SIDEBAR_MIN = 180
@@ -22,6 +22,7 @@ export function App() {
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
+  const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const loadGroups = useGroupsStore((s) => s.loadGroups)
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
@@ -30,6 +31,8 @@ export function App() {
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null)
   const [editorDropActive, setEditorDropActive] = useState(false)
   const [stickyDropActive, setStickyDropActive] = useState(false)
+  const [draggingPaneId, setDraggingPaneId] = useState<string | null>(null)
+  const [paneDropTargetId, setPaneDropTargetId] = useState<string | null>(null)
   const isDragging = useRef(false)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
@@ -150,6 +153,14 @@ export function App() {
     return () => window.removeEventListener('noteflow:note-drag', handler)
   }, [])
 
+  const visibleOpenNoteIds = useMemo(() => {
+    const existingIds = new Set(notes.map((note) => note.id))
+    const validOpen = openNoteIds.filter((id) => existingIds.has(id))
+    if (validOpen.length > 0) return validOpen
+    if (activeNoteId && existingIds.has(activeNoteId)) return [activeNoteId]
+    return []
+  }, [notes, openNoteIds, activeNoteId])
+
   const extractDraggedNoteId = useCallback((e: React.DragEvent) => {
     const noteId = e.dataTransfer.getData('application/x-noteflow-note-id') || e.dataTransfer.getData('text/plain') || draggingNoteId
     if (!noteId) return null
@@ -161,6 +172,51 @@ export function App() {
     setEditorDropActive(false)
     setStickyDropActive(false)
   }, [])
+
+  const extractDraggedPaneId = useCallback((e: React.DragEvent) => {
+    const paneId = e.dataTransfer.getData('application/x-noteflow-pane-id') || draggingPaneId
+    if (!paneId) return null
+    return visibleOpenNoteIds.includes(paneId) ? paneId : null
+  }, [visibleOpenNoteIds, draggingPaneId])
+
+  const reorderOpenPanes = useCallback((draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return
+    const reordered = visibleOpenNoteIds.filter((id) => id !== draggedId)
+    const targetIndex = reordered.indexOf(targetId)
+    if (targetIndex === -1) return
+    reordered.splice(targetIndex, 0, draggedId)
+    setOpenNoteIds(reordered)
+  }, [visibleOpenNoteIds, setOpenNoteIds])
+
+  const handlePaneDragStart = useCallback((e: React.DragEvent<HTMLElement>, noteId: string) => {
+    e.dataTransfer.setData('application/x-noteflow-pane-id', noteId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggingPaneId(noteId)
+    setPaneDropTargetId(null)
+  }, [])
+
+  const handlePaneDragEnd = useCallback(() => {
+    setDraggingPaneId(null)
+    setPaneDropTargetId(null)
+  }, [])
+
+  const handlePaneDragOver = useCallback((e: React.DragEvent<HTMLElement>, targetId: string) => {
+    const draggedId = extractDraggedPaneId(e)
+    if (!draggedId || draggedId === targetId) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (paneDropTargetId !== targetId) setPaneDropTargetId(targetId)
+  }, [extractDraggedPaneId, paneDropTargetId])
+
+  const handlePaneDrop = useCallback((e: React.DragEvent<HTMLElement>, targetId: string) => {
+    const draggedId = extractDraggedPaneId(e)
+    if (!draggedId || draggedId === targetId) return
+    e.preventDefault()
+    e.stopPropagation()
+    reorderOpenPanes(draggedId, targetId)
+    setDraggingPaneId(null)
+    setPaneDropTargetId(null)
+  }, [extractDraggedPaneId, reorderOpenPanes])
 
   const handleEditorDragOver = useCallback((e: React.DragEvent<HTMLElement>) => {
     const noteId = extractDraggedNoteId(e)
@@ -196,14 +252,6 @@ export function App() {
     }
     clearDropUi()
   }, [extractDraggedNoteId, notes, clearDropUi])
-
-  const visibleOpenNoteIds = useMemo(() => {
-    const existingIds = new Set(notes.map((note) => note.id))
-    const validOpen = openNoteIds.filter((id) => existingIds.has(id))
-    if (validOpen.length > 0) return validOpen
-    if (activeNoteId && existingIds.has(activeNoteId)) return [activeNoteId]
-    return []
-  }, [notes, openNoteIds, activeNoteId])
 
   if (isSticky) {
     return <StickyApp />
@@ -266,10 +314,26 @@ export function App() {
                   {visibleOpenNoteIds.map((noteId) => (
                     <section
                       key={noteId}
+                      onDragOver={(e) => handlePaneDragOver(e, noteId)}
+                      onDrop={(e) => handlePaneDrop(e, noteId)}
                       className={`relative h-full min-w-[420px] flex-1 border-r border-border/70 last:border-r-0 ${
                         noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
+                      } ${
+                        paneDropTargetId === noteId && draggingPaneId && draggingPaneId !== noteId
+                          ? 'ring-1 ring-inset ring-accent/60'
+                          : ''
                       }`}
                     >
+                      <button
+                        draggable
+                        onDragStart={(e) => handlePaneDragStart(e, noteId)}
+                        onDragEnd={handlePaneDragEnd}
+                        onClick={(e) => e.preventDefault()}
+                        className="absolute top-2 right-8 z-20 p-1 rounded border border-border/80 bg-surface-1/90 text-text-muted/70 hover:text-text hover:border-accent/40 cursor-grab active:cursor-grabbing transition-colors"
+                        title="Drag to reorder columns"
+                      >
+                        <GripVertical size={12} />
+                      </button>
                       <button
                         onClick={() => closeOpenNote(noteId)}
                         className="absolute top-2 right-2 z-20 p-1 rounded border border-border/80 bg-surface-1/90 text-text-muted/70 hover:text-text hover:border-accent/40 transition-colors"
