@@ -19,7 +19,7 @@ const PANE_DEFAULT_WIDTH = 520
 export function App() {
   const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
 
-  const { loadNotes, isLoading, createNote, setCommandPaletteOpen } = useNotesStore()
+  const { loadNotes, isLoading, createNote, createTempNote, setCommandPaletteOpen } = useNotesStore()
   const notes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
@@ -62,6 +62,10 @@ export function App() {
       // Ctrl+N — new note (always, even when editing)
       if (!e.shiftKey && (key === 'n' || e.code === 'KeyN')) {
         e.preventDefault(); createNote(); return
+      }
+      // Ctrl+Shift+N — new temporary note (auto-deletes in 24h)
+      if (e.shiftKey && (key === 'n' || e.code === 'KeyN')) {
+        e.preventDefault(); createTempNote(); return
       }
       // Ctrl+P — toggle command palette
       if (!e.shiftKey && (key === 'p' || e.code === 'KeyP')) {
@@ -117,7 +121,7 @@ export function App() {
     // Use capture phase so shortcuts work even inside editors that stopPropagation
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [createNote, setCommandPaletteOpen, setSidebarVisible])
+  }, [createNote, createTempNote, setCommandPaletteOpen, setSidebarVisible])
 
   // ── Global shortcuts (via IPC) ─────────────────────────────────────────────
   useEffect(() => {

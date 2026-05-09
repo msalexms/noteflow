@@ -234,7 +234,7 @@ async function listRemoteNotes(token: string, owner: string, repo: string): Prom
     'GET',
     `/repos/${owner}/${repo}/contents/`
   )) as RemoteFile[]
-  return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md')) : []
+  return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md') && f.name !== 'README.md') : []
 }
 
 async function getRemoteFile(
@@ -680,7 +680,7 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
 
   let filesToPush: string[]
   try {
-    const noteFiles = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+    const noteFiles = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md')
     const metadataFiles = METADATA_FILENAMES.filter((filename) => fs.existsSync(path.join(notesDir, filename)))
     filesToPush = [...noteFiles, ...metadataFiles]
   } catch {
@@ -765,7 +765,7 @@ function flushPendingLocalChanges(notesDir: string, previousLastSync: string | u
   const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null
   let files: string[] = []
   try {
-    files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md'))
+    files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md')
   } catch {
     return
   }

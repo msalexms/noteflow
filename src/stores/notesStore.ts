@@ -38,6 +38,7 @@ interface NotesState {
   // Actions
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
+  createTempNote: () => Promise<Note>
   duplicateNote: (id: string) => Promise<Note>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'pinned' | 'group'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
@@ -189,6 +190,25 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
   createNote: async () => {
     const draft = createEmptyNote()
+    const dir = get().notesDir
+    const filename = noteFilename(draft.id, draft.title)
+    const filePath = `${dir}/${filename}`
+    const raw = serializeNote(draft)
+    const note: Note = { ...draft, filePath, raw }
+
+    await window.noteflow.writeNote(filePath, raw)
+    set((s) => ({
+      notes: [note, ...s.notes],
+      activeNoteId: note.id,
+      openNoteIds: [note.id],
+      newlyCreatedNoteId: note.id,
+    }))
+    return note
+  },
+
+  createTempNote: async () => {
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const draft = { ...createEmptyNote(), expiresAt }
     const dir = get().notesDir
     const filename = noteFilename(draft.id, draft.title)
     const filePath = `${dir}/${filename}`

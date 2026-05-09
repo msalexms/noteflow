@@ -101,10 +101,41 @@ function checkAlarms() {
     }
 }
 let alarmTimer = null;
+function checkExpiredNotes() {
+    try {
+        const now = new Date();
+        const files = fs_1.default.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'));
+        for (const filename of files) {
+            const filePath = path_1.default.join(NOTES_DIR, filename);
+            try {
+                const content = fs_1.default.readFileSync(filePath, 'utf-8');
+                const match = content.match(/^expiresAt:\s*(.+)$/m);
+                if (!match)
+                    continue;
+                const expiresAt = new Date(match[1].trim());
+                if (isNaN(expiresAt.getTime()) || now < expiresAt)
+                    continue;
+                markInternalWrite(filename);
+                fs_1.default.unlinkSync(filePath);
+                electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+                githubSync.scheduleDelete(filePath);
+            }
+            catch {
+                // ignore per-file errors
+            }
+        }
+    }
+    catch (err) {
+        console.error('[TempNotes] checkExpiredNotes failed:', err);
+    }
+}
 function startAlarmEngine() {
     if (alarmTimer)
         return;
-    alarmTimer = setInterval(checkAlarms, 60000);
+    alarmTimer = setInterval(() => {
+        checkAlarms();
+        checkExpiredNotes();
+    }, 60000);
 }
 electron_1.ipcMain.on('alarms:schedule', (_event, incoming) => {
     registeredAlarms.clear();
@@ -1254,6 +1285,7 @@ electron_1.app.whenReady().then(async () => {
     createTray();
     registerGlobalShortcut();
     startAlarmEngine();
+    checkExpiredNotes();
     // Watch for external file changes (CLI, sync from another device, etc.)
     // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),
     // and may fire before the OS has flushed the file — a 150 ms delay lets the write settle.

@@ -23,3 +23,16 @@ export function buildSearchRegex(
     return null
   }
 }
+
+export interface ParsedQuery {
+  sectionFilter: string | null
+  textQuery: string
+}
+
+export function parseSearchQuery(query: string): ParsedQuery {
+  const match = query.match(/#(\S+)/)
+  if (!match) return { sectionFilter: null, textQuery: query.trim() }
+  const sectionFilter = match[1]
+  const textQuery = query.replace(/#\S+/, '').trim()
+  return { sectionFilter, textQuery }
+}

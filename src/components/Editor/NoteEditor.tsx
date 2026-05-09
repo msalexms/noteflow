@@ -63,7 +63,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
   // Editor font size (from shared store)
-  const { fontSize, changeFontSize, resetFontSize } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily } = useEditorSettingsStore()
 
   // Raw (markdown source) mode buffer
   const [rawContent, setRawContent] = useState('')
@@ -1126,8 +1126,11 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   handleRawImageInsert(files)
                 }}
                 placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
-                style={{ fontSize: `${fontSize}px` }}
-                className="w-full h-full p-4 bg-transparent font-mono text-text
+                style={{
+                  fontSize: `${fontSize}px`,
+                  fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
+                }}
+                className="w-full h-full p-4 bg-transparent text-text
                            placeholder-text-muted/30 border-none outline-none resize-none caret-accent leading-relaxed"
                 spellCheck={false}
               />

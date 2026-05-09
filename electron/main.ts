@@ -95,9 +95,37 @@ function checkAlarms(): void {
 
 let alarmTimer: ReturnType<typeof setInterval> | null = null
 
+function checkExpiredNotes(): void {
+  try {
+    const now = new Date()
+    const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
+    for (const filename of files) {
+      const filePath = path.join(NOTES_DIR, filename)
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8')
+        const match = content.match(/^expiresAt:\s*(.+)$/m)
+        if (!match) continue
+        const expiresAt = new Date(match[1].trim())
+        if (isNaN(expiresAt.getTime()) || now < expiresAt) continue
+        markInternalWrite(filename)
+        fs.unlinkSync(filePath)
+        BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+        githubSync.scheduleDelete(filePath)
+      } catch {
+        // ignore per-file errors
+      }
+    }
+  } catch (err) {
+    console.error('[TempNotes] checkExpiredNotes failed:', err)
+  }
+}
+
 function startAlarmEngine(): void {
   if (alarmTimer) return
-  alarmTimer = setInterval(checkAlarms, 60_000)
+  alarmTimer = setInterval(() => {
+    checkAlarms()
+    checkExpiredNotes()
+  }, 60_000)
 }
 
 ipcMain.on('alarms:schedule', (_event, incoming: AlarmEntry[]) => {
@@ -1299,6 +1327,7 @@ app.whenReady().then(async () => {
   createTray()
   registerGlobalShortcut()
   startAlarmEngine()
+  checkExpiredNotes()
 
   // Watch for external file changes (CLI, sync from another device, etc.)
   // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),

@@ -42,6 +42,7 @@ export interface NoteMeta {
   pinned: boolean
   group?: string       // groupId — undefined = ungrouped
   encryption?: NoteEncryption  // present iff note is encrypted
+  expiresAt?: string   // ISO timestamp — present only on temporary notes
 }
 
 export interface Note extends NoteMeta {

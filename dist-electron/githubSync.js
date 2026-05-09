@@ -194,7 +194,7 @@ async function listRemoteNotes(token, owner, repo) {
     // Returning [] on error would make the deletion logic treat all local files as
     // "remotely deleted" and wipe them from disk when there is no internet connection.
     const files = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/`));
-    return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md')) : [];
+    return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md') && f.name !== 'README.md') : [];
 }
 async function getRemoteFile(token, owner, repo, filename) {
     try {
@@ -554,7 +554,7 @@ async function pushAllNotes(notesDir) {
     const errors = [];
     let filesToPush;
     try {
-        const noteFiles = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+        const noteFiles = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md');
         const metadataFiles = METADATA_FILENAMES.filter((filename) => fs_1.default.existsSync(path_1.default.join(notesDir, filename)));
         filesToPush = [...noteFiles, ...metadataFiles];
     }
@@ -632,7 +632,7 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
     const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null;
     let files = [];
     try {
-        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md');
     }
     catch {
         return;

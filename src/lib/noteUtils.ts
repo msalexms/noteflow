@@ -67,6 +67,7 @@ export function parseNote(raw: string, filePath: string): Note {
     pinned:   Boolean(data.pinned   ?? false),
     ...(typeof data.group === 'string' && data.group ? { group: data.group } : {}),
     ...(encryption ? { encryption } : {}),
+    ...(typeof data.expiresAt === 'string' && data.expiresAt ? { expiresAt: data.expiresAt } : {}),
   }
 
   // Encrypted notes have no readable sections — skip parsing
@@ -120,9 +121,10 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
       updated:    new Date().toISOString(),
       encryption: note.encryption,
     }
-    if (note.archived) fm.archived = true
-    if (note.pinned)   fm.pinned   = true
-    if (note.group)    fm.group    = note.group
+    if (note.archived)   fm.archived   = true
+    if (note.pinned)     fm.pinned     = true
+    if (note.group)      fm.group      = note.group
+    if (note.expiresAt)  fm.expiresAt  = note.expiresAt
     const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
     return `---\n${yamlStr}---\n`
   }
@@ -141,9 +143,10 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
     })),
   }
 
-  if (note.archived) fm.archived = true
-  if (note.pinned)   fm.pinned   = true
-  if (note.group)    fm.group    = note.group
+  if (note.archived)   fm.archived   = true
+  if (note.pinned)     fm.pinned     = true
+  if (note.group)      fm.group      = note.group
+  if (note.expiresAt)  fm.expiresAt  = note.expiresAt
 
   const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
   // Markdown body = first section content (readable in external editors)
@@ -165,11 +168,11 @@ export function defaultNoteTitle(): string {
   const d = new Date()
   const dd = String(d.getDate()).padStart(2, '0')
   const mm = String(d.getMonth() + 1).padStart(2, '0')
-  return `${dd}-${mm}-${d.getFullYear()}`
+  return `${dd}/${mm}/${d.getFullYear()}`
 }
 
 export function isDefaultNoteTitle(title: string): boolean {
-  return !title.trim() || title.trim() === 'Untitled' || /^\d{2}-\d{2}-\d{4}$/.test(title.trim())
+  return !title.trim() || title.trim() === 'Untitled' || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(title.trim())
 }
 
 export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {

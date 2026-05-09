@@ -241,7 +241,23 @@ function htmlFromMarkdown(md: string): string {
   const rawBlocks = src.split(/\n\n/)
   const htmlBlocks: string[] = []
 
-  for (const block of rawBlocks) {
+  // Merge consecutive list blocks so that blank lines between list items
+  // (stored as \n\n in markdown) are preserved as hard breaks inside the
+  // preceding item rather than splitting into separate disconnected lists.
+  const isBlockAList = (b: string) => {
+    const first = b.split('\n').find(l => l.trim())
+    return !!first && /^\s*(?:[-*+]|\d+\.)[ \t]/.test(first)
+  }
+  const blocks: string[] = []
+  for (const raw of rawBlocks) {
+    if (isBlockAList(raw) && blocks.length > 0 && isBlockAList(blocks[blocks.length - 1])) {
+      blocks[blocks.length - 1] += '\n\n' + raw
+    } else {
+      blocks.push(raw)
+    }
+  }
+
+  for (const block of blocks) {
     const lines = block.split('\n')
 
     // ── Code fence ──────────────────────────────────────────────────────────
@@ -392,6 +408,7 @@ function listElToMd(listEl: Element, depth: number): string {
       const c = child as Element
       const tag = c.tagName.toLowerCase()
       if (tag === 'p') {
+        if (text) text += '\n'
         text += inlineElToMd(c)
       } else if (tag === 'div') {
         // TipTap may wrap task item content in a <div>
@@ -399,7 +416,7 @@ function listElToMd(listEl: Element, depth: number): string {
           if (gc.nodeType !== Node.ELEMENT_NODE) continue
           const gcEl = gc as Element
           const gcTag = gcEl.tagName.toLowerCase()
-          if (gcTag === 'p') text += inlineElToMd(gcEl)
+          if (gcTag === 'p') { if (text) text += '\n'; text += inlineElToMd(gcEl) }
           else if (gcTag === 'ul' || gcTag === 'ol') nestedListEls.push(gcEl)
         }
       } else if (tag === 'ul' || tag === 'ol') {
@@ -478,7 +495,17 @@ function parseMdListItems(lines: string[]): MdListItem[] {
   const stack: { depth: number; node: MdListItem }[] = []
 
   for (const line of lines) {
-    if (!line.trim()) continue
+    // Blank line or empty list item (e.g. "- " left by YAML) — append a line
+    // break to the preceding item so it renders as <br> (visual blank line)
+    // rather than a new bullet point.
+    const isEmptyListMarker = /^\s*[-*+]\s*$/.test(line)
+    if (!line.trim() || isEmptyListMarker) {
+      const lastNode = stack.length > 0 ? stack[stack.length - 1].node
+                     : result.length > 0 ? result[result.length - 1]
+                     : null
+      if (lastNode) lastNode.text += '\n'
+      continue
+    }
 
     const indentLen = line.match(/^(\s*)/)?.[1].length ?? 0
     const depth = Math.floor(indentLen / 2)

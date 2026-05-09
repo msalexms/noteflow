@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getTagColor } from '../../lib/tagColors'
+import { normalize } from '../../lib/searchUtils'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { NoteSection } from '../../types'
 
@@ -9,6 +10,7 @@ import type { NoteSection } from '../../types'
 interface SectionTabsRowProps {
   sections: NoteSection[]
   searchQuery: string
+  sectionFilter?: string | null
   sectionTagColors: TagColorMap
   onSectionClick: (sectionId: string, e: React.MouseEvent) => void
   onSectionContextMenu: (e: React.MouseEvent, sectionId: string) => void
@@ -20,6 +22,7 @@ interface SectionTabsRowProps {
 export function SectionTabsRow({
   sections,
   searchQuery,
+  sectionFilter,
   sectionTagColors,
   onSectionClick,
   onSectionContextMenu,
@@ -28,6 +31,10 @@ export function SectionTabsRow({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const visibleSections = sectionFilter
+    ? sections.filter(s => normalize(s.name).includes(normalize(sectionFilter)))
+    : sections
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current
@@ -47,7 +54,7 @@ export function SectionTabsRow({
       el.removeEventListener('scroll', updateScrollState)
       ro.disconnect()
     }
-  }, [sections, updateScrollState])
+  }, [visibleSections, updateScrollState])
 
   const scrollLeft = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -88,7 +95,7 @@ export function SectionTabsRow({
           transition: 'padding 120ms ease',
         }}
       >
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <span
             key={section.id}
             role="button"

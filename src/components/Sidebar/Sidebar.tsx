@@ -2,12 +2,12 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, Plus } from 'lucide-react'
+import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
-import { normalize, escapeRegExp } from '../../lib/searchUtils'
+import { normalize, escapeRegExp, parseSearchQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { useSidebarGroups } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
@@ -22,6 +22,15 @@ function formatNoteDate(iso: string): string {
   if (isToday(d)) return format(d, 'HH:mm')
   if (isYesterday(d)) return 'Yesterday'
   return format(d, 'MMM d')
+}
+
+function formatExpiry(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now()
+  if (diffMs <= 0) return 'expiring soon'
+  const diffH = Math.floor(diffMs / (1000 * 60 * 60))
+  if (diffH < 1) return `expires in ${Math.ceil(diffMs / (1000 * 60))}m`
+  if (diffH < 24) return `expires in ${diffH}h`
+  return `expires in ${Math.floor(diffH / 24)}d`
 }
 
 function renderHighlightedText(text: string, query: string) {
@@ -85,6 +94,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
+  const createTempNote = useNotesStore((s) => s.createTempNote)
   const duplicateNote = useNotesStore((s) => s.duplicateNote)
 
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
@@ -150,6 +160,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
   const [calendarExpanded, setCalendarExpanded] = useState(false)
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
+  const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
 
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
@@ -158,6 +169,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       setGroupContextMenu(null)
       setGroupPickerNoteId(null)
       setGroupNameInput(null)
+      setNewNoteCtx(null)
     }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
@@ -172,12 +184,31 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return () => window.removeEventListener('noteflow:focus-search', handler)
   }, [])
 
+  const { sectionFilter, textQuery: sectionTextQuery } = useMemo(
+    () => parseSearchQuery(searchQuery),
+    [searchQuery]
+  )
+
   const baseNotes = useMemo(() => {
     return rawNotes
       .filter((n) => showArchived || !n.archived)
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
+
+        if (sectionFilter) {
+          const sf = normalize(sectionFilter)
+          const matchingSections = n.sections.filter(s => normalize(s.name).includes(sf))
+          if (matchingSections.length === 0) return false
+          if (!sectionTextQuery) return true
+          const tq = normalize(sectionTextQuery)
+          return (
+            normalize(n.title).includes(tq) ||
+            matchingSections.some(s => normalize(s.content).includes(tq)) ||
+            n.tags.some(t => normalize(t).includes(tq))
+          )
+        }
+
         const q = normalize(searchQuery)
         return (
           normalize(n.title).includes(q) ||
@@ -189,7 +220,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
         return new Date(b.updated).getTime() - new Date(a.updated).getTime()
       })
-  }, [rawNotes, showArchived, filterTag, searchQuery])
+  }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery])
 
   const notes = useMemo(() => {
     if (selectedDayKey) {
@@ -410,6 +441,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <div className="flex items-center gap-1 min-w-0">
             {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
             {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+            {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
             <span className={`text-[13px] font-mono font-medium truncate flex-1
               ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
               {renderHighlightedText(note.title || 'Untitled', searchQuery)}
@@ -421,6 +453,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <SectionTabsRow
             sections={note.sections}
             searchQuery={searchQuery}
+            sectionFilter={sectionFilter}
             sectionTagColors={sectionTagColors}
             onSectionClick={(sectionId, e) => {
               e.stopPropagation()
@@ -507,7 +540,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search..."
+            placeholder="Search... or #section"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
@@ -684,7 +717,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => createNote()}
-            title="New note (Ctrl+N)"
+            onContextMenu={(e) => { e.preventDefault(); setNewNoteCtx({ x: e.clientX, y: e.clientY }) }}
+            title="New note (Ctrl+N) · Right-click for temporary note"
             className="flex-1 py-1.5 rounded text-xs font-mono transition-all
                        bg-accent/10 text-accent border border-accent/20
                        hover:bg-accent/20 hover:border-accent/40"
@@ -844,6 +878,23 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           </ul>
         )}
       </div>
+
+      {/* ── New note context menu ───────────────────────────────────────────── */}
+      {newNoteCtx && (
+        <div
+          className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-52 animate-in fade-in zoom-in duration-100"
+          style={{ left: newNoteCtx.x, top: newNoteCtx.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => { createTempNote(); setNewNoteCtx(null) }}
+            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+          >
+            <Timer size={12} />
+            Temporary note (24h)
+          </button>
+        </div>
+      )}
 
       {/* ── Note Context Menu ────────────────────────────────────────────────── */}
       {contextMenu && (() => {
