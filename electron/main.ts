@@ -105,7 +105,8 @@ function checkExpiredNotes(): void {
         const content = fs.readFileSync(filePath, 'utf-8')
         const match = content.match(/^expiresAt:\s*(.+)$/m)
         if (!match) continue
-        const expiresAt = new Date(match[1].trim())
+        const raw = match[1].trim().replace(/^["']|["']$/g, '')
+        const expiresAt = new Date(raw)
         if (isNaN(expiresAt.getTime()) || now < expiresAt) continue
         markInternalWrite(filename)
         fs.unlinkSync(filePath)

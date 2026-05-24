@@ -230,15 +230,26 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
 //   - Lists: consecutive same-type items are merged into one <ul>/<ol>
 //
 
+// Sentinel character used to protect blank lines inside code fences from
+// the \n\n block-splitter. Must not appear in real user content.
+const FENCE_BLANK = '\x00'
+
 function htmlFromMarkdown(md: string): string {
   if (!md.trim()) return '<p></p>'
 
   // Normalise line endings
   const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
+  // Protect blank lines inside code fences before splitting on \n\n.
+  // Without this, a code block containing an empty line would be torn apart:
+  // only the first fragment starts with ```, so the rest becomes plain text.
+  const protectedSrc = src.replace(/^```[\s\S]*?^```[ \t]*$/gm, (m) =>
+    m.replace(/\n\n/g, '\n' + FENCE_BLANK + '\n')
+  )
+
   // Split into "blocks" on blank lines — use exactly \n\n so that multiple
   // consecutive blank lines produce empty blocks, preserving them as <p></p>.
-  const rawBlocks = src.split(/\n\n/)
+  const rawBlocks = protectedSrc.split(/\n\n/)
   const htmlBlocks: string[] = []
 
   // Merge consecutive list blocks so that blank lines between list items
@@ -264,6 +275,7 @@ function htmlFromMarkdown(md: string): string {
     if (/^```/.test(lines[0])) {
       const lang = lines[0].slice(3).trim()
       const code = lines.slice(1).join('\n').replace(/```\s*$/, '').trimEnd()
+        .replace(new RegExp(FENCE_BLANK, 'g'), '')
       htmlBlocks.push(`<pre><code class="language-${lang}">${escapeHtml(code)}</code></pre>`)
       continue
     }
