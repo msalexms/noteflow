@@ -95,7 +95,9 @@
     },
     "linux": {
       "target": [
-        "deb"
+        "deb",
+        "appimage",
+        "pacman"
       ],
       "category": "Utility",
       "icon": "public/icon.png",
@@ -123,6 +125,15 @@
       ],
       "afterInstall": "build/linux-postinstall.sh",
       "afterRemove": "build/linux-postremove.sh"
+    },
+    "pacman": {
+      "depends": [
+        "alsa-lib",
+        "gtk3",
+        "libxss",
+        "nss"
+      ],
+      "packageName": "noteflow"
     },
     "extraResources": [
       {
