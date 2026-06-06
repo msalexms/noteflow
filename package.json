@@ -129,10 +129,16 @@
     },
     "pacman": {
       "depends": [
-        "alsa-lib",
         "gtk3",
+        "libnotify",
+        "nss",
         "libxss",
-        "nss"
+        "libxtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "libdrm",
+        "libxkbcommon",
+        "alsa-lib"
       ],
       "packageName": "noteflow"
     },

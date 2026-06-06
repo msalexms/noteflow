@@ -99,4 +99,6 @@ jobs:
             release-win/*.exe.blockmap
             release-win/latest.yml
             release-linux/*.deb
+            release-linux/*.AppImage
+            release-linux/*.pkg.tar.zst
             release-linux/latest-linux.yml

@@ -49,10 +49,10 @@ function getIconPath() {
         return path_1.default.join(__dirname, '../public/icon.ico');
     // In dev, the icon lives in public/; in production Vite copies it to dist/
     // (only dist/ and dist-electron/ are packed into the ASAR, not public/)
-    const dir = electron_1.app.isPackaged ? '../dist' : '../public';
+    const dir = (electron_1.app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public';
     return path_1.default.join(__dirname, `${dir}/icon.png`);
 }
-const isDev = process.env.NODE_ENV === 'development' || !electron_1.app.isPackaged;
+const isDev = process.env.NODE_ENV === 'development' || (!electron_1.app.isPackaged && !process.env.NOTEFLOW_NATIVE);
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
@@ -300,7 +300,7 @@ function isAllowedInitialUpdateUrl(url) {
     const pathname = url.pathname.toLowerCase();
     if (!pathname.includes('/yagoid/noteflow/releases/'))
         return false;
-    return pathname.endsWith('.exe') || pathname.endsWith('.deb');
+    return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst');
 }
 function isAllowedRedirectUpdateUrl(url) {
     return ALLOWED_UPDATE_REDIRECT_HOSTS.has(url.hostname);
@@ -533,7 +533,7 @@ function createStickyWindow(noteId, sectionId) {
     return win;
 }
 function createTray() {
-    const dir = electron_1.app.isPackaged ? '../dist' : '../public';
+    const dir = (electron_1.app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public';
     const iconPath = process.platform === 'win32'
         ? path_1.default.join(__dirname, `${dir}/icon.ico`)
         : path_1.default.join(__dirname, `${dir}/tray-icon.png`);
@@ -732,7 +732,23 @@ electron_1.ipcMain.handle('app:check-update', () => {
                     const hasUpdate = latest && latest !== current;
                     let downloadUrl;
                     if (process.platform === 'linux') {
-                        downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`;
+                        // Match the package manager to the distro: pacman on Arch-based,
+                        // deb on Debian-based, AppImage as the universal fallback.
+                        const isArchBased = fs_1.default.existsSync('/etc/arch-release') ||
+                            fs_1.default.existsSync('/etc/cachyos-release') ||
+                            fs_1.default.existsSync('/usr/bin/pacman');
+                        const isDebBased = fs_1.default.existsSync('/etc/debian_version') ||
+                            fs_1.default.existsSync('/usr/bin/dpkg');
+                        if (isArchBased) {
+                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`;
+                        }
+                        else if (isDebBased) {
+                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`;
+                        }
+                        else {
+                            // Use AppImage as universal Linux format (works on all distros)
+                            downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`;
+                        }
                     }
                     else {
                         downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`;
@@ -795,21 +811,47 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
             writer.on('error', reject);
         });
         if (process.platform === 'linux') {
-            await new Promise((resolve) => {
-                const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' });
-                proc.on('error', () => {
-                    // pkexec not available, fall back to xdg-open
-                    electron_1.shell.openPath(dest);
-                    resolve();
+            // Detect package type from filename
+            const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman');
+            const isDeb = dest.endsWith('.deb');
+            if (isDeb) {
+                await new Promise((resolve) => {
+                    const proc = (0, child_process_1.spawn)('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' });
+                    proc.on('error', () => {
+                        // pkexec not available, fall back to xdg-open
+                        electron_1.shell.openPath(dest);
+                        resolve();
+                    });
+                    proc.on('close', (code) => {
+                        if (code === 0) {
+                            electron_1.app.relaunch();
+                            electron_1.app.quit();
+                        }
+                        resolve();
+                    });
                 });
-                proc.on('close', (code) => {
-                    if (code === 0) {
-                        electron_1.app.relaunch();
-                        electron_1.app.quit();
-                    }
-                    resolve();
+            }
+            else if (isPacman) {
+                await new Promise((resolve) => {
+                    const proc = (0, child_process_1.spawn)('pkexec', ['pacman', '-U', '--noconfirm', dest], { stdio: 'ignore' });
+                    proc.on('error', () => {
+                        // pkexec not available, fall back to xdg-open
+                        electron_1.shell.openPath(dest);
+                        resolve();
+                    });
+                    proc.on('close', (code) => {
+                        if (code === 0) {
+                            electron_1.app.relaunch();
+                            electron_1.app.quit();
+                        }
+                        resolve();
+                    });
                 });
-            });
+            }
+            else {
+                // AppImage or other format - just open it
+                await electron_1.shell.openPath(dest);
+            }
         }
         else {
             await electron_1.shell.openPath(dest);

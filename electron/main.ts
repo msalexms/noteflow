@@ -747,12 +747,17 @@ ipcMain.handle('app:check-update', () => {
             const hasUpdate = latest && latest !== current
             let downloadUrl: string
             if (process.platform === 'linux') {
-              // For Arch/CachyOS, prefer pacman; for others, use AppImage; fallback to deb
+              // Match the package manager to the distro: pacman on Arch-based,
+              // deb on Debian-based, AppImage as the universal fallback.
               const isArchBased = fs.existsSync('/etc/arch-release') ||
                                  fs.existsSync('/etc/cachyos-release') ||
                                  fs.existsSync('/usr/bin/pacman')
+              const isDebBased = fs.existsSync('/etc/debian_version') ||
+                                 fs.existsSync('/usr/bin/dpkg')
               if (isArchBased) {
                 downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`
+              } else if (isDebBased) {
+                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`
               } else {
                 // Use AppImage as universal Linux format (works on all distros)
                 downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`
@@ -849,7 +854,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
         })
       } else if (isPacman) {
         await new Promise<void>((resolve) => {
-          const proc = spawn('pkexec', ['pacman', '-U', dest], { stdio: 'ignore' })
+          const proc = spawn('pkexec', ['pacman', '-U', '--noconfirm', dest], { stdio: 'ignore' })
           proc.on('error', () => {
             // pkexec not available, fall back to xdg-open
             shell.openPath(dest)

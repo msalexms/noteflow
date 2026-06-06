@@ -1,5 +1,5 @@
 # Maintainer: yagoid <yago.igle@gmail.com>
-# Contributor: Your Name <your.email@example.com>
+# Contributor: callysthenes
 
 pkgname=noteflow
 pkgver=1.5.6
@@ -7,7 +7,7 @@ pkgrel=1
 pkgdesc="Fast notes for software engineers - Local files, optional private GitHub sync. No telemetry."
 arch=('x86_64')
 url="https://github.com/yagoid/noteflow"
-license=('MIT')
+license=('LicenseRef-FSL-1.1-Apache-2.0')
 depends=('electron' 'xdg-utils')
 makedepends=('npm' 'nodejs>=18' 'git')
 optdepends=('git: for GitHub sync feature')
