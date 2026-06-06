@@ -30,6 +30,15 @@ export interface NoteGroup {
   name: string      // user-visible label
   color: GroupColor // CSS var → rgb(var(<color>))
   order: number     // sort order ascending
+  archived?: boolean // present iff group is archived (hidden unless "Show archived")
+}
+
+// A subfolder inside a group (single nesting level: group → folder → note)
+export interface NoteFolder {
+  id: string        // nanoid(8)
+  name: string      // user-visible label
+  groupId: string   // parent NoteGroup id
+  order: number     // sort order ascending within the group
 }
 
 export interface NoteMeta {
@@ -39,8 +48,9 @@ export interface NoteMeta {
   created: string
   updated: string
   archived: boolean
-  pinned: boolean
+  favorited: boolean
   group?: string       // groupId — undefined = ungrouped
+  folder?: string      // folderId — undefined = at group root (requires group)
   encryption?: NoteEncryption  // present iff note is encrypted
   expiresAt?: string   // ISO timestamp — present only on temporary notes
 }
@@ -100,6 +110,7 @@ declare global {
       maximize: () => void
       close: () => void
       setSize: (width: number, height: number, minWidth: number, minHeight: number) => void
+      setAlwaysOnTop: (flag: boolean) => void
       foldToCorner: (width: number, height: number) => void
       unfold: () => void
       openSticky: (noteId: string, sectionId: string) => void
@@ -112,12 +123,16 @@ declare global {
       setLoginItem: (enabled: boolean) => Promise<void>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
-      getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }>
-      setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }) => Promise<void>
+      getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }>
+      setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }) => Promise<void>
       getGroups: () => Promise<NoteGroup[]>
       setGroups: (groups: NoteGroup[]) => Promise<void>
+      getFolders: () => Promise<NoteFolder[]>
+      setFolders: (folders: NoteFolder[]) => Promise<void>
       getSectionTagColors: () => Promise<Record<string, GroupColor>>
       setSectionTagColors: (colors: Record<string, GroupColor>) => Promise<void>
+      getNoteOrder: () => Promise<Record<string, string[]>>
+      setNoteOrder: (order: Record<string, string[]>) => Promise<void>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>

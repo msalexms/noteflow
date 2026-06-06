@@ -7,6 +7,8 @@ const FONT_FAMILY_KEY = 'noteflow-font-family'
 const DEFAULT_FONT = 'mono' as const
 type FontFamily = 'mono' | 'inter'
 
+const READABLE_WIDTH_KEY = 'noteflow-readable-width'
+
 interface EditorSettingsState {
   fontSize: number
   setFontSize: (size: number) => void
@@ -14,6 +16,8 @@ interface EditorSettingsState {
   resetFontSize: () => void
   fontFamily: FontFamily
   setFontFamily: (f: FontFamily) => void
+  readableWidth: boolean
+  setReadableWidth: (v: boolean) => void
 }
 
 export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => ({
@@ -34,5 +38,12 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
   setFontFamily: (f) => {
     localStorage.setItem(FONT_FAMILY_KEY, f)
     set({ fontFamily: f })
+  },
+
+  readableWidth: localStorage.getItem(READABLE_WIDTH_KEY) === '1',
+
+  setReadableWidth: (v) => {
+    localStorage.setItem(READABLE_WIDTH_KEY, v ? '1' : '0')
+    set({ readableWidth: v })
   },
 }))

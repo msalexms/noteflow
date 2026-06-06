@@ -81,8 +81,8 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
           {mode === 'encrypt'
-            ? <Lock size={14} className="text-accent flex-shrink-0" />
-            : <Unlock size={14} className="text-accent flex-shrink-0" />
+            ? <Lock size={14} className="text-text flex-shrink-0" />
+            : <Unlock size={14} className="text-text flex-shrink-0" />
           }
           <span className="text-sm font-mono font-semibold text-text">
             {modeLabel}
@@ -125,7 +125,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError('') }}
               onKeyDown={(e) => { if (e.key === 'Enter' && mode !== 'encrypt') handleSubmit() }}
-              className="w-full bg-surface-2 border border-border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-accent transition-colors"
+              className="w-full bg-surface-2 border border-border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-text/30 transition-colors"
               placeholder="Enter password"
               autoComplete="new-password"
             />
@@ -140,7 +140,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                 value={confirm}
                 onChange={(e) => { setConfirm(e.target.value); setError('') }}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-                className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-accent transition-colors ${
+                className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-text/30 transition-colors ${
                   passwordMismatch ? 'border-red-500/60' : 'border-border'
                 }`}
                 placeholder="Confirm password"
@@ -186,7 +186,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                         step={10_000}
                         onChange={(e) => setIterations(Number(e.target.value))}
                         onBlur={(e) => setIterations(clamp(Number(e.target.value), ITER_MIN, ITER_MAX))}
-                        className="flex-1 bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-accent transition-colors"
+                        className="flex-1 bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
                       />
                       <span className="text-xs font-mono text-text-muted/60 flex-shrink-0">
                         {(ITER_MIN / 1000).toFixed(0)}k – {(ITER_MAX / 1_000_000).toFixed(0)}M
@@ -213,7 +213,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                         max={SALT_MAX}
                         onChange={(e) => setSaltBytes(Number(e.target.value))}
                         onBlur={(e) => setSaltBytes(clamp(Number(e.target.value), SALT_MIN, SALT_MAX))}
-                        className="flex-1 bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-accent transition-colors"
+                        className="flex-1 bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
                       />
                       <span className="text-xs font-mono text-text-muted/60 flex-shrink-0">
                         bytes ({SALT_MIN}–{SALT_MAX})
@@ -235,7 +235,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                     <select
                       value={hashAlg}
                       onChange={(e) => setHashAlg(e.target.value as 'SHA-256' | 'SHA-512')}
-                      className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-accent transition-colors"
+                      className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
                     >
                       <option value="SHA-256">SHA-256</option>
                       <option value="SHA-512">SHA-512</option>
@@ -263,7 +263,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
           <button
             onClick={handleSubmit}
             disabled={!isValid || loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-accent text-bg rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono bg-text text-surface-0 rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
             {loading && <Loader2 size={12} className="animate-spin" />}
             {modeLabel}

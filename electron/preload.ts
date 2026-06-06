@@ -38,14 +38,18 @@ const api = {
   setLoginItem: (enabled: boolean): Promise<void> => ipcRenderer.invoke('app:set-login-item', enabled),
   getStartupStickies: (): Promise<Array<{ noteId: string; sectionId: string }>> => ipcRenderer.invoke('settings:get-startup-stickies'),
   setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>): Promise<void> => ipcRenderer.invoke('settings:set-startup-stickies', stickies),
-  getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }> =>
+  getUiState: (): Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }> =>
     ipcRenderer.invoke('settings:get-ui-state'),
-  setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }): Promise<void> =>
+  setUiState: (patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }): Promise<void> =>
     ipcRenderer.invoke('settings:set-ui-state', patch),
   getGroups: (): Promise<unknown[]> => ipcRenderer.invoke('groups:get'),
   setGroups: (groups: unknown[]): Promise<void> => ipcRenderer.invoke('groups:set', groups),
+  getFolders: (): Promise<unknown[]> => ipcRenderer.invoke('folders:get'),
+  setFolders: (folders: unknown[]): Promise<void> => ipcRenderer.invoke('folders:set', folders),
   getSectionTagColors: (): Promise<Record<string, string>> => ipcRenderer.invoke('section-colors:get'),
   setSectionTagColors: (colors: Record<string, string>): Promise<void> => ipcRenderer.invoke('section-colors:set', colors),
+  getNoteOrder: (): Promise<Record<string, string[]>> => ipcRenderer.invoke('note-order:get'),
+  setNoteOrder: (order: Record<string, string[]>): Promise<void> => ipcRenderer.invoke('note-order:set', order),
 
   // Window controls
   openSticky: (noteId: string, sectionId: string) => ipcRenderer.send('window:open-sticky', noteId, sectionId),
@@ -54,6 +58,8 @@ const api = {
   close: () => ipcRenderer.send('window:close'),
   setSize: (w: number, h: number, minW: number, minH: number) =>
     ipcRenderer.send('window:set-size', w, h, minW, minH),
+  setAlwaysOnTop: (flag: boolean) =>
+    ipcRenderer.send('window:set-always-on-top', flag),
   foldToCorner: (w: number, h: number) =>
     ipcRenderer.send('window:fold-to-corner', w, h),
   unfold: () => ipcRenderer.send('window:unfold'),

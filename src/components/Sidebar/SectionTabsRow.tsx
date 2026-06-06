@@ -5,6 +5,10 @@ import { normalize } from '../../lib/searchUtils'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { NoteSection } from '../../types'
 
+// Fade the scrollable row's edges so overflowing tags taper off instead of being clipped hard.
+const EDGE_MASK =
+  'linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 14px), transparent 100%)'
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SectionTabsRowProps {
@@ -56,44 +60,38 @@ export function SectionTabsRow({
     }
   }, [visibleSections, updateScrollState])
 
-  const scrollLeft = (e: React.MouseEvent) => {
+  const scrollByAmount = (e: React.MouseEvent, amount: number) => {
     e.stopPropagation()
-    scrollRef.current?.scrollBy({ left: -100, behavior: 'smooth' })
+    scrollRef.current?.scrollBy({ left: amount, behavior: 'smooth' })
   }
 
-  const scrollRight = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    scrollRef.current?.scrollBy({ left: 100, behavior: 'smooth' })
-  }
+  if (visibleSections.length === 0) return null
 
+  // Bleed out of the note's lateral padding (-mx-2.5 → re-add px-2.5) so the row spans
+  // edge to edge; a single non-wrapping scrollable line fits more tags, edges faded by
+  // the mask. Arrows appear on overflow to reach tags hidden past the edges.
   return (
-    <div className="relative mt-0.5">
-      {/* Left scroll arrow */}
+    <div className="relative mt-1 -mx-2.5">
+      {/* Left scroll arrow — only when there's content scrolled off to the left */}
       {canScrollLeft && (
         <div
           role="button"
-          onClick={scrollLeft}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollLeft(e as unknown as React.MouseEvent) } }}
-          className="absolute left-0 inset-y-0 z-10 flex items-center justify-center w-6
-                     bg-gradient-to-r from-surface-1 to-transparent
-                     text-text-muted/80 hover:text-text-primary transition-colors cursor-pointer
-                     animate-in fade-in duration-150"
           tabIndex={-1}
           aria-label="Scroll sections left"
+          onClick={(e) => scrollByAmount(e, -100)}
+          className="absolute left-0.5 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center
+                     w-4 h-4 rounded bg-surface-3/95 text-text-muted hover:text-text shadow-sm
+                     transition-colors cursor-pointer animate-in fade-in duration-150"
         >
-          <ChevronLeft size={13} strokeWidth={2.5} />
+          <ChevronLeft size={12} strokeWidth={2.5} />
         </div>
       )}
 
-      {/* Scrollable sections row (native scrollbar hidden via CSS) */}
+      {/* Scrollable sections row (native scrollbar hidden via CSS, edges faded via mask) */}
       <div
         ref={scrollRef}
-        className="flex items-center gap-1 overflow-x-auto section-tabs-scroll"
-        style={{
-          paddingLeft: canScrollLeft ? 20 : 0,
-          paddingRight: canScrollRight ? 20 : 0,
-          transition: 'padding 120ms ease',
-        }}
+        className="flex items-center gap-1 px-2.5 overflow-x-auto section-tabs-scroll"
+        style={{ WebkitMaskImage: EDGE_MASK, maskImage: EDGE_MASK }}
       >
         {visibleSections.map((section) => (
           <span
@@ -105,7 +103,7 @@ export function SectionTabsRow({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
             }}
-            className="text-[10px] font-mono px-1 rounded flex-shrink-0 leading-[1.6]
+            className="text-[11px] font-mono px-1 rounded flex-shrink-0 leading-[1.55]
                        hover:opacity-70 transition-opacity cursor-pointer"
             style={getTagColor(section.name, sectionTagColors)}
           >
@@ -114,20 +112,18 @@ export function SectionTabsRow({
         ))}
       </div>
 
-      {/* Right scroll arrow */}
+      {/* Right scroll arrow — only when there's content scrolled off to the right */}
       {canScrollRight && (
         <div
           role="button"
-          onClick={scrollRight}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); scrollRight(e as unknown as React.MouseEvent) } }}
-          className="absolute right-0 inset-y-0 z-10 flex items-center justify-center w-6
-                     bg-gradient-to-l from-surface-1 to-transparent
-                     text-text-muted/80 hover:text-text-primary transition-colors cursor-pointer
-                     animate-in fade-in duration-150"
           tabIndex={-1}
           aria-label="Scroll sections right"
+          onClick={(e) => scrollByAmount(e, 100)}
+          className="absolute right-0.5 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center
+                     w-4 h-4 rounded bg-surface-3/95 text-text-muted hover:text-text shadow-sm
+                     transition-colors cursor-pointer animate-in fade-in duration-150"
         >
-          <ChevronRight size={13} strokeWidth={2.5} />
+          <ChevronRight size={12} strokeWidth={2.5} />
         </div>
       )}
     </div>

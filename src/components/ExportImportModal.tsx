@@ -40,7 +40,7 @@ export function ExportImportModal({ mode: initialMode, onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
-          <PackageOpen size={13} className="text-accent flex-shrink-0" />
+          <PackageOpen size={13} className="text-text flex-shrink-0" />
           <div className="flex gap-1 flex-1">
             {(['export', 'import'] as const).map((m) => (
               <button
@@ -48,7 +48,7 @@ export function ExportImportModal({ mode: initialMode, onClose }: Props) {
                 onClick={() => setMode(m)}
                 className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
                   mode === m
-                    ? 'bg-accent/15 text-accent border border-accent/30'
+                    ? 'bg-surface-2 text-text border border-text/20'
                     : 'text-text-muted border border-transparent hover:text-text'
                 }`}
               >
@@ -212,14 +212,14 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
     return (
       <>
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-8">
-          <Check size={24} className="text-accent" />
+          <Check size={24} className="text-text" />
           <p className="text-sm font-mono text-text text-center">Export complete</p>
           <p className="text-xs font-mono text-text-muted text-center break-all">{successPath}</p>
         </div>
         <div className="flex justify-end gap-2 px-4 pb-4 flex-shrink-0">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs font-mono bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors"
+            className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20 hover:bg-surface-3 transition-colors"
           >
             Done
           </button>
@@ -236,7 +236,7 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
           <p className="text-xs font-mono text-text-muted text-center">{errorMsg}</p>
         </div>
         <div className="flex justify-end gap-2 px-4 pb-4 flex-shrink-0">
-          <button onClick={() => setStep('select')} className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-accent/40 hover:text-text transition-colors">
+          <button onClick={() => setStep('select')} className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-text/25 hover:text-text transition-colors">
             Back
           </button>
         </div>
@@ -328,7 +328,7 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
               onClick={() => setExportFormat(f)}
               className={`px-2 py-0.5 rounded text-xs font-mono transition-colors border ${
                 exportFormat === f
-                  ? 'bg-accent/15 text-accent border-accent/30'
+                  ? 'bg-surface-2 text-text border-text/20'
                   : 'text-text-muted border-transparent hover:border-border hover:text-text'
               }`}
             >
@@ -339,14 +339,14 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
         <div className="flex gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-accent/40 hover:text-text transition-colors"
+            className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-text/25 hover:text-text transition-colors"
           >
             Cancel
           </button>
           <button
             disabled={selectedNoteIds.size === 0}
             onClick={handleExport}
-            className="px-3 py-1.5 rounded text-xs font-mono bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20 hover:bg-surface-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Export{exportFormat !== 'noteflow' && selectedNoteIds.size > 1 ? ' to folder...' : ' to file...'}
           </button>
@@ -463,13 +463,13 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
     return (
       <>
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-8">
-          <Check size={24} className="text-accent" />
+          <Check size={24} className="text-text" />
           <p className="text-sm font-mono text-text">{importedCount} note{importedCount !== 1 ? 's' : ''} imported</p>
         </div>
         <div className="flex justify-end gap-2 px-4 pb-4 flex-shrink-0">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs font-mono bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors"
+            className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20 hover:bg-surface-3 transition-colors"
           >
             Done
           </button>
@@ -486,7 +486,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
           <p className="text-xs font-mono text-text-muted text-center">{errorMsg}</p>
         </div>
         <div className="flex justify-end gap-2 px-4 pb-4 flex-shrink-0">
-          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-accent/40 hover:text-text transition-colors">
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-text/25 hover:text-text transition-colors">
             Close
           </button>
         </div>
@@ -530,7 +530,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
                 <select
                   value={entry.strategy}
                   onChange={(e) => setStrategy(i, e.target.value as ImportConflictStrategy)}
-                  className="text-xs font-mono bg-surface-2 border border-border rounded px-1.5 py-0.5 text-text-muted focus:outline-none focus:border-accent/60 flex-shrink-0"
+                  className="text-xs font-mono bg-surface-2 border border-border rounded px-1.5 py-0.5 text-text-muted focus:outline-none focus:border-text/30 flex-shrink-0"
                 >
                   <option value="skip">Skip</option>
                   <option value="overwrite">Overwrite</option>
@@ -550,14 +550,14 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
         <div className="flex gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-accent/40 hover:text-text transition-colors"
+            className="px-3 py-1.5 rounded text-xs font-mono text-text-muted border border-border hover:border-text/25 hover:text-text transition-colors"
           >
             Cancel
           </button>
           <button
             disabled={toImport === 0}
             onClick={handleImport}
-            className="px-3 py-1.5 rounded text-xs font-mono bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20 hover:bg-surface-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Import notes
           </button>

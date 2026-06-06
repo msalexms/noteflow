@@ -212,7 +212,9 @@ if (!fs_1.default.existsSync(NOTES_DIR)) {
     fs_1.default.mkdirSync(NOTES_DIR, { recursive: true });
 }
 const GROUPS_FILE = path_1.default.join(NOTES_DIR, 'groups.json');
+const FOLDERS_FILE = path_1.default.join(NOTES_DIR, 'folders.json');
 const SECTION_COLORS_FILE = path_1.default.join(NOTES_DIR, 'section-colors.json');
+const NOTE_ORDER_FILE = path_1.default.join(NOTES_DIR, 'note-order.json');
 const SECTION_COLOR_VALUES = new Set([
     '--accent',
     '--accent-2',
@@ -305,8 +307,8 @@ function isAllowedRedirectUpdateUrl(url) {
 }
 function createWindow(hidden = false) {
     const win = new electron_1.BrowserWindow({
-        width: 1100,
-        height: 720,
+        width: 1280,
+        height: 820,
         minWidth: 700,
         minHeight: 500,
         frame: false,
@@ -1122,6 +1124,25 @@ electron_1.ipcMain.handle('groups:set', (event, groups) => {
     });
     githubSync.schedulePush(GROUPS_FILE, content);
 });
+electron_1.ipcMain.handle('folders:get', () => {
+    try {
+        return JSON.parse(fs_1.default.readFileSync(FOLDERS_FILE, 'utf-8'));
+    }
+    catch {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('folders:set', (event, folders) => {
+    const content = JSON.stringify(folders, null, 2);
+    fs_1.default.writeFileSync(FOLDERS_FILE, content, 'utf-8');
+    // Broadcast to other windows so their folders reload immediately
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('notes-updated');
+        }
+    });
+    githubSync.schedulePush(FOLDERS_FILE, content);
+});
 electron_1.ipcMain.handle('section-colors:get', () => {
     try {
         const raw = JSON.parse(fs_1.default.readFileSync(SECTION_COLORS_FILE, 'utf-8'));
@@ -1141,6 +1162,24 @@ electron_1.ipcMain.handle('section-colors:set', (event, colors) => {
         }
     });
     githubSync.schedulePush(SECTION_COLORS_FILE, content);
+});
+electron_1.ipcMain.handle('note-order:get', () => {
+    try {
+        return JSON.parse(fs_1.default.readFileSync(NOTE_ORDER_FILE, 'utf-8'));
+    }
+    catch {
+        return {};
+    }
+});
+electron_1.ipcMain.handle('note-order:set', (event, order) => {
+    const content = JSON.stringify(order, null, 2);
+    fs_1.default.writeFileSync(NOTE_ORDER_FILE, content, 'utf-8');
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('notes-updated');
+        }
+    });
+    githubSync.schedulePush(NOTE_ORDER_FILE, content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {
@@ -1174,6 +1213,12 @@ electron_1.ipcMain.on('window:set-size', (event, width, height, minW, minH) => {
         return;
     win.setMinimumSize(minW, minH);
     win.setSize(width, height);
+});
+electron_1.ipcMain.on('window:set-always-on-top', (event, flag) => {
+    const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+    if (!win)
+        return;
+    win.setAlwaysOnTop(flag);
 });
 electron_1.ipcMain.on('window:fold-to-corner', (event, foldedW, foldedH) => {
     const win = electron_1.BrowserWindow.fromWebContents(event.sender);

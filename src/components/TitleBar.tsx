@@ -11,7 +11,7 @@ import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
-  const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } = useEditorSettingsStore()
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -49,6 +49,47 @@ export function TitleBar() {
       unsubPush()
       unsubStatus()
       window.removeEventListener('noteflow:open-shortcuts', openShortcutsHandler)
+    }
+  }, [])
+
+  useEffect(() => {
+    const openExport = () => setExportImportModal('export')
+    const openImport = () => setExportImportModal('import')
+    const openGithubSync = () => setSyncModal(true)
+    const openStartup = () => setStartupModal(true)
+    const doCheckUpdate = () => {
+      setCheckingUpdate(true)
+      setUpToDate(false)
+      window.noteflow.checkUpdate().then((result) => {
+        if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
+          setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
+        } else {
+          setUpToDate(true)
+          setTimeout(() => setUpToDate(false), 3000)
+        }
+        setCheckingUpdate(false)
+      })
+    }
+    const doSync = () => {
+      setSyncing(true)
+      window.noteflow.pullNotes().then(() => {
+        refreshSyncStatus()
+        setSyncing(false)
+      })
+    }
+    window.addEventListener('noteflow:open-export', openExport)
+    window.addEventListener('noteflow:open-import', openImport)
+    window.addEventListener('noteflow:open-github-sync', openGithubSync)
+    window.addEventListener('noteflow:open-startup', openStartup)
+    window.addEventListener('noteflow:check-for-update', doCheckUpdate)
+    window.addEventListener('noteflow:sync-notes', doSync)
+    return () => {
+      window.removeEventListener('noteflow:open-export', openExport)
+      window.removeEventListener('noteflow:open-import', openImport)
+      window.removeEventListener('noteflow:open-github-sync', openGithubSync)
+      window.removeEventListener('noteflow:open-startup', openStartup)
+      window.removeEventListener('noteflow:check-for-update', doCheckUpdate)
+      window.removeEventListener('noteflow:sync-notes', doSync)
     }
   }, [])
 
@@ -102,7 +143,7 @@ export function TitleBar() {
     >
       {/* App name */}
       <div className="flex items-center gap-2 px-4">
-        <span className="text-xs font-mono text-accent font-bold tracking-widest">NOTEFLOW</span>
+        <span className="text-xs font-mono text-text font-bold tracking-widest">NOTEFLOW</span>
         <span className="text-xs font-mono text-text-muted/30">_</span>
       </div>
 
@@ -117,7 +158,7 @@ export function TitleBar() {
           <button
             onClick={handleUpdate}
             disabled={downloading}
-            className="flex items-center gap-1 px-2 h-full text-accent hover:text-text transition-colors disabled:opacity-60"
+            className="flex items-center gap-1 px-2 h-full text-text/70 hover:text-text transition-colors disabled:opacity-60"
             title={downloading ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}` : `Update available: v${updateInfo.latestVersion}`}
           >
             {downloading ? (
@@ -145,7 +186,7 @@ export function TitleBar() {
             }
           >
             {syncing ? (
-              <RefreshCw size={12} className="animate-spin text-accent" />
+              <RefreshCw size={12} className="animate-spin text-text" />
             ) : pushing ? (
               <Cloud size={12} className="animate-pulse text-green-400" />
             ) : syncStatus.initialPullStatus === 'failed' ? (
@@ -179,7 +220,7 @@ export function TitleBar() {
                     <button
                       onClick={handleCheckUpdate}
                       disabled={checkingUpdate}
-                      className="w-full flex items-center gap-2 text-left hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full flex items-center gap-2 text-left hover:text-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {(checkingUpdate || upToDate || updateInfo) && (
                         <span className="w-[10px] flex-shrink-0 flex items-center justify-center">
@@ -187,7 +228,7 @@ export function TitleBar() {
                             ? <RefreshCw size={10} className="animate-spin" />
                             : upToDate
                             ? <Check size={10} className="text-green-400" />
-                            : <Download size={10} className="text-accent" />}
+                            : <Download size={10} className="text-text/60" />}
                         </span>
                       )}
                       {checkingUpdate
@@ -238,7 +279,7 @@ export function TitleBar() {
                         >−</button>
                         <button
                           onClick={resetFontSize}
-                          className="w-10 text-center rounded hover:bg-surface-3 text-text hover:text-accent transition-colors py-0.5"
+                          className="w-10 text-center rounded hover:bg-surface-3 text-text hover:text-text transition-colors py-0.5"
                           title="Reset (Ctrl+0)"
                         >{fontSize}px</button>
                         <button
@@ -266,6 +307,23 @@ export function TitleBar() {
                     </div>
                   ),
                 },
+                {
+                  id: 'reading-width',
+                  node: (
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-text-muted">Width</span>
+                      <button
+                        onClick={() => setReadableWidth(!readableWidth)}
+                        className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted hover:text-text transition-colors"
+                        title="Constrain editor content to a readable column"
+                      >
+                        <span className={!readableWidth ? 'text-text' : ''}>Full</span>
+                        <span className="opacity-30 px-0.5">/</span>
+                        <span className={readableWidth ? 'text-text' : ''}>Readable</span>
+                      </button>
+                    </div>
+                  ),
+                },
               ],
             },
           ]}
@@ -279,7 +337,7 @@ export function TitleBar() {
                 id: t.id,
                 label: t.label,
                 indicator: activeThemeId === t.id
-                  ? <Check size={10} className="text-accent" />
+                  ? <Check size={10} className="text-text" />
                   : undefined,
                 action: () => setTheme(t.id),
               })),

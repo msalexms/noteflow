@@ -15,6 +15,7 @@ const SECTIONS: ShortcutSection[] = [
     title: 'App',
     shortcuts: [
       { keys: ['Ctrl', 'Shift', 'Space'], description: 'Show / hide app (global)' },
+      { keys: ['Ctrl', 'P'], description: 'Command palette' },
       { keys: ['Ctrl', 'N'], description: 'New note' },
       { keys: ['Ctrl', 'Shift', 'N'], description: 'New temporary note (24h)' },
       { keys: ['Ctrl', 'Shift', 'F'], description: 'Search all notes' },

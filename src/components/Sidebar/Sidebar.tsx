@@ -2,14 +2,15 @@ import { useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, Search, Pin, PanelLeftClose, Trash2, PinOff, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer } from 'lucide-react'
+import { Archive, ArchiveRestore, Search, Star, StarOff, PanelLeftClose, Trash2, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, Folder, FolderOpen, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer, LayoutGrid } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { normalize, escapeRegExp, parseSearchQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
-import { useSidebarGroups } from './useSidebarGroups'
+import { NoteFolderHeader } from './NoteFolderHeader'
+import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
 import type { GroupColor } from '../../types'
 
@@ -43,7 +44,7 @@ function renderHighlightedText(text: string, query: string) {
   return parts.map((part, index) => (
     index % 2 === 1
       ? (
-        <mark key={`${part}-${index}`} className="bg-accent/25 text-accent rounded px-[1px]">
+        <mark key={`${part}-${index}`} className="bg-text/15 text-text rounded px-[1px]">
           {part}
         </mark>
       )
@@ -80,6 +81,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const showArchived = useNotesStore((s) => s.showArchived)
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
+  const setGroupView = useNotesStore((s) => s.setGroupView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
@@ -102,11 +104,21 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   const groups = useGroupsStore((s) => s.groups)
+  const folders = useGroupsStore((s) => s.folders)
   const collapsedGroupIds = useGroupsStore((s) => s.collapsedGroupIds)
+  const collapsedFolderIds = useGroupsStore((s) => s.collapsedFolderIds)
   const createGroup = useGroupsStore((s) => s.createGroup)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
+  const toggleGroupArchived = useGroupsStore((s) => s.toggleGroupArchived)
   const deleteGroup = useGroupsStore((s) => s.deleteGroup)
+  const reorderGroups = useGroupsStore((s) => s.reorderGroups)
   const toggleGroupCollapsed = useGroupsStore((s) => s.toggleGroupCollapsed)
+  const createFolder = useGroupsStore((s) => s.createFolder)
+  const renameFolder = useGroupsStore((s) => s.renameFolder)
+  const deleteFolder = useGroupsStore((s) => s.deleteFolder)
+  const toggleFolderCollapsed = useGroupsStore((s) => s.toggleFolderCollapsed)
+  const noteOrder = useGroupsStore((s) => s.noteOrder)
+  const setContextNoteOrder = useGroupsStore((s) => s.setContextNoteOrder)
 
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -125,6 +137,24 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     groupId: string
   } | null>(null)
 
+  // ── Folder context menu ────────────────────────────────────────────────────
+  const [folderContextMenu, setFolderContextMenu] = useState<{
+    x: number
+    y: number
+    folderId: string
+  } | null>(null)
+
+  // ── Folder picker (move note to folder) ────────────────────────────────────
+  const [folderPickerNoteId, setFolderPickerNoteId] = useState<string | null>(null)
+
+  // ── Folder rename inline ───────────────────────────────────────────────────
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
+  const [editingFolderName, setEditingFolderName] = useState('')
+
+  // ── New folder inline input (per group; optional note to assign on create) ──
+  const [newFolderInput, setNewFolderInput] = useState<{ groupId: string; noteId?: string } | null>(null)
+  const [newFolderName, setNewFolderName] = useState('')
+
   // ── Group picker / create inline ───────────────────────────────────────────
   const [groupPickerNoteId, setGroupPickerNoteId] = useState<string | null>(null)
   const [groupPickerFlip, setGroupPickerFlip] = useState<{ x: boolean; y: boolean }>({ x: false, y: false })
@@ -137,6 +167,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   // ── New group inline input ─────────────────────────────────────────────────
   const [newGroupInput, setNewGroupInput] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
+
+  // ── Group drag-to-reorder ──────────────────────────────────────────────────
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
+  const [groupDropTarget, setGroupDropTarget] = useState<{ groupId: string; position: 'before' | 'after' } | null>(null)
 
   // ── Confirm modal ──────────────────────────────────────────────────────────
   const [modal, setModal] = useState<{
@@ -162,12 +196,23 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
   const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
 
+  // ── Note reorder via drag & drop ───────────────────────────────────────────
+  const [noteDropTarget, setNoteDropTarget] = useState<{
+    noteId: string
+    position: 'before' | 'after'
+    contextKey: string
+  } | null>(null)
+  const draggingNoteContextRef = useRef<string | null>(null)
+  const draggingNoteIdRef = useRef<string | null>(null)
+
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
     const close = () => {
       setContextMenu(null)
       setGroupContextMenu(null)
+      setFolderContextMenu(null)
       setGroupPickerNoteId(null)
+      setFolderPickerNoteId(null)
       setGroupNameInput(null)
       setNewNoteCtx(null)
     }
@@ -189,9 +234,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     [searchQuery]
   )
 
+  // Ids of archived groups — used to hide their notes (and headers) unless "Show archived"
+  const archivedGroupIds = useMemo(
+    () => new Set(groups.filter((g) => g.archived).map((g) => g.id)),
+    [groups],
+  )
+
   const baseNotes = useMemo(() => {
     return rawNotes
-      .filter((n) => showArchived || !n.archived)
+      .filter((n) => showArchived || (!n.archived && !(n.group && archivedGroupIds.has(n.group))))
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
@@ -216,11 +267,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           n.tags.some((t) => normalize(t).includes(q))
         )
       })
-      .sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-        return new Date(b.updated).getTime() - new Date(a.updated).getTime()
-      })
-  }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery])
+      .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
+  }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery, archivedGroupIds])
 
   const notes = useMemo(() => {
     if (selectedDayKey) {
@@ -278,12 +326,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return markers
   }, [baseNotes])
 
-  const items = useSidebarGroups(notes, groups)
+  const items = useSidebarGroups(notes, groups, folders, noteOrder)
   const visibleNoteIds = useMemo(() => {
     const ids: string[] = []
     for (const item of items) {
       if (item.kind === 'group') {
         ids.push(...item.notes.map((note) => note.id))
+        for (const f of item.folders) ids.push(...f.notes.map((note) => note.id))
       } else {
         ids.push(item.note.id)
       }
@@ -328,7 +377,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   function closeAllMenus() {
     setContextMenu(null)
     setGroupContextMenu(null)
+    setFolderContextMenu(null)
     setGroupPickerNoteId(null)
+    setFolderPickerNoteId(null)
     setGroupNameInput(null)
   }
 
@@ -336,6 +387,34 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     const note = await createNote()
     await updateNote(note.id, { group: groupId })
     closeAllMenus()
+  }
+
+  async function createNoteInFolder(groupId: string, folderId: string) {
+    const note = await createNote()
+    await updateNote(note.id, { group: groupId, folder: folderId })
+    closeAllMenus()
+  }
+
+  // Open the inline "new folder" input inside a group, expanding it if collapsed.
+  function startNewFolder(groupId: string, noteId?: string) {
+    if (collapsedGroupIds.has(groupId)) toggleGroupCollapsed(groupId)
+    setNewFolderInput({ groupId, noteId })
+    setNewFolderName('')
+    closeAllMenus()
+  }
+
+  async function commitNewFolder() {
+    if (!newFolderInput || !newFolderName.trim()) {
+      setNewFolderInput(null)
+      setNewFolderName('')
+      return
+    }
+    const folder = await createFolder(newFolderInput.groupId, newFolderName.trim())
+    if (newFolderInput.noteId) {
+      await updateNote(newFolderInput.noteId, { group: newFolderInput.groupId, folder: folder.id })
+    }
+    setNewFolderInput(null)
+    setNewFolderName('')
   }
 
 
@@ -379,30 +458,160 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     }
   }
 
-  function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string) {
+  function getNoteContextKey(note: (typeof rawNotes)[0], inFavorites?: boolean): string {
+    if (inFavorites) return 'favorites'
+    if (note.folder) return `folder:${note.folder}`
+    if (note.group) return `group:${note.group}`
+    return 'ungrouped'
+  }
+
+  function handleNoteDragStart(e: React.DragEvent<HTMLButtonElement>, noteId: string, contextKey: string) {
     e.dataTransfer.setData('application/x-noteflow-note-id', noteId)
     e.dataTransfer.setData('text/plain', noteId)
     e.dataTransfer.effectAllowed = 'copyMove'
+    draggingNoteContextRef.current = contextKey
+    draggingNoteIdRef.current = noteId
     window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
       detail: { active: true, noteId },
     }))
   }
 
   function handleNoteDragEnd() {
+    draggingNoteContextRef.current = null
+    draggingNoteIdRef.current = null
+    setNoteDropTarget(null)
     window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
       detail: { active: false },
     }))
   }
 
-  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null) {
+  function handleNoteReorderDragOver(e: React.DragEvent<HTMLLIElement>, note: (typeof rawNotes)[0], contextKey: string) {
+    if (!draggingNoteContextRef.current) return
+    if (draggingNoteContextRef.current !== contextKey) return
+    if (draggingNoteIdRef.current === note.id) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setNoteDropTarget((prev) =>
+      prev?.noteId === note.id && prev.position === position ? prev : { noteId: note.id, position, contextKey }
+    )
+  }
+
+  function handleNoteReorderDrop(e: React.DragEvent<HTMLLIElement>, targetNote: (typeof rawNotes)[0], contextKey: string) {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('application/x-noteflow-note-id')
+    if (!draggedId || draggedId === targetNote.id) { setNoteDropTarget(null); return }
+    const position = noteDropTarget?.noteId === targetNote.id ? noteDropTarget.position : 'after'
+    setNoteDropTarget(null)
+
+    // Compute the ordered list for this context from the currently visible notes
+    const contextNotes = items.flatMap((item) => {
+      if (contextKey === 'ungrouped' && item.kind === 'note') return [item.note]
+      if (contextKey.startsWith('favorites')) return []
+      if (item.kind === 'group') {
+        if (contextKey === `group:${item.group.id}`) return item.notes
+        const folder = item.folders.find((f) => contextKey === `folder:${f.folder.id}`)
+        if (folder) return folder.notes
+      }
+      return []
+    })
+
+    const currentIds = contextNotes.map((n) => n.id)
+    const without = currentIds.filter((id) => id !== draggedId)
+    let targetIndex = without.indexOf(targetNote.id)
+    if (targetIndex === -1) { setNoteDropTarget(null); return }
+    if (position === 'after') targetIndex += 1
+    without.splice(targetIndex, 0, draggedId)
+    void setContextNoteOrder(contextKey, without)
+  }
+
+  function handleFavoritesReorderDrop(e: React.DragEvent<HTMLLIElement>, targetNote: (typeof rawNotes)[0]) {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('application/x-noteflow-note-id')
+    if (!draggedId || draggedId === targetNote.id) { setNoteDropTarget(null); return }
+    const position = noteDropTarget?.noteId === targetNote.id ? noteDropTarget.position : 'after'
+    setNoteDropTarget(null)
+
+    const favoriteNotes = notes.filter((n) => n.favorited)
+    const currentIds = (noteOrder['favorites'] ?? favoriteNotes.map((n) => n.id))
+      .filter((id) => favoriteNotes.some((n) => n.id === id))
+    const without = currentIds.filter((id) => id !== draggedId)
+    let targetIndex = without.indexOf(targetNote.id)
+    if (targetIndex === -1) { setNoteDropTarget(null); return }
+    if (position === 'after') targetIndex += 1
+    without.splice(targetIndex, 0, draggedId)
+    void setContextNoteOrder('favorites', without)
+  }
+
+  // ── Group reorder via drag & drop ──────────────────────────────────────────
+  function handleGroupDragStart(e: React.DragEvent, groupId: string) {
+    e.dataTransfer.setData('application/x-noteflow-group-id', groupId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggingGroupId(groupId)
+  }
+
+  function handleGroupDragOver(e: React.DragEvent, groupId: string) {
+    if (!draggingGroupId) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (groupId === draggingGroupId) {
+      setGroupDropTarget(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setGroupDropTarget((prev) =>
+      prev?.groupId === groupId && prev.position === position ? prev : { groupId, position }
+    )
+  }
+
+  function handleGroupDragEnd() {
+    setDraggingGroupId(null)
+    setGroupDropTarget(null)
+  }
+
+  function handleGroupDrop(e: React.DragEvent, targetId: string) {
+    if (!draggingGroupId) return
+    e.preventDefault()
+    const dragged = draggingGroupId
+    const position = groupDropTarget?.groupId === targetId ? groupDropTarget.position : 'before'
+    handleGroupDragEnd()
+    if (dragged === targetId) return
+
+    const ordered = [...groups].sort((a, b) => a.order - b.order).map((g) => g.id)
+    const without = ordered.filter((id) => id !== dragged)
+    let targetIndex = without.indexOf(targetId)
+    if (targetIndex === -1) return
+    if (position === 'after') targetIndex += 1
+    without.splice(targetIndex, 0, dragged)
+    void reorderGroups(without)
+  }
+
+  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean) {
     const isActive = activeNoteId === note.id
     const isSearchTarget = activeSearchNoteId === note.id
+    const contextKey = getNoteContextKey(note, inFavorites)
+    const isDropBefore = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'before'
+    const isDropAfter = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'after'
     return (
-      <li key={note.id} className="border-b border-border/30">
+      <li
+        key={inFavorites ? `fav-${note.id}` : note.id}
+        style={{ position: 'relative' }}
+        onDragOver={(e) => handleNoteReorderDragOver(e, note, contextKey)}
+        onDragLeave={() => setNoteDropTarget((prev) => prev?.noteId === note.id ? null : prev)}
+        onDrop={(e) => inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey)}
+      >
+        {isDropBefore && (
+          <div style={{ position: 'absolute', top: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
+        )}
+        {isDropAfter && (
+          <div style={{ position: 'absolute', bottom: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
+        )}
         <button
           data-note-id={note.id}
           draggable
-          onDragStart={(e) => handleNoteDragStart(e, note.id)}
+          onDragStart={(e) => handleNoteDragStart(e, note.id, contextKey)}
           onDragEnd={handleNoteDragEnd}
           onClick={(e) => {
             if (e.ctrlKey || e.metaKey) {
@@ -421,31 +630,26 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               sectionId: null,
             })
           }}
-          className={`relative w-full text-left px-4 py-2 transition-colors h-[64px] flex flex-col justify-center
-            ${isActive && !group ? 'bg-accent/10' : ''}
-            ${!isActive ? 'hover:bg-surface-2' : ''}
-            ${isSearchTarget ? 'ring-1 ring-inset ring-accent/50' : ''}`}
+          className={`relative block w-full text-left px-2.5 py-1.5 rounded-md transition-colors
+            ${!isActive ? 'hover:bg-surface-3' : ''}
+            ${isSearchTarget ? 'ring-1 ring-inset ring-text/25' : ''}`}
           style={{
-            borderRight: group ? 'none' : '2px solid transparent',
-            ...(isActive && group ? { background: `rgb(var(${group.color}) / 0.1)` } : {}),
-            ...(isSearchTarget && !isActive ? { background: 'rgb(var(--accent) / 0.08)' } : {}),
+            ...(indent != null ? { paddingLeft: indent } : {}),
+            ...(isActive
+              ? { background: group ? `rgb(var(${group.color}) / 0.14)` : 'rgb(var(--text) / 0.1)' }
+              : {}),
+            ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
           }}
           title="Ctrl/Cmd + click to open side by side"
         >
-          {isActive && (
-            <div
-              className="absolute left-1 top-2.5 bottom-2.5 w-[1px] rounded-full"
-              style={{ background: group ? `rgb(var(${group.color}))` : 'rgb(var(--accent))' }}
-            />
-          )}
           <div className="flex items-center gap-1 min-w-0">
-            {note.pinned && <Pin size={9} className="text-yellow-400 flex-shrink-0" />}
             {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
             {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
             <span className={`text-[13px] font-mono font-medium truncate flex-1
               ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
               {renderHighlightedText(note.title || 'Untitled', searchQuery)}
             </span>
+            {note.favorited && <Star size={8} className="text-yellow-400/70 flex-shrink-0" fill="currentColor" />}
             <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
               {formatNoteDate(note.updated)}
             </span>
@@ -481,6 +685,84 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           />
         </button>
       </li>
+    )
+  }
+
+  function renderFolder(group: { id: string; color: GroupColor }, sf: SidebarFolder) {
+    const { folder, notes: folderNotes } = sf
+    const collapsed = collapsedFolderIds.has(folder.id)
+    if (hasActiveFilters && folderNotes.length === 0) return null
+    return (
+      <div key={`folder-${folder.id}`}>
+        {editingFolderId === folder.id ? (
+          <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
+            <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(var(${group.color}) / 0.22)`} style={{ color: `rgb(var(${group.color}))` }} />
+            <input
+              autoFocus
+              value={editingFolderName}
+              onChange={(e) => setEditingFolderName(e.target.value)}
+              onBlur={() => {
+                if (editingFolderName.trim()) renameFolder(folder.id, editingFolderName.trim())
+                setEditingFolderId(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (editingFolderName.trim()) renameFolder(folder.id, editingFolderName.trim())
+                  setEditingFolderId(null)
+                }
+                if (e.key === 'Escape') setEditingFolderId(null)
+              }}
+              className="flex-1 text-[11.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        ) : (
+          <NoteFolderHeader
+            folder={folder}
+            groupColor={group.color}
+            noteCount={folderNotes.length}
+            collapsed={collapsed}
+            onToggle={() => toggleFolderCollapsed(folder.id)}
+            onContextMenu={(e) => {
+              setFolderContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 160), folderId: folder.id })
+            }}
+          />
+        )}
+
+        {/* Animated collapsible body with a colored guide line */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateRows: collapsed ? '0fr' : '1fr',
+            transition: 'grid-template-rows 180ms ease',
+          }}
+        >
+          <div style={{ overflow: 'hidden', position: 'relative' }}>
+            <div style={{
+              position: 'absolute',
+              left: '14px', top: '3px', bottom: '5px',
+              width: '1px',
+              background: `rgb(var(${group.color}) / 0.22)`,
+              pointerEvents: 'none',
+              zIndex: 1,
+            }} />
+            <ul className="flex flex-col gap-0.5 mt-0.5">
+              {folderNotes.map((note) => renderNoteButton(note, group, 26))}
+              {folderNotes.length === 0 && (
+                <li>
+                  <button
+                    onClick={() => createNoteInFolder(group.id, folder.id)}
+                    className="w-full text-left pl-[26px] pr-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus size={10} />
+                    New note
+                  </button>
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -546,7 +828,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onKeyDown={handleSearchKeyDown}
             className="w-full pl-7 pr-7 py-1.5 bg-surface-2 border border-border rounded text-xs
                        font-mono text-text placeholder-text-muted/40 outline-none
-                       focus:border-accent/50 transition-colors caret-accent"
+                       focus:border-text/30 transition-colors caret-text"
           />
           {hasSearchFilter && (
             <button
@@ -564,12 +846,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
                      hover:bg-surface-2 transition-colors"
         >
-          <PanelLeftClose size={13} />
+          <PanelLeftClose size={14} strokeWidth={2.5} />
         </button>
       </div>
 
       {/* ── Date filter ────────────────────────────────────────────────────── */}
-      <div className="border-t border-b border-border">
+      <div>
         <div className="flex gap-1 px-3 py-2">
           {(['all', 'today', 'week', 'month'] as const).map((opt) => {
             const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
@@ -583,7 +865,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 }}
                 className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
                 style={active
-                  ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+                  ? { color: 'rgb(var(--text))', background: 'rgb(var(--text) / 0.12)', border: '1px solid rgb(var(--text) / 0.25)' }
                   : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
                 }
               >
@@ -598,7 +880,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onClick={() => setCalendarExpanded((prev) => !prev)}
             className="flex-1 flex items-center justify-center py-0.5 rounded text-xs font-mono transition-colors"
             style={calendarExpanded || selectedDayKey
-              ? { color: 'rgb(var(--accent))', background: 'rgb(var(--accent) / 0.22)', border: '1px solid rgb(var(--accent) / 0.5)' }
+              ? { color: 'rgb(var(--text))', background: 'rgb(var(--text) / 0.12)', border: '1px solid rgb(var(--text) / 0.25)' }
               : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
             }
             title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
@@ -609,7 +891,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <button
               onClick={() => setSelectedDayKey(null)}
               className="p-0.5 rounded transition-colors"
-              style={{ color: 'rgb(var(--accent))' }}
+              style={{ color: 'rgb(var(--text))' }}
               title="Clear day filter"
             >
               <X size={13} />
@@ -618,7 +900,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </div>
         {selectedDayKey && !calendarExpanded && (
           <div className="px-3 pb-2">
-            <span className="text-[10px] font-mono text-accent">
+            <span className="text-[10px] font-mono text-text">
               {format(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
             </span>
           </div>
@@ -682,13 +964,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
                       style={isSelected
                         ? {
-                            background: 'rgb(var(--accent) / 0.22)',
-                            border: '1px solid rgb(var(--accent) / 0.5)',
-                            color: 'rgb(var(--accent))',
+                            background: 'rgb(var(--text) / 0.12)',
+                            border: '1px solid rgb(var(--text) / 0.25)',
+                            color: 'rgb(var(--text))',
                           }
                         : {
                             background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
-                            border: today ? '1px solid rgb(var(--accent) / 0.35)' : '1px solid rgb(var(--border) / 0.4)',
+                            border: today ? '1px solid rgb(var(--text) / 0.2)' : '1px solid rgb(var(--border) / 0.4)',
                             color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
                           }
                       }
@@ -699,7 +981,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
                         )}
                         {marker && marker.updated > 0 && (
-                          <span className="w-[4px] h-[4px] rounded-full bg-accent" />
+                          <span className="w-[4px] h-[4px] rounded-full bg-text/50" />
                         )}
                       </span>
                     </button>
@@ -713,15 +995,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
 
       {/* ── New note / new group buttons ────────────────────────────────────── */}
-      <div className="px-3 py-2 border-b border-border space-y-1.5">
+      <div className="px-3 pt-2 pb-2 space-y-1.5">
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => createNote()}
             onContextMenu={(e) => { e.preventDefault(); setNewNoteCtx({ x: e.clientX, y: e.clientY }) }}
             title="New note (Ctrl+N) · Right-click for temporary note"
             className="flex-1 py-1.5 rounded text-xs font-mono transition-all
-                       bg-accent/10 text-accent border border-accent/20
-                       hover:bg-accent/20 hover:border-accent/40"
+                       bg-surface-2 text-text border border-text/20
+                       hover:bg-surface-3 hover:border-text/30"
           >
             + New note
           </button>
@@ -731,7 +1013,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
                        hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
           >
-            <FolderPlus size={13} />
+            <FolderPlus size={14} strokeWidth={2.5} />
           </button>
         </div>
         {newGroupInput && (
@@ -752,7 +1034,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             }}
             onBlur={() => { setNewGroupInput(false); setNewGroupName('') }}
             placeholder="Group name…"
-            className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-accent/50 rounded outline-none text-text placeholder-text-muted/40 caret-accent"
+            className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text placeholder-text-muted/40 caret-text"
           />
         )}
       </div>
@@ -765,28 +1047,64 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <span className="text-xs font-mono">{rawNotes.length > 0 ? 'No notes match current filters' : 'No notes'}</span>
           </div>
         ) : (
-          <ul className="pt-2 pb-1">
+          <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-2">
+            {/* ── Favorites section ───────────────────────────────────────── */}
+            {(() => {
+              const allFavorites = notes.filter((n) => n.favorited)
+              if (allFavorites.length === 0) return null
+              const favOrder = noteOrder['favorites']
+              const favoriteNotes = favOrder
+                ? [...favOrder.map((id) => allFavorites.find((n) => n.id === id)).filter((n): n is typeof allFavorites[0] => n != null),
+                   ...allFavorites.filter((n) => !favOrder.includes(n.id))]
+                : allFavorites
+              return (
+                <>
+                  <li className="px-1 pt-0.5 pb-0.5">
+                    <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">favorites</span>
+                  </li>
+                  {favoriteNotes.map((note) => {
+                    const noteGroup = note.group ? groups.find((g) => g.id === note.group) ?? null : null
+                    return renderNoteButton(note, noteGroup, undefined, true)
+                  })}
+                  <li className="px-1 pt-2 pb-1.5">
+                    <div className="h-px bg-border/50" />
+                  </li>
+                </>
+              )
+            })()}
             {items.map((item) => {
               if (item.kind === 'group') {
-                const { group, notes: groupNotes } = item
+                const { group, notes: groupNotes, folders: groupFolders } = item
                 const collapsed = collapsedGroupIds.has(group.id)
-                if (hasActiveFilters && groupNotes.length === 0) return null
+                if (hasActiveFilters && item.visibleCount === 0) return null
+                // Archived groups are hidden unless "Show archived" is on (then shown dimmed)
+                if (group.archived && !showArchived) return null
                 return (
-                  <li key={`group-${group.id}`}>
-                    {/* Group header / rename input — with right border that fades in when expanded */}
-                    <div style={{ position: 'relative' }}>
-                      <div style={{
-                        position: 'absolute',
-                        top: 0, right: 0, bottom: 0,
-                        width: '1px',
-                        background: `rgb(var(${group.color}) / 0.5)`,
-                        opacity: collapsed ? 0 : 1,
-                        transition: 'opacity 180ms ease',
-                        pointerEvents: 'none',
-                        zIndex: 1,
-                      }} />
+                  <li key={`group-${group.id}`} className={`first:mt-0 mt-2.5 ${group.archived ? 'opacity-50' : ''}`}>
+                    {/* Group header / rename input — draggable to reorder groups */}
+                    <div
+                      style={{ position: 'relative', opacity: draggingGroupId === group.id ? 0.4 : 1 }}
+                      draggable={editingGroupId !== group.id}
+                      onDragStart={(e) => handleGroupDragStart(e, group.id)}
+                      onDragOver={(e) => handleGroupDragOver(e, group.id)}
+                      onDrop={(e) => handleGroupDrop(e, group.id)}
+                      onDragEnd={handleGroupDragEnd}
+                    >
+                      {/* Drop insertion indicator */}
+                      {groupDropTarget?.groupId === group.id && (
+                        <div style={{
+                          position: 'absolute',
+                          left: 0, right: 0,
+                          [groupDropTarget.position === 'before' ? 'top' : 'bottom']: -5,
+                          height: '2px',
+                          borderRadius: '2px',
+                          background: 'rgb(var(--text) / 0.5)',
+                          zIndex: 5,
+                          pointerEvents: 'none',
+                        }} />
+                      )}
                       {editingGroupId === group.id ? (
-                        <div className="flex items-center gap-2 px-3 py-1.5">
+                        <div className="flex items-center gap-2 px-2 py-1.5">
                           <span
                             className="w-2 h-2 rounded-full flex-shrink-0"
                             style={{ background: `rgb(var(${group.color}))` }}
@@ -806,7 +1124,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                               }
                               if (e.key === 'Escape') setEditingGroupId(null)
                             }}
-                            className="flex-1 text-[11px] font-mono bg-surface-1 border border-accent/50 rounded px-1 outline-none text-text"
+                            className="flex-1 text-[11px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text"
                             onClick={(e) => e.stopPropagation()}
                           />
                         </div>
@@ -816,6 +1134,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           noteCount={item.visibleCount}
                           collapsed={collapsed}
                           onToggle={() => toggleGroupCollapsed(group.id)}
+                          onOpenGroupView={() => {
+                            if (collapsedGroupIds.has(group.id)) toggleGroupCollapsed(group.id)
+                            setGroupView(group.id)
+                          }}
                           onContextMenu={(e) => {
                             setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
                           }}
@@ -831,33 +1153,43 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                         transition: 'grid-template-rows 180ms ease',
                       }}
                     >
-                      {/* overflow:hidden clips the line and cap, revealing them top→bottom as the grid expands */}
+                      {/* overflow:hidden reveals the notes top→bottom as the grid expands */}
                       <div style={{ overflow: 'hidden', position: 'relative' }}>
-                        {/* Right border line */}
+                        {/* Group guide line — sits one level left of the folder guides */}
                         <div style={{
                           position: 'absolute',
-                          top: 0, right: 0, bottom: 0,
+                          left: '1px', top: '3px', bottom: '5px',
                           width: '1px',
                           background: `rgb(var(${group.color}) / 0.5)`,
                           pointerEvents: 'none',
                           zIndex: 1,
                         }} />
-                        {/* Bottom cap */}
-                        <div style={{
-                          position: 'absolute',
-                          bottom: 0, right: 0,
-                          width: '25px', height: '1px',
-                          background: `rgb(var(${group.color}) / 0.5)`,
-                          pointerEvents: 'none',
-                          zIndex: 1,
-                        }} />
-                        <ul>
+                        {/* Inline "new folder" input */}
+                        {newFolderInput?.groupId === group.id && (
+                          <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
+                            <Folder size={12} className="flex-shrink-0" fill={`rgb(var(${group.color}) / 0.16)`} style={{ color: `rgb(var(${group.color}))` }} />
+                            <input
+                              autoFocus
+                              value={newFolderName}
+                              onChange={(e) => setNewFolderName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitNewFolder()
+                                if (e.key === 'Escape') { setNewFolderInput(null); setNewFolderName('') }
+                              }}
+                              onBlur={() => void commitNewFolder()}
+                              placeholder="Folder name…"
+                              className="flex-1 text-[11.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text placeholder-text-muted/40"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                        )}
+                        <ul className="flex flex-col gap-0.5 mt-0.5">
                           {groupNotes.map((note) => renderNoteButton(note, group))}
-                          {groupNotes.length === 0 && (
+                          {groupNotes.length === 0 && groupFolders.length === 0 && !newFolderInput && (
                             <li>
                               <button
                                 onClick={() => createNoteInGroup(group.id)}
-                                className="w-full text-left px-4 py-2 text-xs font-mono text-text-muted hover:text-accent flex items-center gap-1.5 transition-colors"
+                                className="w-full text-left px-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
                               >
                                 <Plus size={10} />
                                 New note
@@ -865,9 +1197,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                             </li>
                           )}
                         </ul>
+                        {/* Subfolders */}
+                        {groupFolders.length > 0 && (
+                          <div className="flex flex-col gap-0.5 mt-0.5">
+                            {groupFolders.map((sf) => renderFolder(group, sf))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="border-b border-border/40" />
                   </li>
                 )
               }
@@ -888,7 +1225,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         >
           <button
             onClick={() => { createTempNote(); setNewNoteCtx(null) }}
-            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <Timer size={12} />
             Temporary note (24h)
@@ -914,15 +1251,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <button
-              onClick={() => { updateNote(note.id, { pinned: !note.pinned }); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              onClick={() => { updateNote(note.id, { favorited: !note.favorited }); closeAllMenus() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
-              {note.pinned ? <PinOff size={12} /> : <Pin size={12} />}
-              {note.pinned ? 'Unpin note' : 'Pin note'}
+              {note.favorited ? <StarOff size={12} /> : <Star size={12} />}
+              {note.favorited ? 'Remove from favorites' : 'Add to favorites'}
             </button>
             <button
               onClick={() => { archiveNote(note.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Archive size={12} />
               {note.archived ? 'Unarchive' : 'Archive'}
@@ -930,7 +1267,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {!note.encryption && (
               <button
                 onClick={() => { closeAllMenus(); setEncModal({ mode: 'encrypt', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
               >
                 <Lock size={12} />
                 Encrypt note
@@ -939,7 +1276,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && !sessionPasswords[note.id] && (
               <button
                 onClick={() => { closeAllMenus(); setEncModal({ mode: 'unlock', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
               >
                 <Unlock size={12} />
                 Unlock note
@@ -948,7 +1285,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && !!sessionPasswords[note.id] && (
               <button
                 onClick={() => { lockNote(note.id); closeAllMenus() }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
               >
                 <Lock size={12} />
                 Lock note
@@ -957,7 +1294,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && (
               <button
                 onClick={() => { closeAllMenus(); setEncModal({ mode: 'remove', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
               >
                 <Unlock size={12} />
                 Remove encryption
@@ -968,14 +1305,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 openNoteInSplit(note.id)
                 closeAllMenus()
               }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Columns2 size={12} />
               Open alongside
             </button>
             <button
               onClick={() => { duplicateNote(note.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Copy size={12} />
               Duplicate note
@@ -1010,8 +1347,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       }}
                       className={`px-1.5 h-4 rounded text-[9px] font-mono border transition-colors ${
                         currentSectionColor
-                          ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
-                          : 'text-accent border-accent/50 bg-accent/10'
+                          ? 'text-text-muted border-border hover:text-text hover:border-text/30'
+                          : 'text-text border-text/25 bg-surface-2'
                       }`}
                     >
                       Auto
@@ -1024,13 +1361,93 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {/* ── Group section ── */}
             <div className="h-px bg-border my-1" />
             {currentGroup ? (
-              <button
-                onClick={() => { updateNote(note.id, { group: undefined }); closeAllMenus() }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
-              >
-                <FolderMinus size={12} />
-                Remove from group
-              </button>
+              <>
+                {/* Move to folder submenu */}
+                <div
+                  className="relative"
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const groupFolders = folders.filter((f) => f.groupId === currentGroup.id)
+                    const submenuW = 160
+                    const submenuH = (groupFolders.length + 2) * 34
+                    setGroupPickerFlip({
+                      x: rect.right + submenuW > window.innerWidth,
+                      y: rect.top + submenuH > window.innerHeight,
+                    })
+                    setFolderPickerNoteId(note.id)
+                  }}
+                  onMouseLeave={() => setFolderPickerNoteId(null)}
+                >
+                  <button
+                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+                  >
+                    <Folder size={12} />
+                    Move to folder
+                    <ChevronRight size={10} className="ml-auto" />
+                  </button>
+
+                  {folderPickerNoteId === note.id && (() => {
+                    const groupFolders = folders.filter((f) => f.groupId === currentGroup.id)
+                    return (
+                      <div
+                        className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 animate-in fade-in zoom-in duration-100"
+                        style={{
+                          [groupPickerFlip.x ? 'right' : 'left']: '100%',
+                          [groupPickerFlip.y ? 'bottom' : 'top']: 0,
+                        }}
+                      >
+                        {note.folder && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              updateNote(note.id, { folder: undefined })
+                              closeAllMenus()
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+                          >
+                            <FolderMinus size={12} />
+                            Group root
+                          </button>
+                        )}
+                        {groupFolders.map((f) => (
+                          <button
+                            key={f.id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              updateNote(note.id, { folder: f.id })
+                              closeAllMenus()
+                            }}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 transition-colors hover:bg-surface-3 hover:text-text ${note.folder === f.id ? 'text-text' : 'text-text-muted'}`}
+                          >
+                            <Folder size={12} className="flex-shrink-0" style={{ color: `rgb(var(${currentGroup.color}))` }} />
+                            <span className="truncate">{f.name}</span>
+                          </button>
+                        ))}
+                        {groupFolders.length === 0 && (
+                          <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">No folders yet</div>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            startNewFolder(currentGroup.id, note.id)
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
+                        >
+                          + New folder…
+                        </button>
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                <button
+                  onClick={() => { updateNote(note.id, { group: undefined, folder: undefined }); closeAllMenus() }}
+                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+                >
+                  <FolderMinus size={12} />
+                  Remove from group
+                </button>
+              </>
             ) : (
               <>
                 <div
@@ -1054,7 +1471,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       e.stopPropagation()
                       if (groups.length === 0) setGroupNameInput({ noteId: note.id, value: '' })
                     }}
-                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
                   >
                     <FolderPlus size={12} />
                     Add to group
@@ -1078,7 +1495,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                             updateNote(note.id, { group: g.id })
                             closeAllMenus()
                           }}
-                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
                         >
                           <span
                             className="w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -1093,7 +1510,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           setGroupPickerNoteId(null)
                           setGroupNameInput({ noteId: note.id, value: '' })
                         }}
-                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-accent/10 hover:text-accent transition-colors"
+                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
                       >
                         + New group…
                       </button>
@@ -1117,7 +1534,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       if (e.key === 'Escape') setGroupNameInput(null)
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="mx-3 my-1 px-2 py-1 text-xs font-mono bg-surface-1 border border-accent/50 rounded outline-none text-text w-[calc(100%-1.5rem)] block"
+                    className="mx-3 my-1 px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text w-[calc(100%-1.5rem)] block"
                     placeholder="Group name…"
                   />
                 )}
@@ -1133,7 +1550,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     if (targetSectionId) window.noteflow.openSticky(note.id, targetSectionId)
                     closeAllMenus()
                   }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
                 >
                   <ExternalLink size={12} />
                   Open as Sticky Note
@@ -1177,11 +1594,26 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              onClick={(e) => { e.stopPropagation(); setGroupView(group.id); closeAllMenus() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <LayoutGrid size={12} />
+              View group
+            </button>
+            <div className="h-px bg-border my-1" />
+            <button
               onClick={(e) => { e.stopPropagation(); createNoteInGroup(group.id) }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Plus size={12} />
               New note
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); startNewFolder(group.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <FolderPlus size={12} />
+              New folder
             </button>
             <div className="h-px bg-border my-1" />
             <button
@@ -1191,7 +1623,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 setEditingGroupName(group.name)
                 setGroupContextMenu(null)
               }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-accent/10 hover:text-accent flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               Rename group
             </button>
@@ -1216,6 +1648,19 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 ))}
               </div>
             </div>
+
+            <div className="h-px bg-border my-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleGroupArchived(group.id)
+                setGroupContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              {group.archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+              {group.archived ? 'Unarchive group' : 'Archive group'}
+            </button>
 
             <div className="h-px bg-border my-1" />
             <button
@@ -1247,12 +1692,63 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         )
       })()}
 
+      {/* ── Folder Context Menu ──────────────────────────────────────────────── */}
+      {folderContextMenu && (() => {
+        const folder = folders.find(f => f.id === folderContextMenu.folderId)
+        if (!folder) return null
+        return (
+          <div
+            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
+            style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={(e) => { e.stopPropagation(); createNoteInFolder(folder.groupId, folder.id) }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <Plus size={12} />
+              New note
+            </button>
+            <div className="h-px bg-border my-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setEditingFolderId(folder.id)
+                setEditingFolderName(folder.name)
+                setFolderContextMenu(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              Rename folder
+            </button>
+            <div className="h-px bg-border my-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setFolderContextMenu(null)
+                setModal({
+                  title: 'Delete folder',
+                  message: `"${folder.name}" will be deleted. Notes inside will move to the group root.`,
+                  confirmLabel: 'Delete',
+                  danger: true,
+                  onConfirm: () => { setModal(null); deleteFolder(folder.id) },
+                })
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
+            >
+              <Trash2 size={12} />
+              Delete folder
+            </button>
+          </div>
+        )
+      })()}
+
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <div className="px-3 py-2 border-t border-border flex items-center justify-between">
         <button
           onClick={() => setShowArchived(!showArchived)}
           className={`flex items-center gap-1 text-xs font-mono transition-colors
-            ${showArchived ? 'text-accent' : 'text-text-muted hover:text-text'}`}
+            ${showArchived ? 'text-text' : 'text-text-muted hover:text-text'}`}
         >
           <Archive size={10} />
           {showArchived ? 'Hide archived' : 'Show archived'}

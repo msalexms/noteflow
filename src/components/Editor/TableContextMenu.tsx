@@ -8,7 +8,11 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react'
+import { setColumnAlign } from './tableUtils'
 
 interface Props {
   editor: Editor
@@ -29,6 +33,11 @@ export function TableContextMenu({ editor }: Props) {
       const target = e.target as HTMLElement | null
       if (!target || !target.closest('table')) return
       e.preventDefault()
+      // Move the cursor to the right-clicked cell so menu actions (add/delete
+      // row/col, alignment) act on the cell under the pointer, not wherever the
+      // caret happened to be.
+      const at = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+      if (at) editor.commands.setTextSelection(at.pos)
       setPos({ x: e.clientX, y: e.clientY })
     }
     dom.addEventListener('contextmenu', handleContextMenu)
@@ -58,9 +67,13 @@ export function TableContextMenu({ editor }: Props) {
 
   // Clamp to viewport so the menu doesn't overflow the window edges.
   const MENU_W = 180
-  const MENU_H = 260
+  const MENU_H = 360
   const left = Math.min(pos.x, window.innerWidth - MENU_W - 4)
   const top  = Math.min(pos.y, window.innerHeight - MENU_H - 4)
+
+  // The header row must stay at row 0 (markdown tables require a header), so
+  // block actions that would remove it or push a body row above it.
+  const inHeader = editor.isActive('tableHeader')
 
   return (
     <div
@@ -68,13 +81,13 @@ export function TableContextMenu({ editor }: Props) {
       style={{ left, top, minWidth: MENU_W }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <MenuItem onClick={run(() => editor.chain().focus().addRowBefore().run())}>
+      <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().addRowBefore().run())}>
         <Plus size={11} /> Row <ArrowUp size={11} />
       </MenuItem>
       <MenuItem onClick={run(() => editor.chain().focus().addRowAfter().run())}>
         <Plus size={11} /> Row <ArrowDown size={11} />
       </MenuItem>
-      <MenuItem onClick={run(() => editor.chain().focus().deleteRow().run())}>
+      <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().deleteRow().run())}>
         <Minus size={11} /> Row
       </MenuItem>
       <div className="my-1 border-t border-border" />
@@ -88,6 +101,16 @@ export function TableContextMenu({ editor }: Props) {
         <Minus size={11} /> Col
       </MenuItem>
       <div className="my-1 border-t border-border" />
+      <MenuItem onClick={run(() => setColumnAlign(editor, 'left'))}>
+        <AlignLeft size={11} /> Align left
+      </MenuItem>
+      <MenuItem onClick={run(() => setColumnAlign(editor, 'center'))}>
+        <AlignCenter size={11} /> Align center
+      </MenuItem>
+      <MenuItem onClick={run(() => setColumnAlign(editor, 'right'))}>
+        <AlignRight size={11} /> Align right
+      </MenuItem>
+      <div className="my-1 border-t border-border" />
       <MenuItem onClick={run(() => editor.chain().focus().deleteTable().run())}>
         <Trash2 size={11} /> Delete table
       </MenuItem>
@@ -95,11 +118,16 @@ export function TableContextMenu({ editor }: Props) {
   )
 }
 
-function MenuItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+function MenuItem({ onClick, children, disabled }: { onClick: () => void; children: React.ReactNode; disabled?: boolean }) {
   return (
     <button
-      onClick={onClick}
-      className="flex items-center gap-1.5 w-full px-3 py-1.5 text-left text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      className={`flex items-center gap-1.5 w-full px-3 py-1.5 text-left transition-colors
+        ${disabled
+          ? 'text-text-muted/30 cursor-not-allowed'
+          : 'text-text-muted hover:text-text hover:bg-surface-3'
+        }`}
     >
       {children}
     </button>

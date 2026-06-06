@@ -82,6 +82,36 @@ button {
   caret-color: rgb(var(--accent));
 }
 
+/* Readable line-length column (optional, toggled in Editor settings).
+   Text-level blocks and code blocks are constrained and centered; only tables
+   and images stay full-width and "break out" of the reading column.
+   The column width is derived from the BODY font size (not each element's own
+   font), so larger headings share the exact same column — otherwise their `ch`
+   would scale up and effectively break out. ~72 mono chars at the base size. */
+.editor-readable {
+  --readable-col: calc(var(--prose-font-size, 13px) * 52);
+}
+.editor-readable .prose-editor .ProseMirror > p,
+.editor-readable .prose-editor .ProseMirror > h1,
+.editor-readable .prose-editor .ProseMirror > h2,
+.editor-readable .prose-editor .ProseMirror > h3,
+.editor-readable .prose-editor .ProseMirror > ul,
+.editor-readable .prose-editor .ProseMirror > ol,
+.editor-readable .prose-editor .ProseMirror > blockquote,
+.editor-readable .prose-editor .ProseMirror > hr {
+  max-width: var(--readable-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Code blocks are React NodeViews — their wrapper may not be a direct child of
+   .ProseMirror, so match by descendant (not `>`) to constrain them too. */
+.editor-readable .prose-editor .ProseMirror .code-block-node {
+  max-width: var(--readable-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: rgb(var(--text-muted));
@@ -463,7 +493,7 @@ button {
 .no-drag { -webkit-app-region: no-drag; }
 
 /* ── Tab scrollbar: space reserved, thumb visible only on hover ──────────── */
-.tabs-scroll { padding-bottom: 2px; }
+.tabs-scroll { padding-bottom: 0; }
 .tabs-scroll::-webkit-scrollbar { height: 4px; }
 .tabs-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .tabs-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
@@ -472,7 +502,7 @@ button {
 .notes-list-scroll::-webkit-scrollbar-thumb { background: transparent; }
 .notes-list-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
 
-/* ── Sidebar section tabs: hide native scrollbar (navigation via arrow btns) */
+/* ── Sidebar section tabs: hide native scrollbar (edges faded via CSS mask) */
 .section-tabs-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 .section-tabs-scroll::-webkit-scrollbar { display: none; }
 
@@ -526,15 +556,16 @@ button {
 .prose-editor .ProseMirror .selectedCell {
   background: rgb(var(--accent) / 0.15);
 }
-.prose-editor .ProseMirror .column-resize-handle {
-  position: absolute;
-  right: -2px;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: rgb(var(--accent) / 0.6);
-  pointer-events: none;
-}
 .prose-editor .ProseMirror .tableWrapper {
   overflow-x: auto;
+}
+/* Guide text in empty header cells so they never look like blank grey bars.
+   An empty ProseMirror textblock renders as <p><br class="ProseMirror-trailingBreak"></p>. */
+.prose-editor .ProseMirror th > p:has(> br.ProseMirror-trailingBreak:only-child)::before {
+  content: 'Column';
+  color: rgb(var(--text-muted) / 0.45);
+  font-weight: 400;
+  pointer-events: none;
+  float: left;
+  height: 0;
 }

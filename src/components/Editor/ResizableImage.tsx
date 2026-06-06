@@ -50,7 +50,7 @@ function ResizableImageView({ node, updateAttributes, selected }: NodeViewProps)
         lineHeight: 0,
         verticalAlign: 'bottom',
         margin: '0.25rem 0',
-        outline: selected ? '2px solid rgb(var(--accent))' : 'none',
+        outline: selected ? '2px solid rgb(var(--text) / 0.5)' : 'none',
         outlineOffset: '2px',
         borderRadius: '4px',
         cursor: resizing ? 'nwse-resize' : undefined,

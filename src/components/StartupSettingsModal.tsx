@@ -62,7 +62,7 @@ export function StartupSettingsModal({ onClose }: StartupSettingsModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <Monitor size={13} className="text-accent" />
+            <Monitor size={13} className="text-text" />
             <span className="text-sm font-mono font-semibold text-text">Startup settings</span>
           </div>
           <button
@@ -91,7 +91,7 @@ export function StartupSettingsModal({ onClose }: StartupSettingsModalProps) {
                 onClick={() => handleToggleLogin(!openAtLogin)}
                 title={openAtLogin ? 'Disable launch on startup' : 'Enable launch on startup'}
                 className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
-                  openAtLogin ? 'bg-accent' : 'bg-surface-3 border border-border'
+                  openAtLogin ? 'bg-text/70' : 'bg-surface-3 border border-border'
                 }`}
               >
                 <span

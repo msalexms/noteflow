@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
 import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
+import { GroupOverview } from './components/GroupOverview/GroupOverview'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
-const SIDEBAR_DEFAULT = 256
+const SIDEBAR_DEFAULT = 300
 const PANE_MIN_WIDTH = 360
 const PANE_MAX_WIDTH = 1200
 const PANE_DEFAULT_WIDTH = 520
@@ -23,6 +24,8 @@ export function App() {
   const notes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
+  const groupViewId = useNotesStore((s) => s.groupViewId)
+  const setGroupView = useNotesStore((s) => s.setGroupView)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
@@ -31,6 +34,7 @@ export function App() {
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [isSidebarDragging, setIsSidebarDragging] = useState(false)
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null)
   const [editorDropActive, setEditorDropActive] = useState(false)
   const [stickyDropActive, setStickyDropActive] = useState(false)
@@ -156,6 +160,7 @@ export function App() {
     isDragging.current = true
     dragStartX.current = e.clientX
     dragStartW.current = sidebarWidth
+    setIsSidebarDragging(true)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }, [sidebarWidth])
@@ -170,6 +175,7 @@ export function App() {
     const onUp = () => {
       if (!isDragging.current) return
       isDragging.current = false
+      setIsSidebarDragging(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -184,13 +190,15 @@ export function App() {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ active?: boolean; noteId?: string }>).detail
-      if (detail?.active) {
-        setDraggingNoteId(detail.noteId ?? null)
-      } else {
-        setDraggingNoteId(null)
-        setEditorDropActive(false)
-        setStickyDropActive(false)
-      }
+      startTransition(() => {
+        if (detail?.active) {
+          setDraggingNoteId(detail.noteId ?? null)
+        } else {
+          setDraggingNoteId(null)
+          setEditorDropActive(false)
+          setStickyDropActive(false)
+        }
+      })
     }
 
     window.addEventListener('noteflow:note-drag', handler)
@@ -415,20 +423,28 @@ export function App() {
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* ── Sidebar ───────────────────────────────────────────────── */}
-        {sidebarVisible && (
-          <>
-            <div style={{ width: sidebarWidth, minWidth: sidebarWidth }} className="flex-shrink-0 overflow-hidden">
-              <Sidebar onCollapse={() => setSidebarVisible(false)} />
-            </div>
+        <div
+          style={{
+            width: sidebarVisible ? sidebarWidth : 0,
+            minWidth: 0,
+            flexShrink: 0,
+            overflow: 'hidden',
+            transition: isSidebarDragging ? 'none' : 'width 220ms ease',
+          }}
+        >
+          <div style={{ width: sidebarWidth, minWidth: sidebarWidth, height: '100%' }}>
+            <Sidebar onCollapse={() => setSidebarVisible(false)} />
+          </div>
+        </div>
 
-            {/* Drag handle */}
-            <div
-              onMouseDown={handleDragStart}
-              className="w-1 flex-shrink-0 cursor-col-resize hover:bg-accent/40 active:bg-accent/60
-                         transition-colors group relative z-10"
-              title="Drag to resize"
-            />
-          </>
+        {/* Drag handle */}
+        {sidebarVisible && (
+          <div
+            onMouseDown={handleDragStart}
+            className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
+                       transition-colors group relative z-10"
+            title="Drag to resize"
+          />
         )}
 
         {/* ── Collapse / expand toggle ──────────────────────────────── */}
@@ -446,15 +462,17 @@ export function App() {
 
         {/* ── Main editor ──────────────────────────────────────────── */}
         <main
-          className={`flex-1 overflow-hidden relative ${editorDropActive ? 'ring-1 ring-inset ring-accent/40' : ''}`}
+          className={`flex-1 overflow-hidden relative ${editorDropActive ? 'ring-1 ring-inset ring-text/30' : ''}`}
           style={{ background: 'rgb(var(--bg-editor))' }}
           onDragOver={handleEditorDragOver}
           onDragLeave={handleEditorDragLeave}
           onDrop={handleEditorDrop}
         >
-          {isLoading ? (
+          {groupViewId ? (
+            <GroupOverview groupId={groupViewId} onClose={() => setGroupView(null)} />
+          ) : isLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
-              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-text/20 border-t-text rounded-full animate-spin" />
               <div className="text-xs font-mono text-text-muted">Loading notes...</div>
             </div>
           ) : (
@@ -483,13 +501,13 @@ export function App() {
                           data-pane-id={noteId}
                           style={{ width: `${paneWidth}px`, minWidth: `${PANE_MIN_WIDTH}px` }}
                           className={`relative h-full flex-shrink-0 flex flex-col border-r border-border/70 last:border-r-0 ${
-                            noteId === activeNoteId ? 'ring-1 ring-inset ring-accent/30' : ''
+                            noteId === activeNoteId ? 'ring-1 ring-inset ring-text/20' : ''
                           } ${
                             draggingPaneId === noteId ? 'opacity-70' : ''
                           }`}
                         >
                           {draggingPaneId && paneDropIndex === index && (
-                            <div className="absolute inset-y-1 -left-[3px] w-[6px] rounded bg-accent/25 border border-accent/60 pointer-events-none" />
+                            <div className="absolute inset-y-1 -left-[3px] w-[6px] rounded bg-text/15 border border-text/40 pointer-events-none" />
                           )}
                           <div className="h-9 px-2 border-b border-border/70 bg-surface-1/70 flex items-center justify-between gap-2">
                             <span className="text-[11px] font-mono text-text-muted truncate" title={paneTitle}>
@@ -501,7 +519,7 @@ export function App() {
                                 onDragStart={(e) => handlePaneDragStart(e, noteId)}
                                 onDragEnd={handlePaneDragEnd}
                                 onClick={(e) => e.preventDefault()}
-                                className="px-2 py-1 rounded border border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:border-accent/70 cursor-grab active:cursor-grabbing transition-colors inline-flex items-center gap-1"
+                                className="px-2 py-1 rounded border border-text/20 bg-surface-2 text-text hover:bg-surface-3 hover:border-text/30 cursor-grab active:cursor-grabbing transition-colors inline-flex items-center gap-1"
                                 title="Reorder columns"
                               >
                                 <GripVertical size={13} />
@@ -522,7 +540,7 @@ export function App() {
 
                           <div
                             onMouseDown={(e) => beginPaneResize(e, noteId)}
-                            className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-accent/25 active:bg-accent/45 transition-colors z-20"
+                            className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-text/20 active:bg-text/35 transition-colors z-20"
                             title="Resize column"
                           />
                         </section>
@@ -530,7 +548,7 @@ export function App() {
                     })}
 
                     {draggingPaneId && paneDropIndex === visibleOpenNoteIds.length && (
-                      <div className="absolute inset-y-1 right-0 w-[6px] rounded bg-accent/25 border border-accent/60 pointer-events-none" />
+                      <div className="absolute inset-y-1 right-0 w-[6px] rounded bg-text/15 border border-text/40 pointer-events-none" />
                     )}
                   </div>
                 </div>
@@ -546,24 +564,24 @@ export function App() {
             )
           )}
 
-          {draggingNoteId && (
+          {draggingNoteId && !groupViewId && (
             <>
               <div
                 className={`absolute inset-5 z-20 pointer-events-none rounded-lg border-2 border-dashed transition-colors ${
                   editorDropActive
-                    ? 'border-accent/70 bg-accent/10'
+                    ? 'border-text/40 bg-text/8'
                     : 'border-border/80 bg-surface-1/20'
                 }`}
               />
 
-              <div className="absolute top-3 left-3 z-30 pointer-events-none px-2 py-1 rounded border border-accent/30 bg-surface-1/90 text-[10px] font-mono text-text-muted">
+              <div className="absolute top-3 left-3 z-30 pointer-events-none px-2 py-1 rounded border border-text/20 bg-surface-1/90 text-[10px] font-mono text-text-muted">
                 Drop in editor to open side by side
               </div>
 
               <div
                 className={`absolute bottom-4 right-4 z-40 pointer-events-auto px-3 py-2 rounded border text-xs font-mono transition-colors ${
                   stickyDropActive
-                    ? 'border-accent/60 bg-accent/15 text-accent'
+                    ? 'border-text/30 bg-surface-2 text-text'
                     : 'border-border bg-surface-1/95 text-text-muted'
                 }`}
                 onDragOver={(e) => {

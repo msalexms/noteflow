@@ -15,7 +15,7 @@ function CodeBlockView({ node }: NodeViewProps) {
   const language = node.attrs.language
 
   return (
-    <NodeViewWrapper className="group">
+    <NodeViewWrapper className="group code-block-node">
       <pre>
         <button
           contentEditable={false}

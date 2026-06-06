@@ -124,7 +124,7 @@ export function GitHubSyncModal({ onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-border">
-          <Github size={13} className="text-accent flex-shrink-0" />
+          <Github size={13} className="text-text flex-shrink-0" />
           <span className="text-xs font-mono text-text font-medium flex-1">GitHub Sync</span>
           <button onClick={handleClose} className="text-text-muted hover:text-text transition-colors">
             <X size={13} />
@@ -146,7 +146,7 @@ export function GitHubSyncModal({ onClose }: Props) {
                       e.preventDefault()
                       window.noteflow.openUrl(`https://github.com/${status.owner}/${status.repo}`)
                     }}
-                    className="text-xs font-mono text-accent hover:underline flex items-center gap-1"
+                    className="text-xs font-mono text-text hover:underline flex items-center gap-1"
                   >
                     {status.owner}/{status.repo}
                     <ExternalLink size={10} />
@@ -202,7 +202,7 @@ export function GitHubSyncModal({ onClose }: Props) {
                       e.preventDefault()
                       window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')
                     }}
-                    className="text-accent hover:underline"
+                    className="text-text hover:underline"
                   >
                     github.com/login/device
                   </a>{' '}
@@ -221,7 +221,7 @@ export function GitHubSyncModal({ onClose }: Props) {
               <div className="flex gap-2">
                 <button
                   onClick={() => window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
                 >
                   <ExternalLink size={11} />
                   Open browser
@@ -287,7 +287,7 @@ export function GitHubSyncModal({ onClose }: Props) {
                   onChange={(e) => setRepo(e.target.value)}
                   placeholder="noteflow-notes"
                   disabled={isLoading}
-                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-accent/50 disabled:opacity-40"
+                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
                 />
                 <p className="text-[10px] font-mono text-text-muted/60 mt-1">
                   Will be created as private if it doesn&apos;t exist.
@@ -296,7 +296,7 @@ export function GitHubSyncModal({ onClose }: Props) {
               <button
                 onClick={handleInitiate}
                 disabled={isLoading || !repo.trim()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {step === 'waiting-auth' && !userCode ? (
                   <Loader size={11} className="animate-spin" />

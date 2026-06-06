@@ -25,6 +25,30 @@ import Table from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableHeader from '@tiptap/extension-table-header'
 import TableCell from '@tiptap/extension-table-cell'
+
+// Per-cell text alignment, serialized to/from `style="text-align:…"`. This is the
+// exact attribute htmlToMarkdown reads from header cells to emit markdown's
+// per-column `:---:` separators, so column alignment round-trips through .md.
+const textAlignAttribute = {
+  textAlign: {
+    default: null as 'left' | 'center' | 'right' | null,
+    parseHTML: (el: HTMLElement) =>
+      (el.style.textAlign as 'left' | 'center' | 'right') || null,
+    renderHTML: (attrs: { textAlign?: string | null }) =>
+      attrs.textAlign ? { style: `text-align:${attrs.textAlign}` } : {},
+  },
+}
+const AlignedTableCell = TableCell.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...textAlignAttribute }
+  },
+})
+const AlignedTableHeader = TableHeader.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...textAlignAttribute }
+  },
+})
+import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { common, createLowlight } from 'lowlight'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorToolbar } from './EditorToolbar'
@@ -72,6 +96,21 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       attributes: {
         spellcheck: 'false',
       },
+      // Pasting raw markdown that contains a pipe table renders it as a real
+      // table (matching other markdown editors). ProseMirror's default would
+      // drop it in as literal `| … |` text. We only intercept when the pasted
+      // plain text actually holds a markdown table — copying a rendered table
+      // from the web carries text/html (tab-separated text/plain, no `|---|`),
+      // which falls through to ProseMirror's native, richer handling.
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData('text/plain') ?? ''
+        if (!containsMarkdownTable(text)) return false
+        event.preventDefault()
+        const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text), 'text/html')
+        const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(dom.body)
+        view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+        return true
+      },
     },
     extensions: [
       Document,
@@ -92,10 +131,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       Link.configure({ openOnClick: false, autolink: false }),
       ResizableImage.configure({ inline: true, allowBase64: true }),
       HorizontalRule,
-      Table.configure({ resizable: true, HTMLAttributes: { class: 'md-table' } }),
+      // resizable:false — column widths can't be stored in portable markdown, so
+      // tables fill the available width with evenly distributed columns instead of
+      // offering a resize affordance that silently resets on reload.
+      Table.configure({ resizable: false, HTMLAttributes: { class: 'md-table' } }),
       TableRow,
-      TableHeader,
-      TableCell,
+      AlignedTableHeader,
+      AlignedTableCell,
       HardBreak,
       History,
       Placeholder.configure({ placeholder }),
@@ -312,7 +354,7 @@ function htmlFromMarkdown(md: string): string {
     const isPipeTable =
       lines.length >= 2 &&
       /\|/.test(lines[0]) &&
-      /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])
+      TABLE_SEPARATOR_RE.test(lines[1])
 
     if (isPipeTable) {
       htmlBlocks.push(mdTableToHtml(lines))
@@ -585,6 +627,20 @@ function mdListBlockToHtml(lines: string[]): string {
 }
 
 // ── Pipe table helpers ───────────────────────────────────────────────────────
+
+// A markdown table separator row: only |, :, -, spaces; each cell ≥3 dashes;
+// ≥2 cells. Strict (≥3 dashes) so paragraphs with literal | aren't mistaken
+// for tables. Shared by block parsing and the paste handler.
+const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+/** True if the text has a header line immediately followed by a separator row. */
+function containsMarkdownTable(md: string): boolean {
+  const lines = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (/\|/.test(lines[i]) && TABLE_SEPARATOR_RE.test(lines[i + 1])) return true
+  }
+  return false
+}
 
 function splitPipeRow(line: string): string[] {
   const trimmed = line.replace(/^\s*\|/, '').replace(/\|\s*$/, '')

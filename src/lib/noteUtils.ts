@@ -63,9 +63,10 @@ export function parseNote(raw: string, filePath: string): Note {
     tags:     Array.isArray(data.tags) ? (data.tags as string[]) : [],
     created:  String(data.created ?? new Date().toISOString()),
     updated:  String(data.updated ?? new Date().toISOString()),
-    archived: Boolean(data.archived ?? false),
-    pinned:   Boolean(data.pinned   ?? false),
+    archived:   Boolean(data.archived   ?? false),
+    favorited:  Boolean(data.favorited ?? data.pinned ?? false),
     ...(typeof data.group === 'string' && data.group ? { group: data.group } : {}),
+    ...(typeof data.folder === 'string' && data.folder ? { folder: data.folder } : {}),
     ...(encryption ? { encryption } : {}),
     ...(typeof data.expiresAt === 'string' && data.expiresAt ? { expiresAt: data.expiresAt } : {}),
   }
@@ -122,8 +123,9 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
       encryption: note.encryption,
     }
     if (note.archived)   fm.archived   = true
-    if (note.pinned)     fm.pinned     = true
+    if (note.favorited)  fm.favorited  = true
     if (note.group)      fm.group      = note.group
+    if (note.folder)     fm.folder     = note.folder
     if (note.expiresAt)  fm.expiresAt  = note.expiresAt
     const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
     return `---\n${yamlStr}---\n`
@@ -144,8 +146,9 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
   }
 
   if (note.archived)   fm.archived   = true
-  if (note.pinned)     fm.pinned     = true
+  if (note.favorited)  fm.favorited  = true
   if (note.group)      fm.group      = note.group
+  if (note.folder)     fm.folder     = note.folder
   if (note.expiresAt)  fm.expiresAt  = note.expiresAt
 
   const yamlStr = yaml.dump(fm, { lineWidth: -1, quotingType: '"' })
@@ -185,7 +188,7 @@ export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {
     created:  now,
     updated:  now,
     archived: false,
-    pinned:   false,
+    favorited: false,
     sections: defaultSections(),
   }
 }

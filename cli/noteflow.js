@@ -203,8 +203,8 @@ function serializeNote(note) {
     }
     if (s.isRawMode) y += '    isRawMode: true\n'
   }
-  if (note.archived) y += 'archived: true\n'
-  if (note.pinned)   y += 'pinned: true\n'
+  if (note.archived)   y += 'archived: true\n'
+  if (note.favorited)  y += 'favorited: true\n'
   if (note.group)    y += `group: ${q(note.group)}\n`
   const body = note.sections[0]?.content || ''
   return `---\n${y}---\n${body}`
@@ -473,7 +473,7 @@ function cmdList(opts) {
   if (opts.json) {
     process.stdout.write(JSON.stringify(filtered.map(n => ({
       id: n.id, title: n.title, tags: n.tags, group: n.group,
-      created: n.created, updated: n.updated, archived: n.archived, pinned: n.pinned,
+      created: n.created, updated: n.updated, archived: n.archived, favorited: n.favorited ?? n.pinned ?? false,
       sections: n.sections?.map(s => s.name),
       filename: n.filename,
     }))) + '\n')
@@ -487,9 +487,9 @@ function cmdList(opts) {
     const g = n.group ? groups.find(gr => gr.id === n.group) : null
     const tags = n.tags?.length ? `  [${n.tags.join(', ')}]` : ''
     const grp  = g ? `  (${g.name})` : ''
-    const pin  = n.pinned ? ' 📌' : ''
+    const fav  = (n.favorited || n.pinned) ? ' ⭐' : ''
     const arc  = n.archived ? ' [archived]' : ''
-    out(`  ${n.title}${pin}${arc}${tags}${grp}`)
+    out(`  ${n.title}${fav}${arc}${tags}${grp}`)
     out(`    ${n.filename}`)
   }
   out('')
@@ -509,7 +509,7 @@ function cmdGet(titleQuery, opts) {
   if (opts.json) {
     const result = {
       id: note.id, title: note.title, tags: note.tags, group: note.group,
-      created: note.created, updated: note.updated, archived: note.archived, pinned: note.pinned,
+      created: note.created, updated: note.updated, archived: note.archived, favorited: note.favorited ?? note.pinned ?? false,
       sections: note.sections?.map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
       filename: note.filename,
     }
@@ -565,8 +565,8 @@ async function cmdDelete(titleQuery, opts) {
   }
 }
 
-// noteflow pin <title>
-async function cmdPin(titleQuery) {
+// noteflow favorite <title>
+async function cmdFavorite(titleQuery) {
   const matches = findNoteByTitle(titleQuery)
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1) {
@@ -574,10 +574,11 @@ async function cmdPin(titleQuery) {
     matches.forEach(n => out(`    ${n.title}  (${n.filename})`)); process.exit(1)
   }
   const note = matches[0]
-  note.pinned = !note.pinned
+  note.favorited = !(note.favorited || note.pinned)
+  delete note.pinned
   note.updated = new Date().toISOString()
   fs.writeFileSync(note.filePath, serializeNote(note), 'utf-8')
-  out(`  "${note.title}" ${note.pinned ? 'pinned' : 'unpinned'}`)
+  out(`  "${note.title}" ${note.favorited ? 'added to favorites' : 'removed from favorites'}`)
   await syncPushFile(note.filePath)
 }
 
@@ -939,7 +940,7 @@ function cmdHelp(topic) {
     delete <title>        Delete a note
     rename <old> <new>    Rename a note
     sections <title>      List sections of a note
-    pin <title>           Toggle pin on a note
+    favorite <title>      Toggle favorite on a note
     archive <title>       Toggle archive on a note
 
   Group commands:
@@ -1047,10 +1048,11 @@ async function main() {
       cmdSections(title)
       break
     }
+    case 'favorite':
     case 'pin': {
       const title = positional.join(' ')
-      if (!title) { err('Usage: noteflow pin <title>'); process.exit(1) }
-      await cmdPin(title)
+      if (!title) { err('Usage: noteflow favorite <title>'); process.exit(1) }
+      await cmdFavorite(title)
       break
     }
     case 'archive': {

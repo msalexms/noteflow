@@ -133,7 +133,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
         title="Match case"
         aria-pressed={caseSensitive}
         className={`p-1 rounded hover:bg-surface-3 ${
-          caseSensitive ? 'bg-accent/20 text-accent' : 'text-text-muted'
+          caseSensitive ? 'bg-surface-3 text-text' : 'text-text-muted'
         }`}
       >
         <CaseSensitive size={14} />

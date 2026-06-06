@@ -63,8 +63,8 @@ export function ConfirmModal({
             ref={cancelRef}
             onClick={onCancel}
             className="px-3 py-1.5 rounded text-xs font-mono text-text-muted
-                       border border-border hover:border-accent/40 hover:text-text
-                       transition-colors focus:outline-none focus:border-accent/60"
+                       border border-border hover:border-text/25 hover:text-text
+                       transition-colors focus:outline-none focus:border-text/30"
           >
             {cancelLabel}
           </button>
@@ -73,7 +73,7 @@ export function ConfirmModal({
             className={`px-3 py-1.5 rounded text-xs font-mono transition-colors focus:outline-none
               ${danger
                 ? 'bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 focus:border-red-500/60'
-                : 'bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 focus:border-accent/60'
+                : 'bg-surface-2 text-text border border-text/20 hover:bg-surface-3 focus:border-text/30'
               }`}
           >
             {confirmLabel}

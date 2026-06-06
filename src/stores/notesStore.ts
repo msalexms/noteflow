@@ -17,6 +17,7 @@ interface NotesState {
   notes: Note[]
   activeNoteId: string | null
   openNoteIds: string[]
+  groupViewId: string | null  // when set, the main area shows the group overview instead of the editor
   notesDir: string
 
   // UI state
@@ -40,11 +41,12 @@ interface NotesState {
   createNote: () => Promise<Note>
   createTempNote: () => Promise<Note>
   duplicateNote: (id: string) => Promise<Note>
-  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'pinned' | 'group'>>) => Promise<void>
+  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'favorited' | 'group' | 'folder'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   setActiveNote: (id: string | null) => void
   setOpenNoteIds: (ids: string[]) => void
+  setGroupView: (id: string | null) => void
   openNoteInSplit: (id: string) => void
   closeOpenNote: (id: string) => void
   setSearchQuery: (q: string) => void
@@ -72,6 +74,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   notes: [],
   activeNoteId: null,
   openNoteIds: [],
+  groupViewId: null,
   notesDir: '',
   searchQuery: '',
   filterSection: 'all',
@@ -237,7 +240,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       created: now,
       updated: now,
       archived: false,
-      pinned: false,
+      favorited: false,
       sections: source.sections.map((s) => ({ ...s, id: nanoid(8) })),
     }
     const dir = get().notesDir
@@ -279,7 +282,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
         return
       }
-      // Non-section patches (pinned, title) always allowed for encrypted notes
+      // Non-section patches (favorited, title) always allowed for encrypted notes
       const updated: Note = { ...note, ...patch, updated: new Date().toISOString() }
       const raw = serializeNote(updated)
       updated.raw = raw
@@ -361,12 +364,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       }
     }
     set((s) => {
-      if (!id) return { activeNoteId: null }
-      if (s.openNoteIds.includes(id)) return { activeNoteId: id }
-      return { activeNoteId: id, openNoteIds: [id] }
+      // Selecting a note always returns to the editor (closes the group overview)
+      if (!id) return { activeNoteId: null, groupViewId: null }
+      if (s.openNoteIds.includes(id)) return { activeNoteId: id, groupViewId: null }
+      return { activeNoteId: id, openNoteIds: [id], groupViewId: null }
     })
     if (id) window.noteflow.setUiState({ activeNoteId: id })
   },
+  setGroupView: (id) => set({ groupViewId: id }),
   setOpenNoteIds: (ids) => {
     set((s) => {
       const existing = new Set(s.notes.map((n) => n.id))
@@ -532,7 +537,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         )
       })
       .sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+        if (a.favorited !== b.favorited) return a.favorited ? -1 : 1
         return new Date(b.updated).getTime() - new Date(a.updated).getTime()
       })
   },

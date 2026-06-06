@@ -24,7 +24,11 @@ import {
   Plus,
   Minus,
   Trash2,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react'
+import { setColumnAlign, getColumnAlign } from './tableUtils'
 
 interface ToolbarProps {
   editor: Editor
@@ -188,7 +192,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
               title={btn.title}
               className={`p-1.5 rounded text-xs transition-colors font-mono
                 ${btn.isActive
-                  ? 'bg-accent/20 text-accent'
+                  ? 'bg-surface-3 text-text'
                   : 'text-text-muted hover:text-text hover:bg-surface-3'
                 }`}
             >
@@ -211,11 +215,11 @@ export function EditorToolbar({ editor }: ToolbarProps) {
               if (e.key === 'Escape') cancelLink()
             }}
             placeholder="https://..."
-            className="flex-1 bg-transparent text-xs font-mono text-text placeholder-text-muted/40 outline-none caret-accent"
+            className="flex-1 bg-transparent text-xs font-mono text-text placeholder-text-muted/40 outline-none caret-text"
           />
           <button
             onMouseDown={(e) => { e.preventDefault(); commitLink() }}
-            className="text-xs font-mono text-accent hover:text-text transition-colors px-1"
+            className="text-xs font-mono text-text/70 hover:text-text transition-colors px-1"
           >
             Set
           </button>
@@ -228,16 +232,29 @@ export function EditorToolbar({ editor }: ToolbarProps) {
         </div>
       )}
 
-      {editor.isActive('table') && (
+      {editor.isActive('table') && (() => {
+        // The header row must stay at row 0 — markdown tables require a header.
+        // Block actions that would remove it or push a body row above it.
+        const inHeader = editor.isActive('tableHeader')
+        const align = getColumnAlign(editor)
+        return (
         <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border flex-wrap">
           <span className="text-[10px] uppercase tracking-wider text-text-muted/60 mr-1">Table</span>
-          <TableOpButton title="Insert row above the current one" onClick={() => editor.chain().focus().addRowBefore().run()}>
+          <TableOpButton
+            title={inHeader ? "Can't add a row above the header" : 'Insert row above the current one'}
+            disabled={inHeader}
+            onClick={() => editor.chain().focus().addRowBefore().run()}
+          >
             <Plus size={11} /> Row <ArrowUp size={11} />
           </TableOpButton>
           <TableOpButton title="Insert row below the current one" onClick={() => editor.chain().focus().addRowAfter().run()}>
             <Plus size={11} /> Row <ArrowDown size={11} />
           </TableOpButton>
-          <TableOpButton title="Delete current row" onClick={() => editor.chain().focus().deleteRow().run()}>
+          <TableOpButton
+            title={inHeader ? "The header row can't be deleted" : 'Delete current row'}
+            disabled={inHeader}
+            onClick={() => editor.chain().focus().deleteRow().run()}
+          >
             <Minus size={11} /> Row
           </TableOpButton>
           <div className="w-px h-4 bg-border mx-1" />
@@ -251,11 +268,34 @@ export function EditorToolbar({ editor }: ToolbarProps) {
             <Minus size={11} /> Col
           </TableOpButton>
           <div className="w-px h-4 bg-border mx-1" />
+          <TableOpButton
+            title="Align column left"
+            isActive={align === 'left' || align === null}
+            onClick={() => setColumnAlign(editor, 'left')}
+          >
+            <AlignLeft size={11} />
+          </TableOpButton>
+          <TableOpButton
+            title="Align column center"
+            isActive={align === 'center'}
+            onClick={() => setColumnAlign(editor, 'center')}
+          >
+            <AlignCenter size={11} />
+          </TableOpButton>
+          <TableOpButton
+            title="Align column right"
+            isActive={align === 'right'}
+            onClick={() => setColumnAlign(editor, 'right')}
+          >
+            <AlignRight size={11} />
+          </TableOpButton>
+          <div className="w-px h-4 bg-border mx-1" />
           <TableOpButton title="Delete the whole table" onClick={() => editor.chain().focus().deleteTable().run()}>
             <Trash2 size={11} /> Table
           </TableOpButton>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
@@ -264,14 +304,26 @@ interface TableOpButtonProps {
   title: string
   onClick: () => void
   children: React.ReactNode
+  disabled?: boolean
+  isActive?: boolean
 }
 
-function TableOpButton({ title, onClick, children }: TableOpButtonProps) {
+function TableOpButton({ title, onClick, children, disabled, isActive }: TableOpButtonProps) {
   return (
     <button
-      onMouseDown={(e) => { e.preventDefault(); onClick() }}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        if (!disabled) onClick()
+      }}
       title={title}
-      className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
+      disabled={disabled}
+      className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-colors
+        ${disabled
+          ? 'text-text-muted/30 cursor-not-allowed'
+          : isActive
+            ? 'bg-surface-3 text-text'
+            : 'text-text-muted hover:text-text hover:bg-surface-3'
+        }`}
     >
       {children}
     </button>

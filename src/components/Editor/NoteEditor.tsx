@@ -9,7 +9,7 @@ import { RawNoteSearchBar } from './RawNoteSearchBar'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
-  Pin, Trash2, Copy, Eye, Edit3,
+  Star, Trash2, Copy, Eye, Edit3,
   Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw,
 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -63,7 +63,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
   // Editor font size (from shared store)
-  const { fontSize, changeFontSize, resetFontSize, fontFamily } = useEditorSettingsStore()
+  const { fontSize, changeFontSize, resetFontSize, fontFamily, readableWidth } = useEditorSettingsStore()
 
   // Raw (markdown source) mode buffer
   const [rawContent, setRawContent] = useState('')
@@ -479,7 +479,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   }
 
   const handleCopyAllText = () => {
-    const text = note.sections.map((s) => s.content).join('\n\n')
+    const text = activeSection?.content ?? ''
     navigator.clipboard.writeText(text)
   }
 
@@ -795,7 +795,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             <p className="text-sm font-mono">This note is encrypted</p>
             <button
               onClick={() => setShowUnlockModal(true)}
-              className="text-xs font-mono text-accent hover:underline opacity-70 hover:opacity-100 transition-opacity"
+              className="text-xs font-mono text-text hover:underline opacity-70 hover:opacity-100 transition-opacity"
             >
               Click to unlock
             </button>
@@ -849,9 +849,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           if (isAccel && e.key === '0') { e.preventDefault(); resetFontSize() }
         }}
       >
-        <div className="flex items-center px-3 pt-3 pb-2 border-b border-border min-h-0 flex-shrink-0 gap-1.5">
-          <div className="relative flex-1 min-w-0">
-            <div ref={tabsScrollRef} className="flex items-center gap-1.5 overflow-x-auto tabs-scroll pr-4">
+        <div
+          className="flex items-stretch px-3 pt-2.5 flex-shrink-0 gap-1.5 h-[42px]"
+          style={{ background: 'color-mix(in srgb, rgb(var(--bg-0)) 50%, rgb(var(--bg-1)) 50%)' }}
+        >
+          <div className="relative flex-1 min-w-0 h-full flex items-stretch">
+            <div ref={tabsScrollRef} className="flex items-stretch gap-1 overflow-x-auto tabs-scroll pr-4 h-full">
             {note.sections.map((section) => {
               const isActive = section.id === (activeSection?.id)
               const isRenaming = renamingId === section.id
@@ -870,17 +873,26 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     e.preventDefault()
                     setSectionColorPickerId((prev) => (prev === section.id ? null : section.id))
                   }}
-                  className={`relative group flex items-center gap-1 flex-shrink-0 rounded px-0.5 transition-all duration-200 cursor-grab active:cursor-grabbing
-                     ${isActive
-                      ? 'tab-active-bg border'
-                      : 'border border-border/40 hover:border-border/70'
-                    }
+                  className={`relative group flex items-center justify-center min-w-[88px] flex-shrink-0 h-full transition-colors duration-150 cursor-grab active:cursor-grabbing
                     ${draggedSectionId === section.id ? 'opacity-30' : 'opacity-100'}
-                    ${dragOverSectionId === section.id ? 'border-l-2 tab-active-border-l pl-1 bg-accent/10 border-dashed' : ''}
                   `}
                   style={isActive
-                    ? { border: colorStyle.border, background: colorStyle.background }
-                    : {}
+                    ? {
+                        borderTop: `1.5px solid ${colorStyle.color}`,
+                        borderTopLeftRadius: 8,
+                        borderTopRightRadius: 8,
+                        background: 'rgb(var(--bg-editor))',
+                        zIndex: 2,
+                        marginBottom: '-1px',
+                      }
+                    : !isActive && dragOverSectionId === section.id && draggedSectionId !== section.id
+                    ? {
+                        borderLeft: '2px solid rgb(var(--accent))',
+                        background: 'rgb(var(--accent) / 0.1)',
+                        borderTopLeftRadius: 4,
+                        borderBottomLeftRadius: 4,
+                      }
+                    : undefined
                   }
                 >
                   {isRenaming ? (
@@ -907,34 +919,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     <button
                       onClick={() => handleSwitchSection(section.id)}
                       onDoubleClick={() => handleStartRename(section)}
-                      className={`px-2 py-0.5 text-xs font-mono transition-colors
-                        ${isActive ? 'tab-active-text' : 'text-text-muted'}`}
+                      className={`px-3 py-1 text-xs font-mono transition-colors whitespace-nowrap
+                        ${isActive ? 'font-semibold' : 'text-text-muted hover:text-text'}`}
                       style={isActive ? { color: colorStyle.color } : undefined}
                     >
                       {section.name}
                     </button>
                   )}
 
-                  {!isRenaming && (
-                    <div className="flex items-center gap-0.5 pr-1 invisible group-hover:visible">
-                      <button
-                        onClick={() => handleStartRename(section)}
-                        title="Rename section"
-                        className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      {note.sections.length > 1 && (
-                        <button
-                          onClick={() => handleDeleteSection(section.id)}
-                          title="Delete section (Ctrl+W)"
-                          className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
               )
             })}
@@ -944,7 +936,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 <button
                   onClick={handleAddSection}
                   title="Add section (Ctrl+T)"
-                  className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0
+                  className="self-center ml-1 flex items-center justify-center w-6 h-6 rounded flex-shrink-0
                              text-text-muted/60 hover:text-text-muted hover:bg-surface-3
                              border border-transparent hover:border-border transition-colors"
                 >
@@ -954,7 +946,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             </div>
             {/* Fade gradient — only when overflowing */}
             {tabsOverflow && (
-              <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-surface-1 to-transparent" />
+              <div
+                className="pointer-events-none absolute inset-y-0 right-0 w-6"
+                style={{ background: 'linear-gradient(to left, rgb(var(--bg-editor)), transparent)' }}
+              />
             )}
           </div>
 
@@ -963,7 +958,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             <button
               onClick={handleAddSection}
               title="Add section (Ctrl+T)"
-              className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0
+              className="self-center flex items-center justify-center w-6 h-6 rounded flex-shrink-0
                          text-text-muted/60 hover:text-text-muted hover:bg-surface-3
                          border border-transparent hover:border-border transition-colors"
             >
@@ -971,7 +966,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             </button>
           )}
 
-          <div className="w-px h-4 bg-border flex-shrink-0" />
+          <div className="self-center w-px h-4 bg-border flex-shrink-0" />
 
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
@@ -979,7 +974,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               title={rawMode ? 'Editor mode (Markdown view)' : 'Raw markdown mode'}
               className={`p-1.5 rounded text-xs transition-colors
                 ${rawMode
-                  ? 'text-accent bg-accent/10 border border-accent/20'
+                  ? 'text-text bg-surface-3 border border-text/20'
                   : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
                 }`}
             >
@@ -987,7 +982,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             </button>
             <button
               onClick={handleCopyAllText}
-              title="Copy note text to clipboard"
+              title="Copy section text to clipboard"
               className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <Copy size={13} />
@@ -1004,12 +999,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               <ExternalLink size={13} />
             </button>
             <button
-              onClick={() => updateNote(note.id, { pinned: !note.pinned })}
-              title={note.pinned ? 'Unpin note' : 'Pin note'}
+              onClick={() => updateNote(note.id, { favorited: !note.favorited })}
+              title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
               className={`p-1.5 rounded text-xs transition-colors
-                ${note.pinned ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
+                ${note.favorited ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
             >
-              <Pin size={13} />
+              <Star size={13} />
             </button>
             <button
               onClick={openDeleteNoteModal}
@@ -1066,12 +1061,29 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   onClick={() => { void handleClearSectionColor(visibleColorPickerSection.name) }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
                     colorPickerOverride
-                      ? 'text-text-muted border-border hover:text-text hover:border-accent/40'
-                      : 'text-accent border-accent/50 bg-accent/10'
+                      ? 'text-text-muted border-border hover:text-text hover:border-text/30'
+                      : 'text-text border-text/25 bg-surface-2'
                   }`}
                 >
                   Auto
                 </button>
+                <div className="w-px h-4 bg-border/70 mx-0.5" />
+                <button
+                  onClick={() => { handleStartRename(visibleColorPickerSection); setSectionColorPickerId(null) }}
+                  title="Rename section"
+                  className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
+                >
+                  <Pencil size={13} />
+                </button>
+                {note.sections.length > 1 && (
+                  <button
+                    onClick={() => { handleDeleteSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}
+                    title="Delete section"
+                    className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
                 <button
                   onClick={() => setSectionColorPickerId(null)}
                   className="p-0.5 rounded text-text-muted/70 hover:text-text transition-colors"
@@ -1092,7 +1104,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             onBlur={handleTitleBlur}
             placeholder="Untitled"
             className="w-full bg-transparent text-xl font-bold font-mono text-text
-                       placeholder-text-muted/30 border-none outline-none caret-accent"
+                       placeholder-text-muted/30 border-none outline-none caret-text"
           />
         </div>
 
@@ -1103,7 +1115,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           </span>
         </div>
 
-        <div className="flex-1 overflow-hidden mr-1 relative">
+        <div className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}>
           {rawMode ? (
             <>
               <textarea
@@ -1130,8 +1142,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   fontSize: `${fontSize}px`,
                   fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
                 }}
-                className="w-full h-full p-4 bg-transparent text-text
-                           placeholder-text-muted/30 border-none outline-none resize-none caret-accent leading-relaxed"
+                className={`h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed ${readableWidth ? 'block w-full max-w-[87ch] mx-auto' : 'w-full'}`}
                 spellCheck={false}
               />
               {searchOpen && (

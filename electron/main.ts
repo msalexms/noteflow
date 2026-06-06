@@ -211,7 +211,9 @@ if (!fs.existsSync(NOTES_DIR)) {
 }
 
 const GROUPS_FILE = path.join(NOTES_DIR, 'groups.json')
+const FOLDERS_FILE = path.join(NOTES_DIR, 'folders.json')
 const SECTION_COLORS_FILE = path.join(NOTES_DIR, 'section-colors.json')
+const NOTE_ORDER_FILE = path.join(NOTES_DIR, 'note-order.json')
 const SECTION_COLOR_VALUES = new Set([
   '--accent',
   '--accent-2',
@@ -297,8 +299,8 @@ function isAllowedRedirectUpdateUrl(url: URL): boolean {
 
 function createWindow(hidden = false): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 720,
+    width: 1280,
+    height: 820,
     minWidth: 700,
     minHeight: 500,
     frame: false,
@@ -1131,10 +1133,10 @@ ipcMain.handle('settings:set-startup-stickies', (_event, stickies: Array<{ noteI
 })
 
 ipcMain.handle('settings:get-ui-state', () => {
-  return (readSettings().uiState ?? {}) as { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }
+  return (readSettings().uiState ?? {}) as { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }
 })
 
-ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[] }) => {
+ipcMain.handle('settings:set-ui-state', (_event, patch: { activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }) => {
   const settings = readSettings()
   settings.uiState = { ...(settings.uiState as object ?? {}), ...patch }
   writeSettings(settings)
@@ -1158,6 +1160,24 @@ ipcMain.handle('groups:set', (event, groups: unknown[]) => {
   githubSync.schedulePush(GROUPS_FILE, content)
 })
 
+ipcMain.handle('folders:get', () => {
+  try {
+    return JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf-8'))
+  } catch { return [] }
+})
+
+ipcMain.handle('folders:set', (event, folders: unknown[]) => {
+  const content = JSON.stringify(folders, null, 2)
+  fs.writeFileSync(FOLDERS_FILE, content, 'utf-8')
+  // Broadcast to other windows so their folders reload immediately
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
+  githubSync.schedulePush(FOLDERS_FILE, content)
+})
+
 ipcMain.handle('section-colors:get', () => {
   try {
     const raw = JSON.parse(fs.readFileSync(SECTION_COLORS_FILE, 'utf-8'))
@@ -1177,6 +1197,23 @@ ipcMain.handle('section-colors:set', (event, colors: unknown) => {
     }
   })
   githubSync.schedulePush(SECTION_COLORS_FILE, content)
+})
+
+ipcMain.handle('note-order:get', () => {
+  try {
+    return JSON.parse(fs.readFileSync(NOTE_ORDER_FILE, 'utf-8'))
+  } catch { return {} }
+})
+
+ipcMain.handle('note-order:set', (event, order: unknown) => {
+  const content = JSON.stringify(order, null, 2)
+  fs.writeFileSync(NOTE_ORDER_FILE, content, 'utf-8')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
+  githubSync.schedulePush(NOTE_ORDER_FILE, content)
 })
 
 // Window controls
@@ -1210,6 +1247,12 @@ ipcMain.on('window:set-size', (event, width: number, height: number, minW: numbe
   if (!win) return
   win.setMinimumSize(minW, minH)
   win.setSize(width, height)
+})
+
+ipcMain.on('window:set-always-on-top', (event, flag: boolean) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  win.setAlwaysOnTop(flag)
 })
 
 ipcMain.on('window:fold-to-corner', (event, foldedW: number, foldedH: number) => {

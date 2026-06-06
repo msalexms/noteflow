@@ -3,7 +3,7 @@ import { useNotesStore } from '../stores/notesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import { resolveColorVar } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
-import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import type { NoteSection } from '../types'
 
@@ -11,11 +11,13 @@ const FOLDED_W = 220
 const FOLDED_H = 32
 
 // Custom TitleBar for the sticky window
-function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold }: {
+function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, onTogglePin }: {
   noteTitle: string
   sectionName?: string
   colorVar: string
   onFold: () => void
+  isPinned?: boolean
+  onTogglePin?: () => void
 }) {
   return (
     <div
@@ -32,6 +34,19 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold }: {
         )}
       </div>
       <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        {onTogglePin && (
+          <button
+            className={`p-1 rounded transition-colors ${
+              isPinned
+                ? 'text-text hover:bg-surface-2'
+                : 'text-text-muted hover:text-text hover:bg-surface-2'
+            }`}
+            onClick={onTogglePin}
+            title={isPinned ? 'Always on top: on' : 'Always on top: off'}
+          >
+            {isPinned ? <Pin size={12} /> : <PinOff size={12} />}
+          </button>
+        )}
         <button
           className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={onFold}
@@ -115,6 +130,9 @@ export function StickyApp() {
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [rawContent, setRawContent] = useState('')
   const [isFolded, setIsFolded] = useState(false)
+  // Sticky windows are created with alwaysOnTop: true in the main process,
+  // so the pin starts active.
+  const [isPinned, setIsPinned] = useState(true)
   const { loadNotes, isLoading, notes, updateNote } = useNotesStore()
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
@@ -240,7 +258,7 @@ export function StickyApp() {
             onChange={(e) => { setUnlockPassword(e.target.value); setUnlockError('') }}
             onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
             placeholder="Enter password"
-            className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-accent transition-colors"
+            className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
             autoComplete="off"
           />
           {unlockError && (
@@ -249,7 +267,7 @@ export function StickyApp() {
           <button
             onClick={handleUnlock}
             disabled={!unlockPassword || unlockLoading}
-            className="flex items-center gap-1.5 w-full justify-center px-3 py-1.5 text-xs font-mono bg-accent text-bg rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            className="flex items-center gap-1.5 w-full justify-center px-3 py-1.5 text-xs font-mono bg-text text-surface-0 rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
             {unlockLoading && <Loader2 size={11} className="animate-spin" />}
             Unlock
@@ -278,6 +296,12 @@ export function StickyApp() {
   const handleFold = () => {
     window.noteflow.foldToCorner(FOLDED_W, FOLDED_H)
     setIsFolded(true)
+  }
+
+  const handleTogglePin = () => {
+    const next = !isPinned
+    window.noteflow.setAlwaysOnTop(next)
+    setIsPinned(next)
   }
 
   const handleUnfold = () => {
@@ -331,6 +355,8 @@ export function StickyApp() {
         sectionName={showSectionName ? section.name : undefined}
         colorVar={sectionColorVar}
         onFold={handleFold}
+        isPinned={isPinned}
+        onTogglePin={handleTogglePin}
       />
       {isReadOnly && (
         <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
@@ -345,7 +371,7 @@ export function StickyApp() {
             onChange={handleRawChange}
             readOnly={isReadOnly}
             className={`w-full h-full p-3 bg-transparent text-xs font-mono text-text
-                       border-none outline-none resize-none caret-accent leading-relaxed
+                       border-none outline-none resize-none caret-text leading-relaxed
                        ${isReadOnly ? 'select-all cursor-default' : ''}`}
             spellCheck={false}
           />
