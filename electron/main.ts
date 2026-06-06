@@ -26,11 +26,11 @@ function getIconPath(): string {
   if (process.platform === 'win32') return path.join(__dirname, '../public/icon.ico')
   // In dev, the icon lives in public/; in production Vite copies it to dist/
   // (only dist/ and dist-electron/ are packed into the ASAR, not public/)
-  const dir = app.isPackaged ? '../dist' : '../public'
+  const dir = (app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public'
   return path.join(__dirname, `${dir}/icon.png`)
 }
 
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+const isDev = process.env.NODE_ENV === 'development' || (!app.isPackaged && !process.env.NOTEFLOW_NATIVE)
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -290,7 +290,7 @@ function isAllowedInitialUpdateUrl(url: URL): boolean {
   if (!ALLOWED_UPDATE_HOSTS.has(url.hostname)) return false
   const pathname = url.pathname.toLowerCase()
   if (!pathname.includes('/yagoid/noteflow/releases/')) return false
-  return pathname.endsWith('.exe') || pathname.endsWith('.deb')
+  return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst')
 }
 
 function isAllowedRedirectUpdateUrl(url: URL): boolean {
@@ -536,7 +536,7 @@ function createStickyWindow(noteId: string, sectionId: string): BrowserWindow {
 }
 
 function createTray() {
-  const dir = app.isPackaged ? '../dist' : '../public'
+  const dir = (app.isPackaged || process.env.NOTEFLOW_NATIVE) ? '../dist' : '../public'
   const iconPath = process.platform === 'win32'
     ? path.join(__dirname, `${dir}/icon.ico`)
     : path.join(__dirname, `${dir}/tray-icon.png`)
@@ -747,7 +747,16 @@ ipcMain.handle('app:check-update', () => {
             const hasUpdate = latest && latest !== current
             let downloadUrl: string
             if (process.platform === 'linux') {
-              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow_${latest}_amd64.deb`
+              // For Arch/CachyOS, prefer pacman; for others, use AppImage; fallback to deb
+              const isArchBased = fs.existsSync('/etc/arch-release') ||
+                                 fs.existsSync('/etc/cachyos-release') ||
+                                 fs.existsSync('/usr/bin/pacman')
+              if (isArchBased) {
+                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/noteflow-${latest}-x86_64.pkg.tar.zst`
+              } else {
+                // Use AppImage as universal Linux format (works on all distros)
+                downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`
+              }
             } else {
               downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`
             }
@@ -818,21 +827,46 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
     })
 
     if (process.platform === 'linux') {
-      await new Promise<void>((resolve) => {
-        const proc = spawn('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' })
-        proc.on('error', () => {
-          // pkexec not available, fall back to xdg-open
-          shell.openPath(dest)
-          resolve()
+      // Detect package type from filename
+      const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman')
+      const isDeb = dest.endsWith('.deb')
+
+      if (isDeb) {
+        await new Promise<void>((resolve) => {
+          const proc = spawn('pkexec', ['dpkg', '-i', dest], { stdio: 'ignore' })
+          proc.on('error', () => {
+            // pkexec not available, fall back to xdg-open
+            shell.openPath(dest)
+            resolve()
+          })
+          proc.on('close', (code) => {
+            if (code === 0) {
+              app.relaunch()
+              app.quit()
+            }
+            resolve()
+          })
         })
-        proc.on('close', (code) => {
-          if (code === 0) {
-            app.relaunch()
-            app.quit()
-          }
-          resolve()
+      } else if (isPacman) {
+        await new Promise<void>((resolve) => {
+          const proc = spawn('pkexec', ['pacman', '-U', dest], { stdio: 'ignore' })
+          proc.on('error', () => {
+            // pkexec not available, fall back to xdg-open
+            shell.openPath(dest)
+            resolve()
+          })
+          proc.on('close', (code) => {
+            if (code === 0) {
+              app.relaunch()
+              app.quit()
+            }
+            resolve()
+          })
         })
-      })
+      } else {
+        // AppImage or other format - just open it
+        await shell.openPath(dest)
+      }
     } else {
       await shell.openPath(dest)
     }

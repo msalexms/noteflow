@@ -15,7 +15,7 @@
 
 ## What is NoteFlow?
 
-NoteFlow is a keyboard-first, lightweight note-taking application for **Windows and Linux**.
+NoteFlow is a keyboard-first, lightweight note-taking application for **Windows and Linux** (including Arch-based distributions like CachyOS).
 
 Built specifically for software engineers and power users who need something faster than Notion and less clunky than the built-in OS alternatives. Scratch down a task list, jot code snippets, or capture a quick thought — and optionally access all of it from a terminal or headless server.
 
@@ -31,7 +31,35 @@ Built specifically for software engineers and power users who need something fas
 
 ## Download
 
-Get the latest `.exe` (Windows 10/11) or `.deb` (Debian/Ubuntu) from the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
+Get the latest release from the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
+
+- **Windows**: `NoteFlow-X.Y.Z-Setup.exe`
+- **Debian/Ubuntu/Mint**: `noteflow_X.Y.Z_amd64.deb`
+- **Arch/CachyOS/Manjaro**: `noteflow-X.Y.Z-x86_64.pkg.tar.zst`
+- **Universal Linux**: `NoteFlow-X.Y.Z-x86_64.AppImage` (works on any distro)
+
+### Arch/CachyOS Installation
+
+#### Using the prebuilt package:
+```bash
+# Install the prebuilt pacman package
+wget https://github.com/yagoid/noteflow/releases/latest/download/noteflow-1.5.6-x86_64.pkg.tar.zst
+sudo pacman -U noteflow-1.5.6-x86_64.pkg.tar.zst
+```
+
+#### Using the AppImage (universal):
+```bash
+wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-1.5.6-x86_64.AppImage
+chmod +x NoteFlow-1.5.6-x86_64.AppImage
+./NoteFlow-1.5.6-x86_64.AppImage
+```
+
+#### From AUR (if available):
+```bash
+paru -y noteflow    # using paru
+# or
+yay -S noteflow     # using yay
+```
 
 *[Landing page](https://yagoid.github.io/noteflow/) · [CLI reference](https://yagoid.github.io/noteflow/cli.html)*
 
@@ -72,7 +100,11 @@ To build the installers:
 
 ```bash
 npm run dist
-# Generates: NoteFlow-X.Y.Z-Setup.exe (Windows) and noteflow_X.Y.Z_amd64.deb (Linux)
+# Generates for Windows: NoteFlow-X.Y.Z-Setup.exe
+# Generates for Linux:
+#   - noteflow_X.Y.Z_amd64.deb (Debian/Ubuntu/Mint)
+#   - NoteFlow-X.Y.Z-x86_64.AppImage (Universal Linux)
+#   - noteflow-X.Y.Z-x86_64.pkg.tar.zst (Arch/CachyOS)
 ```
 
 ## License
