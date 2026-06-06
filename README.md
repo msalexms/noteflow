@@ -109,4 +109,8 @@ npm run dist
 
 ## License
 
-MIT
+[Functional Source License, Version 1.1, Apache 2.0 Future License](LICENSE) (`FSL-1.1-Apache-2.0`).
+
+NoteFlow is source-available: you can freely use, copy, modify, and distribute it,
+with the only restriction that you may not use it to compete with NoteFlow. On
+2028-06-06 this license automatically converts to Apache License 2.0.
