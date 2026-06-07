@@ -649,7 +649,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
               {renderHighlightedText(note.title || 'Untitled', searchQuery)}
             </span>
-            {note.favorited && <Star size={8} className="text-yellow-400/70 flex-shrink-0" fill="currentColor" />}
             <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
               {formatNoteDate(note.updated)}
             </span>
@@ -661,6 +660,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             sectionTagColors={sectionTagColors}
             onSectionClick={(sectionId, e) => {
               e.stopPropagation()
+              // When the group overview is open the editor is unmounted, so a synchronous
+              // request-section event is lost. Stash the target section (the editor reads it on
+              // mount) and re-emit once it's listening (next macrotask) — same as GroupOverview.
+              const fromGroupView = useNotesStore.getState().groupViewId !== null
+              if (fromGroupView) {
+                useNotesStore.setState({ pendingInitialSectionId: sectionId })
+              }
               window.dispatchEvent(new CustomEvent('noteflow:request-section', {
                 detail: { noteId: note.id, sectionId }
               }))
@@ -670,6 +676,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }
               setOpenNoteIds([note.id])
               setActiveNote(note.id)
+              if (fromGroupView) {
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+                    detail: { noteId: note.id, sectionId },
+                  }))
+                }, 0)
+              }
             }}
             onSectionContextMenu={(e, sectionId) => {
               e.preventDefault()
@@ -1134,10 +1147,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           noteCount={item.visibleCount}
                           collapsed={collapsed}
                           onToggle={() => toggleGroupCollapsed(group.id)}
-                          onOpenGroupView={() => {
-                            if (collapsedGroupIds.has(group.id)) toggleGroupCollapsed(group.id)
-                            setGroupView(group.id)
-                          }}
+                          onOpenGroupView={() => setGroupView(group.id)}
                           onContextMenu={(e) => {
                             setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
                           }}
