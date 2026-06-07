@@ -1,0 +1,46 @@
+[
+  {
+    "model": "Xenova/multilingual-e5-small",
+    "dim": 384,
+    "loadS": 0.6,
+    "embedMsPerSec": 4941,
+    "anisotropy": 0.83,
+    "avgTop1": 0.352,
+    "avgMargin": 0.125,
+    "coveragePct": 100,
+    "avgRelated": 5.7
+  },
+  {
+    "model": "Xenova/multilingual-e5-base",
+    "dim": 768,
+    "loadS": 3.9,
+    "embedMsPerSec": 4676,
+    "anisotropy": 0.806,
+    "avgTop1": 0.33,
+    "avgMargin": 0.107,
+    "coveragePct": 100,
+    "avgRelated": 5.6
+  },
+  {
+    "model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "dim": 384,
+    "loadS": 2.6,
+    "embedMsPerSec": 4601,
+    "anisotropy": 0.348,
+    "avgTop1": 0.548,
+    "avgMargin": 0.119,
+    "coveragePct": 100,
+    "avgRelated": 5.8
+  },
+  {
+    "model": "Xenova/paraphrase-multilingual-mpnet-base-v2",
+    "dim": 768,
+    "loadS": 4.6,
+    "embedMsPerSec": 4697,
+    "anisotropy": 0.326,
+    "avgTop1": 0.447,
+    "avgMargin": 0.122,
+    "coveragePct": 100,
+    "avgRelated": 5.6
+  }
+]

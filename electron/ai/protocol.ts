@@ -1,0 +1,57 @@
+// Shared message protocol + constants between the main process (aiIndex.ts) and
+// the AI utilityProcess (aiWorker.ts). Structured-clone friendly (plain objects).
+
+// Chosen by benchmark (scripts/ai-bench.cjs) over the user's real notes: best topical
+// relations for mixed ES/EN/code content. The embedding dimension is detected at runtime
+// from the model, so swapping modelId in settings just works (triggers a reindex).
+export const DEFAULT_AI_MODEL = 'Xenova/paraphrase-multilingual-mpnet-base-v2'
+export const SCHEMA_VERSION = 2         // bump → triggers a full reindex on next start
+
+export type IndexState = 'idle' | 'indexing' | 'downloading-model'
+
+export interface IndexProgress {
+  done: number
+  total: number
+  phase: string
+}
+
+export interface RelatedNote {
+  noteId: string
+  title: string
+  sectionId: string    // the matching section in the related note (for navigation)
+  sectionName: string  // its display label (which tab)
+  score: number
+  snippet: string
+}
+
+export interface SemanticHit {
+  noteId: string
+  sectionId: string
+  score: number
+  snippet: string
+}
+
+// ── Requests (main → worker) ────────────────────────────────────────────────
+
+export interface InitPayload { modelId: string; cacheDir: string; dbPath: string }
+export interface IndexNotePayload { filePath: string; content: string }
+export interface RemovePayload { filePath: string }
+export interface ReindexPayload { notesDir: string }
+export interface SearchPayload { query: string; k: number }
+export interface RelatedPayload { noteId: string; sectionId: string; k: number }
+
+export type WorkerRequest =
+  | { type: 'init';        id: number; payload: InitPayload }
+  | { type: 'index-note';  id: number; payload: IndexNotePayload }
+  | { type: 'remove-note'; id: number; payload: RemovePayload }
+  | { type: 'reindex-all'; id: number; payload: ReindexPayload }
+  | { type: 'search';      id: number; payload: SearchPayload }
+  | { type: 'related';     id: number; payload: RelatedPayload }
+
+// ── Responses (worker → main) ───────────────────────────────────────────────
+
+export type WorkerResponse =
+  | { type: 'result';   id: number; payload: unknown }
+  | { type: 'error';    id: number; error: string }
+  | { type: 'progress'; payload: IndexProgress }
+  | { type: 'state';    payload: IndexState }

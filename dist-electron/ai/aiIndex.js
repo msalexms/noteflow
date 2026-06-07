@@ -1,0 +1,255 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_AI_SETTINGS = void 0;
+exports.init = init;
+exports.isEnabled = isEnabled;
+exports.primeSettings = primeSettings;
+exports.getSettings = getSettings;
+exports.applySettings = applySettings;
+exports.scheduleIndex = scheduleIndex;
+exports.removeFromIndex = removeFromIndex;
+exports.reindexAll = reindexAll;
+exports.search = search;
+exports.related = related;
+/**
+ * aiIndex.ts — runs in the main process. Owns the AI utilityProcess lifecycle and
+ * exposes a small async API consumed by the IPC handlers and the fs:write-note hook.
+ *
+ * The heavy work (embeddings, SQLite) lives in aiWorker.ts; this module only forks it,
+ * mediates a request/response message protocol, debounces incremental indexing (mirrors
+ * githubSync.schedulePush), and respawns the worker if it crashes (the index persists).
+ */
+const electron_1 = require("electron");
+const path_1 = __importDefault(require("path"));
+const protocol_1 = require("./protocol");
+exports.DEFAULT_AI_SETTINGS = {
+    enabled: false,
+    modelId: protocol_1.DEFAULT_AI_MODEL,
+    lastIndexedModelId: null,
+    chunking: 'section',
+};
+let child = null;
+let ready = false;
+let manualStop = false;
+let starting = null;
+let settings = { ...exports.DEFAULT_AI_SETTINGS };
+let notesDir = '';
+let eventSink = {};
+let nextId = 1;
+const pending = new Map();
+const indexTimers = new Map();
+const INDEX_DEBOUNCE_MS = 2500;
+// ── Public API ──────────────────────────────────────────────────────────────
+function init(opts) {
+    notesDir = opts.notesDir;
+    eventSink = { progress: opts.onProgress, state: opts.onState };
+}
+function isEnabled() {
+    return settings.enabled;
+}
+/**
+ * Set the persisted settings at boot WITHOUT starting the worker on the critical path.
+ * If enabled, the worker is warmed up a few seconds later so loading the model (and any
+ * reindex) doesn't compete with the app's first paint. Lazy callers (related/search/
+ * scheduleIndex) also start it on demand.
+ */
+function primeSettings(next) {
+    settings = next;
+    if (next.enabled) {
+        setTimeout(() => {
+            ensureStarted().catch((err) => console.error('[aiIndex] warmup failed:', String(err)));
+        }, 4000);
+    }
+}
+function getSettings() {
+    return settings;
+}
+/** Apply a new settings snapshot: start/stop/restart the worker as needed. */
+async function applySettings(next) {
+    const prev = settings;
+    settings = next;
+    if (!next.enabled) {
+        await stop();
+        return;
+    }
+    if (!child) {
+        await ensureStarted();
+        return;
+    }
+    if (prev.modelId !== next.modelId) {
+        // Model changed → restart; the worker detects the meta mismatch and reindexes.
+        await stop();
+        await ensureStarted();
+    }
+}
+/** Debounced incremental index of a single note (called from fs:write-note). */
+function scheduleIndex(filePath, content) {
+    if (!settings.enabled)
+        return;
+    const key = path_1.default.basename(filePath);
+    const existing = indexTimers.get(key);
+    if (existing)
+        clearTimeout(existing);
+    indexTimers.set(key, setTimeout(async () => {
+        indexTimers.delete(key);
+        try {
+            await ensureStarted();
+            await request('index-note', { filePath, content });
+        }
+        catch (err) {
+            console.error('[aiIndex] index-note failed:', String(err));
+        }
+    }, INDEX_DEBOUNCE_MS));
+}
+function removeFromIndex(filePath) {
+    if (!settings.enabled || !child || !ready)
+        return;
+    request('remove-note', { filePath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)));
+}
+async function reindexAll() {
+    await ensureStarted();
+    return request('reindex-all', { notesDir });
+}
+async function search(query, k = 10) {
+    if (!settings.enabled)
+        return [];
+    try {
+        await ensureStarted();
+        return await request('search', { query, k });
+    }
+    catch (err) {
+        // Worker stopped/restarting (e.g. user toggled off mid-request) → no results, not an error.
+        console.warn('[aiIndex] search aborted:', String(err));
+        return [];
+    }
+}
+async function related(noteId, sectionId, k = 6) {
+    if (!settings.enabled)
+        return [];
+    try {
+        await ensureStarted();
+        return await request('related', { noteId, sectionId, k });
+    }
+    catch (err) {
+        console.warn('[aiIndex] related aborted:', String(err));
+        return [];
+    }
+}
+// ── Worker lifecycle ────────────────────────────────────────────────────────
+function ensureStarted() {
+    if (child && ready)
+        return Promise.resolve();
+    if (starting)
+        return starting;
+    starting = start().finally(() => { starting = null; });
+    return starting;
+}
+async function start() {
+    if (child)
+        return;
+    manualStop = false;
+    const dbPath = path_1.default.join(electron_1.app.getPath('userData'), 'ai-index', 'index.db');
+    const cacheDir = path_1.default.join(electron_1.app.getPath('userData'), 'ai-models');
+    // aiIndex.js is compiled to dist-electron/ai/, so the worker is a sibling here.
+    const workerPath = path_1.default.join(__dirname, 'aiWorker.js');
+    const proc = electron_1.utilityProcess.fork(workerPath, [], {
+        serviceName: 'noteflow-ai',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    proc.stdout?.on('data', (d) => console.log('[aiWorker]', d.toString().trimEnd()));
+    proc.stderr?.on('data', (d) => console.error('[aiWorker:err]', d.toString().trimEnd()));
+    child = proc;
+    await new Promise((resolve, reject) => {
+        let settled = false;
+        proc.on('message', (msg) => onMessage(msg));
+        proc.on('exit', (code) => {
+            if (!settled) {
+                settled = true;
+                reject(new Error(`AI worker exited before init (code ${code})`));
+            }
+            onExit(code);
+        });
+        // Send init once spawned. Electron queues the message until the child port is up.
+        proc.once('spawn', () => {
+            request('init', { modelId: settings.modelId, cacheDir, dbPath })
+                .then((res) => {
+                ready = true;
+                settled = true;
+                resolve();
+                if (res?.needsReindex) {
+                    reindexAll().catch((err) => console.error('[aiIndex] initial reindex failed:', String(err)));
+                }
+            })
+                .catch((err) => {
+                if (!settled) {
+                    settled = true;
+                    reject(err);
+                }
+            });
+        });
+    });
+}
+async function stop() {
+    manualStop = true;
+    for (const t of indexTimers.values())
+        clearTimeout(t);
+    indexTimers.clear();
+    for (const { reject } of pending.values())
+        reject(new Error('AI worker stopped'));
+    pending.clear();
+    const proc = child;
+    child = null;
+    ready = false;
+    if (proc)
+        proc.kill();
+}
+function onExit(code) {
+    child = null;
+    ready = false;
+    for (const { reject } of pending.values())
+        reject(new Error('AI worker exited'));
+    pending.clear();
+    if (!manualStop && settings.enabled) {
+        // Unexpected crash → respawn after a short delay. The on-disk index survives.
+        console.warn(`[aiIndex] worker exited (code ${code}); respawning…`);
+        setTimeout(() => { ensureStarted().catch((err) => console.error('[aiIndex] respawn failed:', String(err))); }, 1000);
+    }
+}
+function onMessage(msg) {
+    switch (msg.type) {
+        case 'result': {
+            const p = pending.get(msg.id);
+            if (p) {
+                pending.delete(msg.id);
+                p.resolve(msg.payload);
+            }
+            break;
+        }
+        case 'error': {
+            const p = pending.get(msg.id);
+            if (p) {
+                pending.delete(msg.id);
+                p.reject(new Error(msg.error));
+            }
+            break;
+        }
+        case 'progress':
+            eventSink.progress?.(msg.payload);
+            break;
+        case 'state':
+            eventSink.state?.(msg.payload);
+            break;
+    }
+}
+function request(type, payload) {
+    if (!child)
+        return Promise.reject(new Error('AI worker not running'));
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        child.postMessage({ type, id, payload });
+    });
+}

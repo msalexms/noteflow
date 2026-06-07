@@ -6,6 +6,7 @@ import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
 import { RawNoteSearchBar } from './RawNoteSearchBar'
+import { RelatedNotesPanel } from './RelatedNotesPanel'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
@@ -1172,6 +1173,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             </>
           )}
         </div>
+
+        <RelatedNotesPanel
+          noteId={note.id}
+          activeSectionId={activeSection?.id ?? null}
+          activeSectionName={activeSection?.name ?? ''}
+          noteUpdated={note.updated}
+          encrypted={!!note.encryption}
+        />
       </div>
     </>
   )

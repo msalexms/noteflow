@@ -93,6 +93,41 @@ export interface ImportPreviewEntry {
   strategy: ImportConflictStrategy
 }
 
+// ── AI / Semantic index ───────────────────────────────────────────────────────
+
+export interface AiSettings {
+  enabled: boolean
+  modelId: string
+  lastIndexedModelId?: string | null
+  chunking: 'section'
+}
+
+// A note surfaced as semantically related to the active section (powers the panel)
+export interface RelatedNote {
+  noteId: string
+  title: string
+  sectionId: string    // matching section in the related note (click navigates here)
+  sectionName: string  // its tab label
+  score: number
+  snippet: string
+}
+
+// A single chunk-level hit from a semantic/hybrid search
+export interface SemanticHit {
+  noteId: string
+  sectionId: string
+  score: number
+  snippet: string
+}
+
+export type IndexState = 'idle' | 'indexing' | 'downloading-model'
+
+export interface IndexProgress {
+  done: number
+  total: number
+  phase: string
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -157,6 +192,14 @@ declare global {
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
       onSyncStatusChanged: (cb: () => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
+      // AI / Semantic index
+      getAiSettings: () => Promise<AiSettings>
+      setAiSettings: (patch: Partial<AiSettings>) => Promise<AiSettings>
+      aiRelated: (noteId: string, sectionId: string, k?: number) => Promise<RelatedNote[]>
+      aiSearch: (query: string, k?: number) => Promise<SemanticHit[]>
+      aiReindexAll: () => Promise<{ ok: boolean }>
+      onAiReindexProgress: (cb: (progress: IndexProgress) => void) => () => void
+      onAiIndexState: (cb: (state: IndexState) => void) => () => void
     }
   }
 }

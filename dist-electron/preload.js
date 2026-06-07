@@ -74,6 +74,22 @@ const api = {
     },
     // Alarms
     scheduleAlarms: (alarms) => electron_1.ipcRenderer.send('alarms:schedule', alarms),
+    // AI / Semantic index
+    getAiSettings: () => electron_1.ipcRenderer.invoke('ai:get-settings'),
+    setAiSettings: (patch) => electron_1.ipcRenderer.invoke('ai:set-settings', patch),
+    aiRelated: (noteId, sectionId, k) => electron_1.ipcRenderer.invoke('ai:related', noteId, sectionId, k),
+    aiSearch: (query, k) => electron_1.ipcRenderer.invoke('ai:search', query, k),
+    aiReindexAll: () => electron_1.ipcRenderer.invoke('ai:reindex-all'),
+    onAiReindexProgress: (cb) => {
+        const wrapper = (_event, progress) => cb(progress);
+        electron_1.ipcRenderer.on('ai:reindex-progress', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:reindex-progress', wrapper);
+    },
+    onAiIndexState: (cb) => {
+        const wrapper = (_event, state) => cb(state);
+        electron_1.ipcRenderer.on('ai:index-state', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:index-state', wrapper);
+    },
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

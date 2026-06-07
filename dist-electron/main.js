@@ -44,6 +44,7 @@ const os_1 = __importDefault(require("os"));
 const child_process_1 = require("child_process");
 const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
+const aiIndex = __importStar(require("./ai/aiIndex"));
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -655,6 +656,9 @@ electron_1.ipcMain.handle('fs:write-note', (event, filePath, content) => {
         else {
             githubSync.schedulePush(safePath, content);
         }
+        // Keep the semantic index up to date (debounced; no-op when AI is disabled).
+        if (aiIndex.isEnabled())
+            aiIndex.scheduleIndex(safePath, content);
         return { ok: true };
     }
     catch (err) {
@@ -670,6 +674,7 @@ electron_1.ipcMain.handle('fs:delete-note', (_event, filePath) => {
             win.webContents.send('notes-updated');
         });
         githubSync.scheduleDelete(safePath);
+        aiIndex.removeFromIndex(safePath);
         return { ok: true };
     }
     catch (err) {
@@ -1064,6 +1069,32 @@ function readSettings() {
 function writeSettings(data) {
     fs_1.default.writeFileSync(path_1.default.join(electron_1.app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8');
 }
+// ── AI / Semantic index ───────────────────────────────────────────────────────
+function readAiSettings() {
+    const raw = (readSettings().ai ?? {});
+    return { ...aiIndex.DEFAULT_AI_SETTINGS, ...raw };
+}
+function writeAiSettings(next) {
+    const settings = readSettings();
+    settings.ai = next;
+    writeSettings(settings);
+}
+function emitAiState(state) {
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:index-state', state));
+}
+function emitAiProgress(progress) {
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:reindex-progress', progress));
+}
+electron_1.ipcMain.handle('ai:get-settings', () => readAiSettings());
+electron_1.ipcMain.handle('ai:set-settings', async (_event, patch) => {
+    const next = { ...readAiSettings(), ...patch };
+    writeAiSettings(next);
+    await aiIndex.applySettings(next);
+    return next;
+});
+electron_1.ipcMain.handle('ai:related', (_event, noteId, sectionId, k) => aiIndex.related(noteId, sectionId, k));
+electron_1.ipcMain.handle('ai:search', (_event, query, k) => aiIndex.search(query, k));
+electron_1.ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll());
 electron_1.ipcMain.on('settings:get-theme', (event) => {
     event.returnValue = readSettings().theme ?? null;
 });
@@ -1374,6 +1405,10 @@ electron_1.app.whenReady().then(async () => {
     registerGlobalShortcut();
     startAlarmEngine();
     checkExpiredNotes();
+    // Semantic index (AI). init() wires config; primeSettings defers the worker warmup so
+    // model loading / reindex doesn't compete with the app's first paint.
+    aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState });
+    aiIndex.primeSettings(readAiSettings());
     // Watch for external file changes (CLI, sync from another device, etc.)
     // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),
     // and may fire before the OS has flushed the file — a 150 ms delay lets the write settle.

@@ -129,6 +129,23 @@ const api = {
   scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) =>
     ipcRenderer.send('alarms:schedule', alarms),
 
+  // AI / Semantic index
+  getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
+  setAiSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('ai:set-settings', patch),
+  aiRelated: (noteId: string, sectionId: string, k?: number) => ipcRenderer.invoke('ai:related', noteId, sectionId, k),
+  aiSearch: (query: string, k?: number) => ipcRenderer.invoke('ai:search', query, k),
+  aiReindexAll: () => ipcRenderer.invoke('ai:reindex-all'),
+  onAiReindexProgress: (cb: (progress: { done: number; total: number; phase: string }) => void) => {
+    const wrapper = (_event: any, progress: { done: number; total: number; phase: string }) => cb(progress)
+    ipcRenderer.on('ai:reindex-progress', wrapper)
+    return () => ipcRenderer.removeListener('ai:reindex-progress', wrapper)
+  },
+  onAiIndexState: (cb: (state: 'idle' | 'indexing' | 'downloading-model') => void) => {
+    const wrapper = (_event: any, state: 'idle' | 'indexing' | 'downloading-model') => cb(state)
+    ipcRenderer.on('ai:index-state', wrapper)
+    return () => ipcRenderer.removeListener('ai:index-state', wrapper)
+  },
+
   // Events from main → renderer
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)

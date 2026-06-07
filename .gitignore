@@ -143,3 +143,9 @@ vite.config.ts.timestamp-*
 
 # Electron dev user data
 .electron-dev/
+
+# electron-builder output
+release/
+
+# Local-only AI handoff/notes (not part of the repo)
+docs-ai/

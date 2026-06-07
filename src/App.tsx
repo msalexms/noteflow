@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, startTransition } fr
 import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
+import { useAiStore } from './stores/aiStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
@@ -55,6 +56,14 @@ export function App() {
     loadGroups()
     loadSectionTagColors()
   }, [loadNotes, loadGroups, loadSectionTagColors])
+
+  // ── AI / semantic index: load settings + subscribe to index progress/state ──
+  useEffect(() => {
+    if (isSticky) return
+    useAiStore.getState().loadAiSettings()
+    const cleanup = useAiStore.getState().initListeners()
+    return cleanup
+  }, [isSticky])
 
   // ── Global keyboard shortcuts (capture phase — works even inside editors) ─
   useEffect(() => {

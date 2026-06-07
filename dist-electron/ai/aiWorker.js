@@ -1,0 +1,653 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+/**
+ * aiWorker.ts — runs inside an Electron utilityProcess (Node).
+ *
+ * Owns the heavy, CPU-bound work so the main process event loop stays responsive:
+ *  - EmbeddingProvider: local embeddings via Transformers.js (onnxruntime-node).
+ *    Model is downloaded on first use to `cacheDir` (deferred — no installer bloat).
+ *  - SqliteIndex: better-sqlite3 + sqlite-vec (vectors) + FTS5 (keyword), hybrid
+ *    retrieval fused with Reciprocal Rank Fusion (RRF). Persisted in userData.
+ *  - extractSections: minimal frontmatter/sections parser (mirrors src/lib/noteUtils.ts).
+ *    Encrypted notes are skipped — no plaintext ever enters the index.
+ *
+ * The index is a derived artifact: deleting the DB and reindexing rebuilds it from the .md.
+ */
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const js_yaml_1 = __importDefault(require("js-yaml"));
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const sqliteVec = __importStar(require("sqlite-vec"));
+const protocol_1 = require("./protocol");
+// Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
+// require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
+// real runtime dynamic import.
+const dynamicImport = new Function('s', 'return import(s)');
+const EMBED_MAX_CHARS = 2000; // ~512 tokens; the embedding models ignore anything past this
+const parentPort = process.parentPort;
+function send(msg) {
+    parentPort.postMessage(msg);
+}
+function emitState(state) {
+    send({ type: 'state', payload: state });
+}
+function emitProgress(p) {
+    send({ type: 'progress', payload: p });
+}
+// ── Helpers ─────────────────────────────────────────────────────────────────
+// FNV-1a 32-bit — cheap, stable content hash to skip re-embedding unchanged sections.
+function fnv1a(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16);
+}
+function toSnippet(text, max = 160) {
+    const oneLine = text.replace(/\s+/g, ' ').trim();
+    return oneLine.length > max ? oneLine.slice(0, max - 1) + '…' : oneLine;
+}
+// Build a safe FTS5 MATCH query from arbitrary text: distinct word tokens, quoted,
+// OR-joined. Quoting neutralises FTS5 operator syntax so user text can't break it.
+function buildFtsQuery(text, maxTerms = 24) {
+    const tokens = (text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? []);
+    const seen = new Set();
+    const out = [];
+    for (const t of tokens) {
+        if (seen.has(t))
+            continue;
+        seen.add(t);
+        out.push(`"${t}"`);
+        if (out.length >= maxTerms)
+            break;
+    }
+    return out.join(' OR ');
+}
+function floatBuf(v) {
+    return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+}
+function extractSections(raw) {
+    const normalized = raw.replace(/\r\n/g, '\n');
+    let frontmatter = '';
+    let body = normalized;
+    if (normalized.startsWith('---\n')) {
+        const end = normalized.indexOf('\n---\n', 4);
+        if (end !== -1) {
+            frontmatter = normalized.slice(4, end);
+            body = normalized.slice(end + 5);
+        }
+    }
+    let data = {};
+    if (frontmatter) {
+        try {
+            data = js_yaml_1.default.load(frontmatter) ?? {};
+        }
+        catch { /* malformed */ }
+    }
+    const noteId = typeof data.id === 'string' ? data.id : null;
+    const title = typeof data.title === 'string' ? data.title : '';
+    const encrypted = !!(data.encryption && typeof data.encryption === 'object');
+    let sections = [];
+    if (!encrypted) {
+        if (Array.isArray(data.sections) && data.sections.length > 0) {
+            sections = data.sections.map((s, i) => ({
+                id: String(s.id ?? `sec${i}`),
+                name: String(s.name ?? 'Section'),
+                content: String(s.content ?? ''),
+            }));
+        }
+        else {
+            sections = [{ id: 'sec0', name: 'Note', content: body }];
+        }
+    }
+    return { noteId, title, encrypted, sections };
+}
+// ── Embedding provider ──────────────────────────────────────────────────────
+class EmbeddingProvider {
+    constructor() {
+        this.extractor = null;
+        this.isE5 = false;
+        this._dim = 0;
+    }
+    /** Output embedding dimension, detected at init (so any model works). */
+    get dim() { return this._dim; }
+    async init(modelId, cacheDir) {
+        const transformers = await dynamicImport('@huggingface/transformers');
+        const { pipeline, env } = transformers;
+        env.cacheDir = cacheDir;
+        env.allowRemoteModels = true;
+        env.allowLocalModels = true;
+        this.isE5 = /e5/i.test(modelId); // e5 models need "passage:"/"query:" prefixes
+        emitState('downloading-model'); // best-effort: first run downloads, later runs hit cache
+        try {
+            this.extractor = await pipeline('feature-extraction', modelId, { dtype: 'q8' });
+        }
+        catch {
+            this.extractor = await pipeline('feature-extraction', modelId); // model may lack a q8 build
+        }
+        // Probe the real output dimension so the vector index sizes its column correctly.
+        const probe = await this.embed(['x'], 'passage');
+        this._dim = probe[0].length;
+        emitState('idle');
+    }
+    prefix(text, kind) {
+        return this.isE5 ? `${kind}: ${text}` : text;
+    }
+    async embed(texts, kind) {
+        if (!this.extractor)
+            throw new Error('Embedding model not initialised');
+        // Cap length: these models only attend to ~512 tokens, and long inputs are O(n²) slow.
+        const input = texts.map((t) => this.prefix(t.slice(0, EMBED_MAX_CHARS), kind));
+        const out = await this.extractor(input, { pooling: 'mean', normalize: true });
+        const list = out.tolist();
+        return list.map((arr) => Float32Array.from(arr));
+    }
+}
+class SqliteIndex {
+    constructor(dbPath) {
+        // Cached per-section (chunk) vectors + global mean for "related"; invalidated on any write.
+        this.chunkCache = null;
+        fs_1.default.mkdirSync(path_1.default.dirname(dbPath), { recursive: true });
+        this.db = new better_sqlite3_1.default(dbPath);
+        this.db.pragma('journal_mode = WAL');
+        sqliteVec.load(this.db);
+    }
+    getMeta(key) {
+        const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
+        return row?.value ?? null;
+    }
+    setMeta(key, value) {
+        this.db.prepare('INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+    }
+    /** Ensure schema for (modelId, dim). Returns true when a full reindex is needed
+     *  (fresh DB, or model/dim/schema changed → existing vectors are invalid). */
+    ensure(modelId, dim) {
+        // Stable tables (never need a destructive migration).
+        this.db.exec(`
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS notes (note_id TEXT PRIMARY KEY, file_path TEXT, title TEXT);
+      CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(file_path);
+    `);
+        const vecExists = this.db.prepare("SELECT name FROM sqlite_master WHERE name = 'vec_chunks'").get();
+        const matches = vecExists &&
+            this.getMeta('modelId') === modelId &&
+            this.getMeta('dim') === String(dim) &&
+            this.getMeta('schemaVersion') === String(protocol_1.SCHEMA_VERSION);
+        if (matches)
+            return false;
+        // Fresh or mismatched → (re)build the data tables from scratch (the index is derived).
+        // Dropping chunks/fts lets a schema bump add columns (e.g. section_name).
+        this.db.exec(`
+      DROP TABLE IF EXISTS vec_chunks;
+      DROP TABLE IF EXISTS fts_chunks;
+      DROP TABLE IF EXISTS chunks;
+      DELETE FROM notes;
+      CREATE TABLE chunks (
+        chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        section_name TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        text TEXT NOT NULL
+      );
+      CREATE INDEX idx_chunks_note ON chunks(note_id);
+      CREATE VIRTUAL TABLE fts_chunks USING fts5(text);
+    `);
+        this.db.exec(`CREATE VIRTUAL TABLE vec_chunks USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[${dim}])`);
+        this.setMeta('modelId', modelId);
+        this.setMeta('dim', String(dim));
+        this.setMeta('schemaVersion', String(protocol_1.SCHEMA_VERSION));
+        this.chunkCache = null;
+        return true;
+    }
+    isEmpty() {
+        const row = this.db.prepare('SELECT COUNT(*) AS n FROM chunks').get();
+        return row.n === 0;
+    }
+    getNoteSections(noteId) {
+        const rows = this.db.prepare('SELECT section_id, content_hash, chunk_id FROM chunks WHERE note_id = ?').all(noteId);
+        const map = new Map();
+        for (const r of rows)
+            map.set(r.section_id, r);
+        return map;
+    }
+    /** Apply an incremental note update in one transaction. */
+    applyNoteUpdate(noteId, filePath, title, deleteChunkIds, inserts) {
+        const tx = this.db.transaction(() => {
+            this.db.prepare('INSERT INTO notes(note_id, file_path, title) VALUES(?, ?, ?) ' +
+                'ON CONFLICT(note_id) DO UPDATE SET file_path = excluded.file_path, title = excluded.title').run(noteId, path_1.default.resolve(filePath), title);
+            const delChunk = this.db.prepare('DELETE FROM chunks WHERE chunk_id = ?');
+            const delVec = this.db.prepare('DELETE FROM vec_chunks WHERE chunk_id = ?');
+            const delFts = this.db.prepare('DELETE FROM fts_chunks WHERE rowid = ?');
+            // vec0 requires integer (BigInt) primary keys for both inserts and deletes.
+            for (const id of deleteChunkIds) {
+                delChunk.run(id);
+                delVec.run(BigInt(id));
+                delFts.run(id);
+            }
+            const insChunk = this.db.prepare('INSERT INTO chunks(note_id, section_id, section_name, content_hash, text) VALUES(?, ?, ?, ?, ?)');
+            const insVec = this.db.prepare('INSERT INTO vec_chunks(chunk_id, embedding) VALUES(?, ?)');
+            const insFts = this.db.prepare('INSERT INTO fts_chunks(rowid, text) VALUES(?, ?)');
+            for (const ins of inserts) {
+                const info = insChunk.run(noteId, ins.sectionId, ins.sectionName, ins.hash, ins.text);
+                const chunkId = Number(info.lastInsertRowid);
+                insVec.run(BigInt(chunkId), floatBuf(ins.embedding));
+                insFts.run(chunkId, ins.text);
+            }
+        });
+        tx();
+        this.chunkCache = null;
+    }
+    /** Bulk insert pre-embedded chunks (used by reindex, batched across notes). */
+    bulkInsert(rows) {
+        const tx = this.db.transaction(() => {
+            const upNote = this.db.prepare('INSERT INTO notes(note_id, file_path, title) VALUES(?, ?, ?) ' +
+                'ON CONFLICT(note_id) DO UPDATE SET file_path = excluded.file_path, title = excluded.title');
+            const insChunk = this.db.prepare('INSERT INTO chunks(note_id, section_id, section_name, content_hash, text) VALUES(?, ?, ?, ?, ?)');
+            const insVec = this.db.prepare('INSERT INTO vec_chunks(chunk_id, embedding) VALUES(?, ?)');
+            const insFts = this.db.prepare('INSERT INTO fts_chunks(rowid, text) VALUES(?, ?)');
+            const seenNotes = new Set();
+            for (const r of rows) {
+                if (!seenNotes.has(r.noteId)) {
+                    upNote.run(r.noteId, path_1.default.resolve(r.filePath), r.title);
+                    seenNotes.add(r.noteId);
+                }
+                const info = insChunk.run(r.noteId, r.sectionId, r.sectionName, r.hash, r.text);
+                const chunkId = Number(info.lastInsertRowid);
+                insVec.run(BigInt(chunkId), floatBuf(r.embedding));
+                insFts.run(chunkId, r.text);
+            }
+        });
+        tx();
+        this.chunkCache = null;
+    }
+    removeNote(noteId) {
+        const rows = this.db.prepare('SELECT chunk_id FROM chunks WHERE note_id = ?').all(noteId);
+        const tx = this.db.transaction(() => {
+            const delChunk = this.db.prepare('DELETE FROM chunks WHERE chunk_id = ?');
+            const delVec = this.db.prepare('DELETE FROM vec_chunks WHERE chunk_id = ?');
+            const delFts = this.db.prepare('DELETE FROM fts_chunks WHERE rowid = ?');
+            for (const r of rows) {
+                delChunk.run(r.chunk_id);
+                delVec.run(BigInt(r.chunk_id));
+                delFts.run(r.chunk_id);
+            }
+            this.db.prepare('DELETE FROM notes WHERE note_id = ?').run(noteId);
+        });
+        tx();
+        this.chunkCache = null;
+    }
+    removeNoteByFilePath(filePath) {
+        const row = this.db.prepare('SELECT note_id FROM notes WHERE file_path = ?')
+            .get(path_1.default.resolve(filePath));
+        if (row)
+            this.removeNote(row.note_id);
+    }
+    clearAll() {
+        this.db.exec('DELETE FROM chunks; DELETE FROM vec_chunks; DELETE FROM fts_chunks; DELETE FROM notes;');
+        this.chunkCache = null;
+    }
+    chunkMetaFor(chunkIds) {
+        const map = new Map();
+        if (chunkIds.length === 0)
+            return map;
+        const placeholders = chunkIds.map(() => '?').join(',');
+        const rows = this.db.prepare(`SELECT chunk_id, note_id, section_id, text FROM chunks WHERE chunk_id IN (${placeholders})`).all(...chunkIds);
+        for (const r of rows)
+            map.set(r.chunk_id, r);
+        return map;
+    }
+    /** Vector KNN: returns chunk_ids ranked best-first, merged across query vectors. */
+    vecRank(queryVecs, k) {
+        const best = new Map(); // chunk_id -> min distance
+        const stmt = this.db.prepare('SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ?');
+        for (const v of queryVecs) {
+            const rows = stmt.all(floatBuf(v), k);
+            for (const r of rows) {
+                const prev = best.get(r.chunk_id);
+                if (prev === undefined || r.distance < prev)
+                    best.set(r.chunk_id, r.distance);
+            }
+        }
+        return [...best.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+    }
+    /** FTS5 BM25: returns chunk_ids ranked best-first. */
+    ftsRank(queryText, k) {
+        const q = buildFtsQuery(queryText);
+        if (!q)
+            return [];
+        try {
+            const rows = this.db.prepare('SELECT rowid AS chunk_id FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?').all(q, k);
+            return rows.map((r) => r.chunk_id);
+        }
+        catch {
+            return [];
+        }
+    }
+    /** Hybrid retrieval: vector + FTS ranks fused with RRF, aggregated to note level. */
+    hybrid(queryVecs, queryText, k, excludeNoteId) {
+        const pool = Math.max(k * 6, 30);
+        const vecIds = this.vecRank(queryVecs, pool);
+        const ftsIds = this.ftsRank(queryText, pool);
+        const meta = this.chunkMetaFor([...new Set([...vecIds, ...ftsIds])]);
+        const RRF_K = 60;
+        // Aggregate to note level, keeping the best (first-ranked) chunk per note per list.
+        const noteScore = new Map();
+        const noteBestChunk = new Map();
+        const fuse = (ids) => {
+            const seenNotes = new Set();
+            ids.forEach((chunkId, rank) => {
+                const m = meta.get(chunkId);
+                if (!m || m.note_id === excludeNoteId)
+                    return;
+                if (seenNotes.has(m.note_id))
+                    return; // only best chunk of this note in this list
+                seenNotes.add(m.note_id);
+                noteScore.set(m.note_id, (noteScore.get(m.note_id) ?? 0) + 1 / (RRF_K + rank));
+                if (!noteBestChunk.has(m.note_id))
+                    noteBestChunk.set(m.note_id, m);
+            });
+        };
+        fuse(vecIds);
+        fuse(ftsIds);
+        return [...noteScore.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, k)
+            .map(([noteId, score]) => {
+            const m = noteBestChunk.get(noteId);
+            return { noteId, sectionId: m.section_id, score, snippet: toSnippet(m.text) };
+        });
+    }
+    /** All section (chunk) vectors + their global mean. Cached; invalidated on writes. */
+    getChunkCache() {
+        if (this.chunkCache)
+            return this.chunkCache;
+        const rows = this.db.prepare('SELECT v.chunk_id AS chunk_id, c.note_id AS note_id, c.section_id AS section_id, v.embedding AS embedding ' +
+            'FROM vec_chunks v JOIN chunks c ON c.chunk_id = v.chunk_id').all();
+        const items = [];
+        let dim = 0;
+        let mean = new Float32Array(0);
+        for (const r of rows) {
+            const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4).slice();
+            if (dim === 0) {
+                dim = vec.length;
+                mean = new Float32Array(dim);
+            }
+            items.push({ chunkId: r.chunk_id, noteId: r.note_id, sectionId: r.section_id, vec });
+            for (let i = 0; i < dim; i++)
+                mean[i] += vec[i];
+        }
+        if (items.length > 0)
+            for (let i = 0; i < dim; i++)
+                mean[i] /= items.length;
+        this.chunkCache = { items, mean };
+        return this.chunkCache;
+    }
+    chunkDisplay(chunkId) {
+        const r = this.db.prepare('SELECT c.note_id, c.section_id, c.section_name, c.text, n.title ' +
+            'FROM chunks c LEFT JOIN notes n ON n.note_id = c.note_id WHERE c.chunk_id = ?').get(chunkId);
+        return {
+            noteId: r?.note_id ?? '',
+            title: r?.title ?? '',
+            sectionId: r?.section_id ?? '',
+            sectionName: r?.section_name ?? '',
+            snippet: r ? toSnippet(r.text) : '',
+        };
+    }
+    /**
+     * Related notes for a specific SECTION. Uses that section's vector (centered by the
+     * global mean to counter embedding anisotropy) and finds the nearest sections in OTHER
+     * notes, keeping the single best-matching section per note. Only genuinely topical
+     * neighbours score above `minScore`. Falls back to the note's centroid if the section
+     * has no indexed content.
+     */
+    relatedBySection(noteId, sectionId, k, minScore = 0.03) {
+        const { items, mean } = this.getChunkCache();
+        if (items.length === 0)
+            return [];
+        const dim = items[0].vec.length;
+        let query = items.find((it) => it.noteId === noteId && it.sectionId === sectionId)?.vec;
+        if (!query) {
+            const own = items.filter((it) => it.noteId === noteId);
+            if (own.length === 0)
+                return [];
+            const c = new Float32Array(dim);
+            for (const it of own)
+                for (let i = 0; i < dim; i++)
+                    c[i] += it.vec[i];
+            for (let i = 0; i < dim; i++)
+                c[i] /= own.length;
+            query = c;
+        }
+        const center = (v) => {
+            const out = new Float32Array(dim);
+            let norm = 0;
+            for (let i = 0; i < dim; i++) {
+                out[i] = v[i] - mean[i];
+                norm += out[i] * out[i];
+            }
+            norm = Math.sqrt(norm) || 1;
+            for (let i = 0; i < dim; i++)
+                out[i] /= norm;
+            return out;
+        };
+        const qc = center(query);
+        // Other notes: keep the single best-scoring section per note.
+        // Same note: keep each sibling section individually (distinct navigable tabs).
+        const bestByNote = new Map();
+        const siblings = [];
+        for (const it of items) {
+            if (it.noteId === noteId && it.sectionId === sectionId)
+                continue; // skip the active section itself
+            const vc = center(it.vec);
+            let dot = 0;
+            for (let i = 0; i < dim; i++)
+                dot += qc[i] * vc[i];
+            if (it.noteId === noteId) {
+                siblings.push({ chunkId: it.chunkId, score: dot });
+            }
+            else {
+                const prev = bestByNote.get(it.noteId);
+                if (!prev || dot > prev.score)
+                    bestByNote.set(it.noteId, { chunkId: it.chunkId, score: dot });
+            }
+        }
+        return [...siblings, ...bestByNote.values()]
+            .filter((b) => b.score > minScore)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, k)
+            .map((b) => ({ ...this.chunkDisplay(b.chunkId), score: b.score }));
+    }
+}
+// ── Orchestration ───────────────────────────────────────────────────────────
+const provider = new EmbeddingProvider();
+let index = null;
+let currentModelId = '';
+// Strip base64 data URIs (embedded images) — huge, zero semantic value, and catastrophically
+// slow to embed/tokenize if left in (a single pasted image can take tens of seconds).
+function stripNoise(text) {
+    return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+}
+function chunkTextFor(s) {
+    return stripNoise(`${s.name}\n${s.content}`).trim();
+}
+async function handleIndexNote(filePath, content) {
+    if (!index)
+        throw new Error('Index not initialised');
+    const parsed = extractSections(content);
+    if (!parsed.noteId || parsed.encrypted) {
+        index.removeNoteByFilePath(filePath);
+        return { ok: true, skipped: true };
+    }
+    const desired = parsed.sections
+        .map((s) => ({ sectionId: s.id, sectionName: s.name, text: chunkTextFor(s) }))
+        .filter((d) => d.text.length > 0)
+        .map((d) => ({ ...d, hash: fnv1a(d.text) }));
+    const existing = index.getNoteSections(parsed.noteId);
+    const desiredIds = new Set(desired.map((d) => d.sectionId));
+    const deleteChunkIds = [];
+    const toEmbed = [];
+    for (const d of desired) {
+        const ex = existing.get(d.sectionId);
+        if (ex && ex.content_hash === d.hash)
+            continue; // unchanged → keep existing chunk
+        if (ex)
+            deleteChunkIds.push(ex.chunk_id); // changed → replace
+        toEmbed.push(d);
+    }
+    for (const [sectionId, ex] of existing) {
+        if (!desiredIds.has(sectionId))
+            deleteChunkIds.push(ex.chunk_id); // removed section
+    }
+    const embeddings = toEmbed.length > 0 ? await provider.embed(toEmbed.map((d) => d.text), 'passage') : [];
+    const inserts = toEmbed.map((d, i) => ({
+        sectionId: d.sectionId, sectionName: d.sectionName, hash: d.hash, text: d.text, embedding: embeddings[i],
+    }));
+    index.applyNoteUpdate(parsed.noteId, filePath, parsed.title, deleteChunkIds, inserts);
+    return { ok: true };
+}
+const REINDEX_BATCH = 16; // embed many sections per inference call → much better CPU throughput
+async function handleReindexAll(notesDir) {
+    if (!index)
+        throw new Error('Index not initialised');
+    emitState('indexing');
+    index.clearAll();
+    // 1) Collect every section across all notes (skip encrypted/empty).
+    let files = [];
+    try {
+        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
+    }
+    catch { /* empty */ }
+    const rows = [];
+    for (const f of files) {
+        const full = path_1.default.join(notesDir, f);
+        let content;
+        try {
+            content = fs_1.default.readFileSync(full, 'utf-8');
+        }
+        catch {
+            continue;
+        }
+        const parsed = extractSections(content);
+        if (!parsed.noteId || parsed.encrypted)
+            continue;
+        for (const s of parsed.sections) {
+            const text = chunkTextFor(s);
+            if (!text)
+                continue;
+            rows.push({ noteId: parsed.noteId, filePath: full, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) });
+        }
+    }
+    // 2) Embed in batches and write incrementally (progress is per-section → smooth bar).
+    let done = 0;
+    emitProgress({ done, total: rows.length, phase: 'indexing' });
+    for (let i = 0; i < rows.length; i += REINDEX_BATCH) {
+        const batch = rows.slice(i, i + REINDEX_BATCH);
+        const embs = await provider.embed(batch.map((r) => r.text), 'passage');
+        index.bulkInsert(batch.map((r, j) => ({ ...r, embedding: embs[j] })));
+        done += batch.length;
+        emitProgress({ done, total: rows.length, phase: 'indexing' });
+    }
+    emitState('idle');
+    return { ok: true, indexed: rows.length };
+}
+async function handleSearch(query, k) {
+    if (!index)
+        throw new Error('Index not initialised');
+    const [qvec] = await provider.embed([query], 'query');
+    return index.hybrid([qvec], query, k);
+}
+async function handleRelated(noteId, sectionId, k) {
+    if (!index)
+        throw new Error('Index not initialised');
+    return index.relatedBySection(noteId, sectionId, k);
+}
+// ── Message loop ────────────────────────────────────────────────────────────
+parentPort.on('message', async (e) => {
+    const req = e.data;
+    try {
+        switch (req.type) {
+            case 'init': {
+                currentModelId = req.payload.modelId;
+                index = new SqliteIndex(req.payload.dbPath);
+                // Load the model first so we know its embedding dimension, then size the index.
+                await provider.init(req.payload.modelId, req.payload.cacheDir);
+                // Reindex when the model/schema/dim changed OR the index is empty (fresh DB, or a
+                // DB that only ever had its metadata written). Avoids an empty Related panel.
+                const needsReindex = index.ensure(req.payload.modelId, provider.dim) || index.isEmpty();
+                send({ type: 'result', id: req.id, payload: { ok: true, needsReindex } });
+                break;
+            }
+            case 'index-note': {
+                const r = await handleIndexNote(req.payload.filePath, req.payload.content);
+                send({ type: 'result', id: req.id, payload: r });
+                break;
+            }
+            case 'remove-note': {
+                index?.removeNoteByFilePath(req.payload.filePath);
+                send({ type: 'result', id: req.id, payload: { ok: true } });
+                break;
+            }
+            case 'reindex-all': {
+                const r = await handleReindexAll(req.payload.notesDir);
+                send({ type: 'result', id: req.id, payload: r });
+                break;
+            }
+            case 'search': {
+                const r = await handleSearch(req.payload.query, req.payload.k);
+                send({ type: 'result', id: req.id, payload: r });
+                break;
+            }
+            case 'related': {
+                const r = await handleRelated(req.payload.noteId, req.payload.sectionId, req.payload.k);
+                send({ type: 'result', id: req.id, payload: r });
+                break;
+            }
+        }
+    }
+    catch (err) {
+        const id = req.id ?? -1;
+        emitState('idle');
+        send({ type: 'error', id, error: String(err?.stack ?? err) });
+    }
+});
+// Signal the parent that the worker module has loaded and the message loop is ready.
+send({ type: 'state', payload: 'idle' });
+void currentModelId;

@@ -1,0 +1,671 @@
+/**
+ * aiWorker.ts — runs inside an Electron utilityProcess (Node).
+ *
+ * Owns the heavy, CPU-bound work so the main process event loop stays responsive:
+ *  - EmbeddingProvider: local embeddings via Transformers.js (onnxruntime-node).
+ *    Model is downloaded on first use to `cacheDir` (deferred — no installer bloat).
+ *  - SqliteIndex: better-sqlite3 + sqlite-vec (vectors) + FTS5 (keyword), hybrid
+ *    retrieval fused with Reciprocal Rank Fusion (RRF). Persisted in userData.
+ *  - extractSections: minimal frontmatter/sections parser (mirrors src/lib/noteUtils.ts).
+ *    Encrypted notes are skipped — no plaintext ever enters the index.
+ *
+ * The index is a derived artifact: deleting the DB and reindexing rebuilds it from the .md.
+ */
+import fs from 'fs'
+import path from 'path'
+import yaml from 'js-yaml'
+import Database from 'better-sqlite3'
+import * as sqliteVec from 'sqlite-vec'
+import type { FeatureExtractionPipeline } from '@huggingface/transformers'
+import {
+  SCHEMA_VERSION,
+  type WorkerRequest, type WorkerResponse, type IndexState, type IndexProgress,
+  type RelatedNote, type SemanticHit,
+} from './protocol'
+
+// Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
+// require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
+// real runtime dynamic import.
+const dynamicImport = new Function('s', 'return import(s)') as
+  (s: string) => Promise<typeof import('@huggingface/transformers')>
+
+const EMBED_MAX_CHARS = 2000 // ~512 tokens; the embedding models ignore anything past this
+
+// ── utilityProcess parent port ──────────────────────────────────────────────
+interface ParentPortLike {
+  postMessage(message: unknown): void
+  on(event: 'message', listener: (e: { data: WorkerRequest }) => void): void
+}
+const parentPort = (process as unknown as { parentPort: ParentPortLike }).parentPort
+
+function send(msg: WorkerResponse): void {
+  parentPort.postMessage(msg)
+}
+function emitState(state: IndexState): void {
+  send({ type: 'state', payload: state })
+}
+function emitProgress(p: IndexProgress): void {
+  send({ type: 'progress', payload: p })
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+// FNV-1a 32-bit — cheap, stable content hash to skip re-embedding unchanged sections.
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+function toSnippet(text: string, max = 160): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  return oneLine.length > max ? oneLine.slice(0, max - 1) + '…' : oneLine
+}
+
+// Build a safe FTS5 MATCH query from arbitrary text: distinct word tokens, quoted,
+// OR-joined. Quoting neutralises FTS5 operator syntax so user text can't break it.
+function buildFtsQuery(text: string, maxTerms = 24): string {
+  const tokens = (text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? [])
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const t of tokens) {
+    if (seen.has(t)) continue
+    seen.add(t)
+    out.push(`"${t}"`)
+    if (out.length >= maxTerms) break
+  }
+  return out.join(' OR ')
+}
+
+function floatBuf(v: Float32Array): Buffer {
+  return Buffer.from(v.buffer, v.byteOffset, v.byteLength)
+}
+
+// ── Note parsing (mirrors src/lib/noteUtils.ts splitFrontmatter/parseNote) ────
+
+interface ParsedSection { id: string; name: string; content: string }
+interface ParsedNote {
+  noteId: string | null
+  title: string
+  encrypted: boolean
+  sections: ParsedSection[]
+}
+
+function extractSections(raw: string): ParsedNote {
+  const normalized = raw.replace(/\r\n/g, '\n')
+  let frontmatter = ''
+  let body = normalized
+  if (normalized.startsWith('---\n')) {
+    const end = normalized.indexOf('\n---\n', 4)
+    if (end !== -1) {
+      frontmatter = normalized.slice(4, end)
+      body = normalized.slice(end + 5)
+    }
+  }
+
+  let data: Record<string, unknown> = {}
+  if (frontmatter) {
+    try { data = (yaml.load(frontmatter) as Record<string, unknown>) ?? {} } catch { /* malformed */ }
+  }
+
+  const noteId = typeof data.id === 'string' ? data.id : null
+  const title = typeof data.title === 'string' ? data.title : ''
+  const encrypted = !!(data.encryption && typeof data.encryption === 'object')
+
+  let sections: ParsedSection[] = []
+  if (!encrypted) {
+    if (Array.isArray(data.sections) && data.sections.length > 0) {
+      sections = (data.sections as Array<Record<string, unknown>>).map((s, i) => ({
+        id: String(s.id ?? `sec${i}`),
+        name: String(s.name ?? 'Section'),
+        content: String(s.content ?? ''),
+      }))
+    } else {
+      sections = [{ id: 'sec0', name: 'Note', content: body }]
+    }
+  }
+
+  return { noteId, title, encrypted, sections }
+}
+
+// ── Embedding provider ──────────────────────────────────────────────────────
+
+class EmbeddingProvider {
+  private extractor: FeatureExtractionPipeline | null = null
+  private isE5 = false
+  private _dim = 0
+
+  /** Output embedding dimension, detected at init (so any model works). */
+  get dim(): number { return this._dim }
+
+  async init(modelId: string, cacheDir: string): Promise<void> {
+    const transformers = await dynamicImport('@huggingface/transformers')
+    const { pipeline, env } = transformers
+    env.cacheDir = cacheDir
+    env.allowRemoteModels = true
+    env.allowLocalModels = true
+    this.isE5 = /e5/i.test(modelId) // e5 models need "passage:"/"query:" prefixes
+    emitState('downloading-model') // best-effort: first run downloads, later runs hit cache
+    try {
+      this.extractor = await pipeline('feature-extraction', modelId, { dtype: 'q8' })
+    } catch {
+      this.extractor = await pipeline('feature-extraction', modelId) // model may lack a q8 build
+    }
+    // Probe the real output dimension so the vector index sizes its column correctly.
+    const probe = await this.embed(['x'], 'passage')
+    this._dim = probe[0].length
+    emitState('idle')
+  }
+
+  private prefix(text: string, kind: 'passage' | 'query'): string {
+    return this.isE5 ? `${kind}: ${text}` : text
+  }
+
+  async embed(texts: string[], kind: 'passage' | 'query'): Promise<Float32Array[]> {
+    if (!this.extractor) throw new Error('Embedding model not initialised')
+    // Cap length: these models only attend to ~512 tokens, and long inputs are O(n²) slow.
+    const input = texts.map((t) => this.prefix(t.slice(0, EMBED_MAX_CHARS), kind))
+    const out = await this.extractor(input, { pooling: 'mean', normalize: true })
+    const list = out.tolist() as number[][]
+    return list.map((arr) => Float32Array.from(arr))
+  }
+}
+
+// ── SQLite hybrid index ─────────────────────────────────────────────────────
+
+interface SectionRow { section_id: string; content_hash: string; chunk_id: number }
+interface InsertChunk { sectionId: string; sectionName: string; hash: string; text: string; embedding: Float32Array }
+interface ChunkMeta { chunk_id: number; note_id: string; section_id: string; text: string }
+interface ChunkVec { chunkId: number; noteId: string; sectionId: string; vec: Float32Array }
+
+class SqliteIndex {
+  private db: Database.Database
+  // Cached per-section (chunk) vectors + global mean for "related"; invalidated on any write.
+  private chunkCache: { items: ChunkVec[]; mean: Float32Array } | null = null
+
+  constructor(dbPath: string) {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+    this.db = new Database(dbPath)
+    this.db.pragma('journal_mode = WAL')
+    sqliteVec.load(this.db)
+  }
+
+  private getMeta(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined
+    return row?.value ?? null
+  }
+  private setMeta(key: string, value: string): void {
+    this.db.prepare('INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
+  }
+
+  /** Ensure schema for (modelId, dim). Returns true when a full reindex is needed
+   *  (fresh DB, or model/dim/schema changed → existing vectors are invalid). */
+  ensure(modelId: string, dim: number): boolean {
+    // Stable tables (never need a destructive migration).
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS notes (note_id TEXT PRIMARY KEY, file_path TEXT, title TEXT);
+      CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(file_path);
+    `)
+
+    const vecExists = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE name = 'vec_chunks'"
+    ).get() as { name: string } | undefined
+
+    const matches =
+      vecExists &&
+      this.getMeta('modelId') === modelId &&
+      this.getMeta('dim') === String(dim) &&
+      this.getMeta('schemaVersion') === String(SCHEMA_VERSION)
+
+    if (matches) return false
+
+    // Fresh or mismatched → (re)build the data tables from scratch (the index is derived).
+    // Dropping chunks/fts lets a schema bump add columns (e.g. section_name).
+    this.db.exec(`
+      DROP TABLE IF EXISTS vec_chunks;
+      DROP TABLE IF EXISTS fts_chunks;
+      DROP TABLE IF EXISTS chunks;
+      DELETE FROM notes;
+      CREATE TABLE chunks (
+        chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id TEXT NOT NULL,
+        section_id TEXT NOT NULL,
+        section_name TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        text TEXT NOT NULL
+      );
+      CREATE INDEX idx_chunks_note ON chunks(note_id);
+      CREATE VIRTUAL TABLE fts_chunks USING fts5(text);
+    `)
+    this.db.exec(`CREATE VIRTUAL TABLE vec_chunks USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[${dim}])`)
+    this.setMeta('modelId', modelId)
+    this.setMeta('dim', String(dim))
+    this.setMeta('schemaVersion', String(SCHEMA_VERSION))
+    this.chunkCache = null
+    return true
+  }
+
+  isEmpty(): boolean {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM chunks').get() as { n: number }
+    return row.n === 0
+  }
+
+  getNoteSections(noteId: string): Map<string, SectionRow> {
+    const rows = this.db.prepare(
+      'SELECT section_id, content_hash, chunk_id FROM chunks WHERE note_id = ?'
+    ).all(noteId) as SectionRow[]
+    const map = new Map<string, SectionRow>()
+    for (const r of rows) map.set(r.section_id, r)
+    return map
+  }
+
+  /** Apply an incremental note update in one transaction. */
+  applyNoteUpdate(
+    noteId: string, filePath: string, title: string,
+    deleteChunkIds: number[], inserts: InsertChunk[],
+  ): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(
+        'INSERT INTO notes(note_id, file_path, title) VALUES(?, ?, ?) ' +
+        'ON CONFLICT(note_id) DO UPDATE SET file_path = excluded.file_path, title = excluded.title'
+      ).run(noteId, path.resolve(filePath), title)
+
+      const delChunk = this.db.prepare('DELETE FROM chunks WHERE chunk_id = ?')
+      const delVec = this.db.prepare('DELETE FROM vec_chunks WHERE chunk_id = ?')
+      const delFts = this.db.prepare('DELETE FROM fts_chunks WHERE rowid = ?')
+      // vec0 requires integer (BigInt) primary keys for both inserts and deletes.
+      for (const id of deleteChunkIds) { delChunk.run(id); delVec.run(BigInt(id)); delFts.run(id) }
+
+      const insChunk = this.db.prepare(
+        'INSERT INTO chunks(note_id, section_id, section_name, content_hash, text) VALUES(?, ?, ?, ?, ?)'
+      )
+      const insVec = this.db.prepare('INSERT INTO vec_chunks(chunk_id, embedding) VALUES(?, ?)')
+      const insFts = this.db.prepare('INSERT INTO fts_chunks(rowid, text) VALUES(?, ?)')
+      for (const ins of inserts) {
+        const info = insChunk.run(noteId, ins.sectionId, ins.sectionName, ins.hash, ins.text)
+        const chunkId = Number(info.lastInsertRowid)
+        insVec.run(BigInt(chunkId), floatBuf(ins.embedding))
+        insFts.run(chunkId, ins.text)
+      }
+    })
+    tx()
+    this.chunkCache = null
+  }
+
+  /** Bulk insert pre-embedded chunks (used by reindex, batched across notes). */
+  bulkInsert(rows: Array<{ noteId: string; filePath: string; title: string; sectionId: string; sectionName: string; hash: string; text: string; embedding: Float32Array }>): void {
+    const tx = this.db.transaction(() => {
+      const upNote = this.db.prepare(
+        'INSERT INTO notes(note_id, file_path, title) VALUES(?, ?, ?) ' +
+        'ON CONFLICT(note_id) DO UPDATE SET file_path = excluded.file_path, title = excluded.title'
+      )
+      const insChunk = this.db.prepare('INSERT INTO chunks(note_id, section_id, section_name, content_hash, text) VALUES(?, ?, ?, ?, ?)')
+      const insVec = this.db.prepare('INSERT INTO vec_chunks(chunk_id, embedding) VALUES(?, ?)')
+      const insFts = this.db.prepare('INSERT INTO fts_chunks(rowid, text) VALUES(?, ?)')
+      const seenNotes = new Set<string>()
+      for (const r of rows) {
+        if (!seenNotes.has(r.noteId)) { upNote.run(r.noteId, path.resolve(r.filePath), r.title); seenNotes.add(r.noteId) }
+        const info = insChunk.run(r.noteId, r.sectionId, r.sectionName, r.hash, r.text)
+        const chunkId = Number(info.lastInsertRowid)
+        insVec.run(BigInt(chunkId), floatBuf(r.embedding))
+        insFts.run(chunkId, r.text)
+      }
+    })
+    tx()
+    this.chunkCache = null
+  }
+
+  removeNote(noteId: string): void {
+    const rows = this.db.prepare('SELECT chunk_id FROM chunks WHERE note_id = ?').all(noteId) as { chunk_id: number }[]
+    const tx = this.db.transaction(() => {
+      const delChunk = this.db.prepare('DELETE FROM chunks WHERE chunk_id = ?')
+      const delVec = this.db.prepare('DELETE FROM vec_chunks WHERE chunk_id = ?')
+      const delFts = this.db.prepare('DELETE FROM fts_chunks WHERE rowid = ?')
+      for (const r of rows) { delChunk.run(r.chunk_id); delVec.run(BigInt(r.chunk_id)); delFts.run(r.chunk_id) }
+      this.db.prepare('DELETE FROM notes WHERE note_id = ?').run(noteId)
+    })
+    tx()
+    this.chunkCache = null
+  }
+
+  removeNoteByFilePath(filePath: string): void {
+    const row = this.db.prepare('SELECT note_id FROM notes WHERE file_path = ?')
+      .get(path.resolve(filePath)) as { note_id: string } | undefined
+    if (row) this.removeNote(row.note_id)
+  }
+
+  clearAll(): void {
+    this.db.exec('DELETE FROM chunks; DELETE FROM vec_chunks; DELETE FROM fts_chunks; DELETE FROM notes;')
+    this.chunkCache = null
+  }
+
+  private chunkMetaFor(chunkIds: number[]): Map<number, ChunkMeta> {
+    const map = new Map<number, ChunkMeta>()
+    if (chunkIds.length === 0) return map
+    const placeholders = chunkIds.map(() => '?').join(',')
+    const rows = this.db.prepare(
+      `SELECT chunk_id, note_id, section_id, text FROM chunks WHERE chunk_id IN (${placeholders})`
+    ).all(...chunkIds) as ChunkMeta[]
+    for (const r of rows) map.set(r.chunk_id, r)
+    return map
+  }
+
+  /** Vector KNN: returns chunk_ids ranked best-first, merged across query vectors. */
+  private vecRank(queryVecs: Float32Array[], k: number): number[] {
+    const best = new Map<number, number>() // chunk_id -> min distance
+    const stmt = this.db.prepare(
+      'SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ?'
+    )
+    for (const v of queryVecs) {
+      const rows = stmt.all(floatBuf(v), k) as { chunk_id: number; distance: number }[]
+      for (const r of rows) {
+        const prev = best.get(r.chunk_id)
+        if (prev === undefined || r.distance < prev) best.set(r.chunk_id, r.distance)
+      }
+    }
+    return [...best.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id)
+  }
+
+  /** FTS5 BM25: returns chunk_ids ranked best-first. */
+  private ftsRank(queryText: string, k: number): number[] {
+    const q = buildFtsQuery(queryText)
+    if (!q) return []
+    try {
+      const rows = this.db.prepare(
+        'SELECT rowid AS chunk_id FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?'
+      ).all(q, k) as { chunk_id: number }[]
+      return rows.map((r) => r.chunk_id)
+    } catch {
+      return []
+    }
+  }
+
+  /** Hybrid retrieval: vector + FTS ranks fused with RRF, aggregated to note level. */
+  hybrid(queryVecs: Float32Array[], queryText: string, k: number, excludeNoteId?: string): SemanticHit[] {
+    const pool = Math.max(k * 6, 30)
+    const vecIds = this.vecRank(queryVecs, pool)
+    const ftsIds = this.ftsRank(queryText, pool)
+
+    const meta = this.chunkMetaFor([...new Set([...vecIds, ...ftsIds])])
+    const RRF_K = 60
+    // Aggregate to note level, keeping the best (first-ranked) chunk per note per list.
+    const noteScore = new Map<string, number>()
+    const noteBestChunk = new Map<string, ChunkMeta>()
+
+    const fuse = (ids: number[]) => {
+      const seenNotes = new Set<string>()
+      ids.forEach((chunkId, rank) => {
+        const m = meta.get(chunkId)
+        if (!m || m.note_id === excludeNoteId) return
+        if (seenNotes.has(m.note_id)) return // only best chunk of this note in this list
+        seenNotes.add(m.note_id)
+        noteScore.set(m.note_id, (noteScore.get(m.note_id) ?? 0) + 1 / (RRF_K + rank))
+        if (!noteBestChunk.has(m.note_id)) noteBestChunk.set(m.note_id, m)
+      })
+    }
+    fuse(vecIds)
+    fuse(ftsIds)
+
+    return [...noteScore.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, k)
+      .map(([noteId, score]) => {
+        const m = noteBestChunk.get(noteId)!
+        return { noteId, sectionId: m.section_id, score, snippet: toSnippet(m.text) }
+      })
+  }
+
+  /** All section (chunk) vectors + their global mean. Cached; invalidated on writes. */
+  private getChunkCache(): { items: ChunkVec[]; mean: Float32Array } {
+    if (this.chunkCache) return this.chunkCache
+    const rows = this.db.prepare(
+      'SELECT v.chunk_id AS chunk_id, c.note_id AS note_id, c.section_id AS section_id, v.embedding AS embedding ' +
+      'FROM vec_chunks v JOIN chunks c ON c.chunk_id = v.chunk_id'
+    ).all() as { chunk_id: number; note_id: string; section_id: string; embedding: Buffer | Uint8Array }[]
+
+    const items: ChunkVec[] = []
+    let dim = 0
+    let mean = new Float32Array(0)
+    for (const r of rows) {
+      const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4).slice()
+      if (dim === 0) { dim = vec.length; mean = new Float32Array(dim) }
+      items.push({ chunkId: r.chunk_id, noteId: r.note_id, sectionId: r.section_id, vec })
+      for (let i = 0; i < dim; i++) mean[i] += vec[i]
+    }
+    if (items.length > 0) for (let i = 0; i < dim; i++) mean[i] /= items.length
+    this.chunkCache = { items, mean }
+    return this.chunkCache
+  }
+
+  private chunkDisplay(chunkId: number): Omit<RelatedNote, 'score'> {
+    const r = this.db.prepare(
+      'SELECT c.note_id, c.section_id, c.section_name, c.text, n.title ' +
+      'FROM chunks c LEFT JOIN notes n ON n.note_id = c.note_id WHERE c.chunk_id = ?'
+    ).get(chunkId) as { note_id: string; section_id: string; section_name: string; text: string; title: string } | undefined
+    return {
+      noteId: r?.note_id ?? '',
+      title: r?.title ?? '',
+      sectionId: r?.section_id ?? '',
+      sectionName: r?.section_name ?? '',
+      snippet: r ? toSnippet(r.text) : '',
+    }
+  }
+
+  /**
+   * Related notes for a specific SECTION. Uses that section's vector (centered by the
+   * global mean to counter embedding anisotropy) and finds the nearest sections in OTHER
+   * notes, keeping the single best-matching section per note. Only genuinely topical
+   * neighbours score above `minScore`. Falls back to the note's centroid if the section
+   * has no indexed content.
+   */
+  relatedBySection(noteId: string, sectionId: string, k: number, minScore = 0.03): RelatedNote[] {
+    const { items, mean } = this.getChunkCache()
+    if (items.length === 0) return []
+    const dim = items[0].vec.length
+
+    let query = items.find((it) => it.noteId === noteId && it.sectionId === sectionId)?.vec
+    if (!query) {
+      const own = items.filter((it) => it.noteId === noteId)
+      if (own.length === 0) return []
+      const c = new Float32Array(dim)
+      for (const it of own) for (let i = 0; i < dim; i++) c[i] += it.vec[i]
+      for (let i = 0; i < dim; i++) c[i] /= own.length
+      query = c
+    }
+
+    const center = (v: Float32Array): Float32Array => {
+      const out = new Float32Array(dim)
+      let norm = 0
+      for (let i = 0; i < dim; i++) { out[i] = v[i] - mean[i]; norm += out[i] * out[i] }
+      norm = Math.sqrt(norm) || 1
+      for (let i = 0; i < dim; i++) out[i] /= norm
+      return out
+    }
+
+    const qc = center(query)
+    // Other notes: keep the single best-scoring section per note.
+    // Same note: keep each sibling section individually (distinct navigable tabs).
+    const bestByNote = new Map<string, { chunkId: number; score: number }>()
+    const siblings: { chunkId: number; score: number }[] = []
+    for (const it of items) {
+      if (it.noteId === noteId && it.sectionId === sectionId) continue // skip the active section itself
+      const vc = center(it.vec)
+      let dot = 0
+      for (let i = 0; i < dim; i++) dot += qc[i] * vc[i]
+      if (it.noteId === noteId) {
+        siblings.push({ chunkId: it.chunkId, score: dot })
+      } else {
+        const prev = bestByNote.get(it.noteId)
+        if (!prev || dot > prev.score) bestByNote.set(it.noteId, { chunkId: it.chunkId, score: dot })
+      }
+    }
+
+    return [...siblings, ...bestByNote.values()]
+      .filter((b) => b.score > minScore)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, k)
+      .map((b) => ({ ...this.chunkDisplay(b.chunkId), score: b.score }))
+  }
+}
+
+// ── Orchestration ───────────────────────────────────────────────────────────
+
+const provider = new EmbeddingProvider()
+let index: SqliteIndex | null = null
+let currentModelId = ''
+
+// Strip base64 data URIs (embedded images) — huge, zero semantic value, and catastrophically
+// slow to embed/tokenize if left in (a single pasted image can take tens of seconds).
+function stripNoise(text: string): string {
+  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+}
+
+function chunkTextFor(s: ParsedSection): string {
+  return stripNoise(`${s.name}\n${s.content}`).trim()
+}
+
+async function handleIndexNote(filePath: string, content: string): Promise<{ ok: boolean; skipped?: boolean }> {
+  if (!index) throw new Error('Index not initialised')
+  const parsed = extractSections(content)
+  if (!parsed.noteId || parsed.encrypted) {
+    index.removeNoteByFilePath(filePath)
+    return { ok: true, skipped: true }
+  }
+
+  const desired = parsed.sections
+    .map((s) => ({ sectionId: s.id, sectionName: s.name, text: chunkTextFor(s) }))
+    .filter((d) => d.text.length > 0)
+    .map((d) => ({ ...d, hash: fnv1a(d.text) }))
+
+  const existing = index.getNoteSections(parsed.noteId)
+  const desiredIds = new Set(desired.map((d) => d.sectionId))
+  const deleteChunkIds: number[] = []
+  const toEmbed: { sectionId: string; sectionName: string; text: string; hash: string }[] = []
+
+  for (const d of desired) {
+    const ex = existing.get(d.sectionId)
+    if (ex && ex.content_hash === d.hash) continue // unchanged → keep existing chunk
+    if (ex) deleteChunkIds.push(ex.chunk_id)       // changed → replace
+    toEmbed.push(d)
+  }
+  for (const [sectionId, ex] of existing) {
+    if (!desiredIds.has(sectionId)) deleteChunkIds.push(ex.chunk_id) // removed section
+  }
+
+  const embeddings = toEmbed.length > 0 ? await provider.embed(toEmbed.map((d) => d.text), 'passage') : []
+  const inserts: InsertChunk[] = toEmbed.map((d, i) => ({
+    sectionId: d.sectionId, sectionName: d.sectionName, hash: d.hash, text: d.text, embedding: embeddings[i],
+  }))
+
+  index.applyNoteUpdate(parsed.noteId, filePath, parsed.title, deleteChunkIds, inserts)
+  return { ok: true }
+}
+
+const REINDEX_BATCH = 16 // embed many sections per inference call → much better CPU throughput
+
+async function handleReindexAll(notesDir: string): Promise<{ ok: boolean; indexed: number }> {
+  if (!index) throw new Error('Index not initialised')
+  emitState('indexing')
+  index.clearAll()
+
+  // 1) Collect every section across all notes (skip encrypted/empty).
+  let files: string[] = []
+  try { files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md')) } catch { /* empty */ }
+  type Row = { noteId: string; filePath: string; title: string; sectionId: string; sectionName: string; text: string; hash: string }
+  const rows: Row[] = []
+  for (const f of files) {
+    const full = path.join(notesDir, f)
+    let content: string
+    try { content = fs.readFileSync(full, 'utf-8') } catch { continue }
+    const parsed = extractSections(content)
+    if (!parsed.noteId || parsed.encrypted) continue
+    for (const s of parsed.sections) {
+      const text = chunkTextFor(s)
+      if (!text) continue
+      rows.push({ noteId: parsed.noteId, filePath: full, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) })
+    }
+  }
+
+  // 2) Embed in batches and write incrementally (progress is per-section → smooth bar).
+  let done = 0
+  emitProgress({ done, total: rows.length, phase: 'indexing' })
+  for (let i = 0; i < rows.length; i += REINDEX_BATCH) {
+    const batch = rows.slice(i, i + REINDEX_BATCH)
+    const embs = await provider.embed(batch.map((r) => r.text), 'passage')
+    index.bulkInsert(batch.map((r, j) => ({ ...r, embedding: embs[j] })))
+    done += batch.length
+    emitProgress({ done, total: rows.length, phase: 'indexing' })
+  }
+
+  emitState('idle')
+  return { ok: true, indexed: rows.length }
+}
+
+async function handleSearch(query: string, k: number): Promise<SemanticHit[]> {
+  if (!index) throw new Error('Index not initialised')
+  const [qvec] = await provider.embed([query], 'query')
+  return index.hybrid([qvec], query, k)
+}
+
+async function handleRelated(noteId: string, sectionId: string, k: number): Promise<RelatedNote[]> {
+  if (!index) throw new Error('Index not initialised')
+  return index.relatedBySection(noteId, sectionId, k)
+}
+
+// ── Message loop ────────────────────────────────────────────────────────────
+
+parentPort.on('message', async (e: { data: WorkerRequest }) => {
+  const req = e.data
+  try {
+    switch (req.type) {
+      case 'init': {
+        currentModelId = req.payload.modelId
+        index = new SqliteIndex(req.payload.dbPath)
+        // Load the model first so we know its embedding dimension, then size the index.
+        await provider.init(req.payload.modelId, req.payload.cacheDir)
+        // Reindex when the model/schema/dim changed OR the index is empty (fresh DB, or a
+        // DB that only ever had its metadata written). Avoids an empty Related panel.
+        const needsReindex = index.ensure(req.payload.modelId, provider.dim) || index.isEmpty()
+        send({ type: 'result', id: req.id, payload: { ok: true, needsReindex } })
+        break
+      }
+      case 'index-note': {
+        const r = await handleIndexNote(req.payload.filePath, req.payload.content)
+        send({ type: 'result', id: req.id, payload: r })
+        break
+      }
+      case 'remove-note': {
+        index?.removeNoteByFilePath(req.payload.filePath)
+        send({ type: 'result', id: req.id, payload: { ok: true } })
+        break
+      }
+      case 'reindex-all': {
+        const r = await handleReindexAll(req.payload.notesDir)
+        send({ type: 'result', id: req.id, payload: r })
+        break
+      }
+      case 'search': {
+        const r = await handleSearch(req.payload.query, req.payload.k)
+        send({ type: 'result', id: req.id, payload: r })
+        break
+      }
+      case 'related': {
+        const r = await handleRelated(req.payload.noteId, req.payload.sectionId, req.payload.k)
+        send({ type: 'result', id: req.id, payload: r })
+        break
+      }
+    }
+  } catch (err) {
+    const id = (req as { id?: number }).id ?? -1
+    emitState('idle')
+    send({ type: 'error', id, error: String((err as Error)?.stack ?? err) })
+  }
+})
+
+// Signal the parent that the worker module has loaded and the message loop is ready.
+send({ type: 'state', payload: 'idle' })
+void currentModelId

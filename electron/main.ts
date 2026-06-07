@@ -20,6 +20,7 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
+import * as aiIndex from './ai/aiIndex'
 
 
 function getIconPath(): string {
@@ -665,6 +666,8 @@ ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
     } else {
       githubSync.schedulePush(safePath, content)
     }
+    // Keep the semantic index up to date (debounced; no-op when AI is disabled).
+    if (aiIndex.isEnabled()) aiIndex.scheduleIndex(safePath, content)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -680,6 +683,7 @@ ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
       win.webContents.send('notes-updated')
     })
     githubSync.scheduleDelete(safePath)
+    aiIndex.removeFromIndex(safePath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -1095,6 +1099,40 @@ function writeSettings(data: Record<string, unknown>): void {
   fs.writeFileSync(path.join(app.getPath('userData'), 'settings.json'), JSON.stringify(data), 'utf-8')
 }
 
+// ── AI / Semantic index ───────────────────────────────────────────────────────
+
+function readAiSettings(): aiIndex.AiSettings {
+  const raw = (readSettings().ai ?? {}) as Partial<aiIndex.AiSettings>
+  return { ...aiIndex.DEFAULT_AI_SETTINGS, ...raw }
+}
+
+function writeAiSettings(next: aiIndex.AiSettings): void {
+  const settings = readSettings()
+  settings.ai = next
+  writeSettings(settings)
+}
+
+function emitAiState(state: string): void {
+  BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:index-state', state))
+}
+
+function emitAiProgress(progress: unknown): void {
+  BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:reindex-progress', progress))
+}
+
+ipcMain.handle('ai:get-settings', () => readAiSettings())
+
+ipcMain.handle('ai:set-settings', async (_event, patch: Partial<aiIndex.AiSettings>) => {
+  const next = { ...readAiSettings(), ...patch }
+  writeAiSettings(next)
+  await aiIndex.applySettings(next)
+  return next
+})
+
+ipcMain.handle('ai:related', (_event, noteId: string, sectionId: string, k?: number) => aiIndex.related(noteId, sectionId, k))
+ipcMain.handle('ai:search', (_event, query: string, k?: number) => aiIndex.search(query, k))
+ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll())
+
 ipcMain.on('settings:get-theme', (event) => {
   event.returnValue = readSettings().theme ?? null
 })
@@ -1411,6 +1449,11 @@ app.whenReady().then(async () => {
   registerGlobalShortcut()
   startAlarmEngine()
   checkExpiredNotes()
+
+  // Semantic index (AI). init() wires config; primeSettings defers the worker warmup so
+  // model loading / reindex doesn't compete with the app's first paint.
+  aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState })
+  aiIndex.primeSettings(readAiSettings())
 
   // Watch for external file changes (CLI, sync from another device, etc.)
   // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),

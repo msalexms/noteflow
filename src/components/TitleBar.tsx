@@ -3,6 +3,7 @@ import { Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, 
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
+import { useAiStore } from '../stores/aiStore'
 import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
 import { GitHubSyncModal } from './GitHubSyncModal'
@@ -12,6 +13,11 @@ import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
   const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } = useEditorSettingsStore()
+  const aiEnabled = useAiStore((s) => s.enabled)
+  const aiIndexState = useAiStore((s) => s.indexState)
+  const aiProgress = useAiStore((s) => s.progress)
+  const setAiEnabled = useAiStore((s) => s.setEnabled)
+  const aiReindexAll = useAiStore((s) => s.reindexAll)
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -324,6 +330,55 @@ export function TitleBar() {
                     </div>
                   ),
                 },
+              ],
+            },
+            {
+              label: 'Local AI',
+              items: [
+                {
+                  id: 'ai-enabled',
+                  node: (
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-text-muted" title="Local semantic index — powers Related notes. 100% offline.">
+                        Related notes
+                      </span>
+                      <button
+                        onClick={() => setAiEnabled(!aiEnabled)}
+                        title={aiEnabled ? 'Disable local AI' : 'Enable local AI — first run downloads a small model (~once)'}
+                        className={`relative flex-shrink-0 w-8 h-[18px] rounded-full transition-colors ${
+                          aiEnabled ? 'bg-text/70' : 'bg-surface-3 border border-border'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-[2px] w-3.5 h-3.5 bg-white rounded-full shadow transition-all duration-200 ${
+                            aiEnabled ? 'left-[15px]' : 'left-[2px]'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  ),
+                },
+                ...(aiEnabled
+                  ? [{
+                      id: 'ai-reindex',
+                      node: (
+                        <button
+                          onClick={() => aiReindexAll()}
+                          disabled={aiIndexState !== 'idle'}
+                          className="w-full flex items-center gap-2 text-left hover:text-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <span className="w-[10px] flex-shrink-0 flex items-center justify-center">
+                            <RefreshCw size={10} className={aiIndexState !== 'idle' ? 'animate-spin' : 'text-text/60'} />
+                          </span>
+                          {aiIndexState === 'downloading-model'
+                            ? 'Downloading model…'
+                            : aiIndexState === 'indexing'
+                            ? (aiProgress ? `Indexing ${aiProgress.done}/${aiProgress.total}…` : 'Indexing…')
+                            : 'Reindex all notes'}
+                        </button>
+                      ),
+                    }]
+                  : []),
               ],
             },
           ]}
