@@ -1,7 +1,7 @@
 {
   "name": "noteflow",
   "private": true,
-  "version": "1.5.6",
+  "version": "1.5.0",
   "description": "Fast notes for software engineers",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -107,8 +107,7 @@
     "linux": {
       "target": [
         "deb",
-        "appimage",
-        "pacman"
+        "appimage"
       ],
       "category": "Utility",
       "icon": "public/icon.png",
@@ -168,7 +167,9 @@
       "**/node_modules/file-uri-to-path/**",
       "**/node_modules/sqlite-vec/**",
       "**/node_modules/sqlite-vec-*/**",
-      "**/node_modules/onnxruntime-node/**"
+      "**/node_modules/onnxruntime-node/**",
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**"
     ],
     "files": [
       "dist/**/*",
