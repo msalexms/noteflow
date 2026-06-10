@@ -17,9 +17,9 @@ description: Contexto completo del proyecto NoteFlow — app de escritorio de no
 - **Rama principal:** `main`
 - **Directorio local:** raíz del repo clonado (la ruta absoluta varía por máquina).
 - **Versión actual:** ver `package.json` (`version`). Convención `vX.Y.Z`.
-- **Licencia:** `FSL-1.1-Apache-2.0` (Functional Source License — source-available; convierte a
-  Apache 2.0 el 2028-06-06). Antes era MIT. El `package.json` lleva el campo `license` y el
-  `PKGBUILD` usa `LicenseRef-FSL-1.1-Apache-2.0`.
+- **Licencia:** `GPL-3.0-or-later` (GNU General Public License v3.0 — copyleft estándar). Antes fue
+  MIT y luego `FSL-1.1-Apache-2.0`. El `package.json` lleva el campo `license` y el
+  `PKGBUILD` usa `GPL-3.0-or-later`.
 - **Skills hermanas:**
   - `noteflow-features` → funcionalidades, UI, UX, atajos (perspectiva de producto/usuario).
   - `noteflow-cli` → referencia completa del CLI companion.
@@ -550,7 +550,7 @@ Se dispara con tags `v*`. Dos jobs:
   `noteflow` en `/usr/local/bin`.
 - **Linux (Arch/CachyOS/Manjaro):** `noteflow-X.Y.Z-x86_64.pkg.tar.zst` (target `pacman` de
   electron-builder). Hay además un `PKGBUILD` en la raíz para build manual/AUR (usa `electron` del
-  sistema y `NOTEFLOW_NATIVE=1`); licencia `LicenseRef-FSL-1.1-Apache-2.0`.
+  sistema y `NOTEFLOW_NATIVE=1`); licencia `GPL-3.0-or-later`.
 - **Linux (universal):** `NoteFlow-X.Y.Z-x86_64.AppImage` — funciona en cualquier distro.
 - Salida: `release/`.
 
