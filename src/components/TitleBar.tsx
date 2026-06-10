@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
+import { Brain, Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { THEMES } from '../lib/themes'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
-import { useAiStore } from '../stores/aiStore'
+import { useNotesStore } from '../stores/notesStore'
 import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
 import { GitHubSyncModal } from './GitHubSyncModal'
@@ -13,14 +13,12 @@ import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 export function TitleBar() {
   const { activeThemeId, setTheme } = useThemeStore()
   const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } = useEditorSettingsStore()
-  const aiEnabled = useAiStore((s) => s.enabled)
-  const aiIndexState = useAiStore((s) => s.indexState)
-  const aiProgress = useAiStore((s) => s.progress)
-  const setAiEnabled = useAiStore((s) => s.setEnabled)
-  const aiReindexAll = useAiStore((s) => s.reindexAll)
+  const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
+  const setBrainView = useNotesStore((s) => s.setBrainView)
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
+  const [installing, setInstalling] = useState(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [upToDate, setUpToDate] = useState(false)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
@@ -42,6 +40,7 @@ export function TitleBar() {
     })
     refreshSyncStatus()
     window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
+    window.noteflow.onUpdateInstalling(() => setInstalling(true))
     const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
     const unsubPush = window.noteflow.onSyncPushState((state) => {
       setPushing(state === 'pushing')
@@ -131,12 +130,13 @@ export function TitleBar() {
   }
 
   const handleUpdate = async () => {
-    if (!updateInfo || downloading) return
+    if (!updateInfo || downloading || installing) return
     setDownloading(true)
     setDownloadProgress(0)
     const result = await window.noteflow.downloadAndInstall(updateInfo.downloadUrl)
     if (!result.success) {
       window.noteflow.openUrl(updateInfo.downloadUrl)
+      setInstalling(false)
     }
     setDownloading(false)
   }
@@ -160,14 +160,34 @@ export function TitleBar() {
         className="flex items-center h-full"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
+        <button
+          onClick={() => setBrainView(!brainViewOpen)}
+          className={`flex items-center gap-1.5 px-2.5 h-5 my-auto mr-5 rounded border border-solid text-[10px] font-mono tracking-wide transition-colors ${
+            brainViewOpen
+              ? 'border-text-muted bg-surface-2 text-text'
+              : 'border-text-muted/60 text-text-muted hover:text-text hover:border-text-muted hover:bg-surface-2'
+          }`}
+          title={brainViewOpen ? 'Cerrar el cerebro' : 'Abrir el cerebro — grafo de notas'}
+        >
+          <Brain size={12} />
+          <span>brain</span>
+        </button>
         {updateInfo && (
           <button
             onClick={handleUpdate}
-            disabled={downloading}
+            disabled={downloading || installing}
             className="flex items-center gap-1 px-2 h-full text-text/70 hover:text-text transition-colors disabled:opacity-60"
-            title={downloading ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}` : `Update available: v${updateInfo.latestVersion}`}
+            title={
+              installing
+                ? 'Installing… NoteFlow will restart'
+                : downloading
+                ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}`
+                : `Update available: v${updateInfo.latestVersion}`
+            }
           >
-            {downloading ? (
+            {installing ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : downloading ? (
               <span className="text-[10px] font-mono">{downloadProgress > 0 ? `${downloadProgress}%` : '…'}</span>
             ) : (
               <Download size={12} />
@@ -330,55 +350,6 @@ export function TitleBar() {
                     </div>
                   ),
                 },
-              ],
-            },
-            {
-              label: 'Local AI',
-              items: [
-                {
-                  id: 'ai-enabled',
-                  node: (
-                    <div className="flex items-center justify-between w-full">
-                      <span className="text-text-muted" title="Local semantic index — powers Related notes. 100% offline.">
-                        Related notes
-                      </span>
-                      <button
-                        onClick={() => setAiEnabled(!aiEnabled)}
-                        title={aiEnabled ? 'Disable local AI' : 'Enable local AI — first run downloads a small model (~once)'}
-                        className={`relative flex-shrink-0 w-8 h-[18px] rounded-full transition-colors ${
-                          aiEnabled ? 'bg-text/70' : 'bg-surface-3 border border-border'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-[2px] w-3.5 h-3.5 bg-white rounded-full shadow transition-all duration-200 ${
-                            aiEnabled ? 'left-[15px]' : 'left-[2px]'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  ),
-                },
-                ...(aiEnabled
-                  ? [{
-                      id: 'ai-reindex',
-                      node: (
-                        <button
-                          onClick={() => aiReindexAll()}
-                          disabled={aiIndexState !== 'idle'}
-                          className="w-full flex items-center gap-2 text-left hover:text-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <span className="w-[10px] flex-shrink-0 flex items-center justify-center">
-                            <RefreshCw size={10} className={aiIndexState !== 'idle' ? 'animate-spin' : 'text-text/60'} />
-                          </span>
-                          {aiIndexState === 'downloading-model'
-                            ? 'Downloading model…'
-                            : aiIndexState === 'indexing'
-                            ? (aiProgress ? `Indexing ${aiProgress.done}/${aiProgress.total}…` : 'Indexing…')
-                            : 'Reindex all notes'}
-                        </button>
-                      ),
-                    }]
-                  : []),
               ],
             },
           ]}

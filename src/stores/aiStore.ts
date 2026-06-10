@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AiSettings, RelatedNote, IndexState, IndexProgress } from '../types'
+import type { AiSettings, RelatedNote, IndexState, IndexProgress, GraphEdge } from '../types'
 
 // Per-key debounce for related lookups — avoids querying on every keystroke save.
 const relatedTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -15,12 +15,15 @@ interface AiState {
   indexState: IndexState
   progress: IndexProgress | null
   relatedByKey: Record<string, RelatedNote[]>
+  graphEdges: GraphEdge[]
+  graphLoading: boolean
 
   loadAiSettings: () => Promise<void>
   setEnabled: (value: boolean) => Promise<void>
   reindexAll: () => Promise<void>
   fetchRelated: (noteId: string, sectionId: string) => void
   getRelated: (noteId: string, sectionId: string) => RelatedNote[] | undefined
+  fetchGraphEdges: () => Promise<void>
   initListeners: () => () => void
 }
 
@@ -31,6 +34,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   indexState: 'idle',
   progress: null,
   relatedByKey: {},
+  graphEdges: [],
+  graphLoading: false,
 
   loadAiSettings: async () => {
     try {
@@ -45,7 +50,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEnabled: async (value) => {
     const next: AiSettings = await window.noteflow.setAiSettings({ enabled: value })
     set({ enabled: next.enabled, modelId: next.modelId })
-    if (!value) set({ relatedByKey: {}, progress: null, indexState: 'idle' })
+    if (!value) set({ relatedByKey: {}, graphEdges: [], progress: null, indexState: 'idle' })
   },
 
   reindexAll: async () => {
@@ -70,12 +75,28 @@ export const useAiStore = create<AiState>((set, get) => ({
     }, RELATED_DEBOUNCE_MS))
   },
 
+  fetchGraphEdges: async () => {
+    if (!get().enabled) { set({ graphEdges: [] }); return }
+    set({ graphLoading: true })
+    try {
+      const edges = await window.noteflow.aiGraph()
+      set({ graphEdges: edges, graphLoading: false })
+    } catch (err) {
+      console.error('Failed to fetch graph edges:', err)
+      set({ graphLoading: false })
+    }
+  },
+
   initListeners: () => {
     const offProgress = window.noteflow.onAiReindexProgress((progress) => set({ progress }))
     const offState = window.noteflow.onAiIndexState((indexState) => {
       set({ indexState })
-      // When a (re)index finishes, drop cached related results so panels refetch fresh.
-      if (indexState === 'idle') set({ relatedByKey: {} })
+      // When a (re)index finishes, drop cached related results so panels refetch fresh, and
+      // refresh the brain graph's content edges if it's open.
+      if (indexState === 'idle') {
+        set({ relatedByKey: {} })
+        if (get().enabled) void get().fetchGraphEdges()
+      }
     })
     return () => { offProgress(); offState() }
   },

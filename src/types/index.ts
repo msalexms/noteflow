@@ -120,6 +120,13 @@ export interface SemanticHit {
   snippet: string
 }
 
+// A content (semantic) edge between two notes — powers the brain graph's content layer
+export interface GraphEdge {
+  a: string   // noteId
+  b: string   // noteId
+  score: number
+}
+
 export type IndexState = 'idle' | 'indexing' | 'downloading-model'
 
 export interface IndexProgress {
@@ -172,6 +179,7 @@ declare global {
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
       onUpdateProgress: (callback: (percent: number) => void) => void
+      onUpdateInstalling: (callback: () => void) => void
       exportNotes: (entries: NoteflowExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
@@ -197,6 +205,7 @@ declare global {
       setAiSettings: (patch: Partial<AiSettings>) => Promise<AiSettings>
       aiRelated: (noteId: string, sectionId: string, k?: number) => Promise<RelatedNote[]>
       aiSearch: (query: string, k?: number) => Promise<SemanticHit[]>
+      aiGraph: () => Promise<GraphEdge[]>
       aiReindexAll: () => Promise<{ ok: boolean }>
       onAiReindexProgress: (cb: (progress: IndexProgress) => void) => () => void
       onAiIndexState: (cb: (state: IndexState) => void) => () => void

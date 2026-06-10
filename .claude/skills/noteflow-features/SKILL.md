@@ -47,7 +47,8 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ```
 
 Iconos del TitleBar:
-- **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra %).
+- **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
+  de descarga y luego un spinner "Installing…").
 - **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
 - **⚙ settings**: menú (atajos, fuente del editor, GitHub Sync, export/import, startup, update,
   elegir carpeta de notas).
@@ -65,7 +66,7 @@ Iconos del TitleBar:
 - Desde el tray (menú o `New Note`).
 
 ### Organizar
-- **Favorites** → aparece en la sección "favorites" al top del sidebar (etiqueta pequeña + notas planas). El icono ⭐ (pequeño, tenue) aparece tras el nombre en la tarjeta. La nota también sigue visible en su grupo si tiene uno. Toggle desde el menú contextual o el botón ⭐ en la toolbar del editor.
+- **Favorites** → aparece en la sección "favorites" al top del sidebar (etiqueta pequeña + notas planas). La nota también sigue visible en su grupo si tiene uno. Toggle desde el menú contextual o el botón ⭐ en la toolbar del editor.
 - **Drag-to-reorder** → las notas se pueden arrastrar dentro de su contexto (favorites, grupo, carpeta o sin grupo) para fijar un orden manual. El orden persiste en `note-order.json` (sincronizado con GitHub). Una línea indicadora muestra dónde se insertará la nota al soltar.
 - **Archive** → se oculta de la lista principal (toggle "Show archived" en footer).
 - **Duplicate** → copia completa con todas sus secciones.
@@ -272,6 +273,51 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 
 ---
 
+## Local AI — "Related notes" (Fase 1 de "El Cerebro")
+
+Primera pieza del plan "El Cerebro" (segundo cerebro consultable). Un **índice semántico local**
+indexa cada **sección** de cada nota como un embedding y muestra, para la **sección activa**, las
+secciones más afines de otras notas (y hermanas de la misma nota) en un panel **"Related notes"**
+al pie del editor. **100% local y offline** — nada sale de la máquina; el índice es un artefacto
+derivado reconstruible desde los `.md`.
+
+- **Activación:** flag `settings.ai.enabled` (default **off**). La **UI definitiva de activación
+  está en la vista cerebro** (ver abajo): con la IA off el cerebro muestra solo la estructura y un
+  CTA "Activar IA local"; al activar descarga un modelo pequeño (~una vez) e indexa con barra de
+  progreso. Queda además un toggle **"Local AI"** en el menú de ajustes del TitleBar.
+- **Panel Related:** al cambiar de sección/nota, el panel actualiza las relacionadas; click en un
+  resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
+- **Reindexar:** botón "Reindex all notes" en el mismo menú (muestra progreso); el índice también
+  se mantiene al día solo al guardar (incremental, debounce).
+- Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y alimentará el **chat RAG**
+  (Fase 3). Un índice, tres consumidores. Detalle técnico en la skill `noteflow-context`.
+
+---
+
+## La Vista Cerebro (Fase 2 de "El Cerebro")
+
+Modo visual conmutable: el **botón "Cerebro"** (icono de cerebro) en el TitleBar abre un **grafo a
+pantalla completa** que sustituye el editor (sidebar y TitleBar siguen visibles; volver = botón
+Cerebro otra vez, tecla de cierre, o click en cualquier nota). Es **aditivo** — la lista de siempre
+sigue siendo el modo principal.
+
+- **Nodos:** grupos, carpetas y notas. Cada grupo es una región con **su color**; carpetas y notas
+  heredan el color de su grupo (las notas sueltas son neutras). No aparecen notas archivadas,
+  cifradas ni temporales.
+- **Dos capas de conexiones:**
+  - **Estructura** (líneas sólidas): la jerarquía `grupo → carpeta → nota` que tú creas.
+  - **Contenido** (líneas tenues): notas que **hablan de lo mismo** según la IA, aunque estén en
+    grupos distintos. Salen del índice semántico (necesita la IA activada).
+- **Interacción:** navegación libre estilo Obsidian — arrastrar el lienzo (pan), **rueda para zoom**,
+  arrastrar un nodo para recolocarlo. **Hover/seleccionar** una nota **resalta sus conexiones de
+  contenido** y atenúa el resto. **Click en una nota** la abre en el editor (en su primera sección).
+  Los nombres de las notas aparecen al acercar el zoom.
+- **Toggle "Contenido":** botón en la barra superior para mostrar/ocultar la capa de contenido y
+  dejar solo la estructura.
+- **Sin IA:** el cerebro funciona igualmente mostrando solo la estructura + el CTA de activación.
+
+---
+
 ## Búsqueda y filtros
 
 ### Búsqueda global (sidebar)
@@ -408,9 +454,18 @@ Settings → "Startup settings...":
 
 - Al detectar una versión nueva en GitHub, aparece el icono ⬇ en el TitleBar (y un aviso en
   Settings).
-- Al pulsarlo, NoteFlow descarga el instalador (mostrando el % de progreso) y lo lanza:
-  - Windows: ejecuta el `.exe`.
-  - Linux: `pkexec dpkg -i` (con fallback a abrir el `.deb`), y relanza la app.
+- Al pulsarlo, NoteFlow descarga el instalador (el botón muestra el % y, al terminar, un spinner
+  "Installing…") y se actualiza **sin popups del SO ni cerrar/reabrir a mano**:
+  - Windows: muestra la **barra de progreso nativa del instalador**, se cierra sola y se reabre ya
+    actualizada — **sin el popup "cierra la aplicación" ni UAC** (instalador NSIS lanzado con
+    `--updated`, que omite ese prompt; ver detalle técnico en `noteflow-context`).
+  - Linux (deb/pacman): pide la contraseña de root (diálogo del sistema — inevitable al instalar a
+    nivel de sistema) y se relanza.
+  - Linux (AppImage): se reemplaza a sí misma en su ubicación y se relanza.
+- En Windows, la instalación queda cubierta por la barra de progreso nativa de NSIS. En Linux el
+  feedback durante la instalación es el propio diálogo de root (deb/pacman) o es casi instantáneo
+  (AppImage). Dentro de la app, el botón del TitleBar muestra `%` de descarga → spinner
+  "Installing…" hasta que la ventana se cierra.
 - Descargas restringidas a hosts oficiales de GitHub (allowlist de seguridad).
 
 ---

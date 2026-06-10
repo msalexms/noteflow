@@ -7,6 +7,7 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { GroupOverview } from './components/GroupOverview/GroupOverview'
+import { BrainView } from './components/Brain/BrainView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
@@ -27,6 +28,8 @@ export function App() {
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
   const groupViewId = useNotesStore((s) => s.groupViewId)
   const setGroupView = useNotesStore((s) => s.setGroupView)
+  const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
+  const setBrainView = useNotesStore((s) => s.setBrainView)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
@@ -477,7 +480,9 @@ export function App() {
           onDragLeave={handleEditorDragLeave}
           onDrop={handleEditorDrop}
         >
-          {groupViewId ? (
+          {brainViewOpen ? (
+            <BrainView onClose={() => setBrainView(false)} />
+          ) : groupViewId ? (
             <GroupOverview groupId={groupViewId} onClose={() => setGroupView(null)} />
           ) : isLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">

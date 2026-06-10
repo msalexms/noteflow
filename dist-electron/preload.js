@@ -47,6 +47,9 @@ const api = {
     onUpdateProgress: (callback) => {
         electron_1.ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent));
     },
+    onUpdateInstalling: (callback) => {
+        electron_1.ipcRenderer.on('update:installing', () => callback());
+    },
     // Export / Import
     exportNotes: (entries, format, hint) => electron_1.ipcRenderer.invoke('notes:export', entries, format, hint),
     parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
@@ -79,6 +82,7 @@ const api = {
     setAiSettings: (patch) => electron_1.ipcRenderer.invoke('ai:set-settings', patch),
     aiRelated: (noteId, sectionId, k) => electron_1.ipcRenderer.invoke('ai:related', noteId, sectionId, k),
     aiSearch: (query, k) => electron_1.ipcRenderer.invoke('ai:search', query, k),
+    aiGraph: () => electron_1.ipcRenderer.invoke('ai:graph'),
     aiReindexAll: () => electron_1.ipcRenderer.invoke('ai:reindex-all'),
     onAiReindexProgress: (cb) => {
         const wrapper = (_event, progress) => cb(progress);

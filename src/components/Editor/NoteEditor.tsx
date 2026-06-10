@@ -6,7 +6,6 @@ import { Editor } from './Editor'
 import type { EditorHandle } from './Editor'
 import { InNoteSearchBar } from './InNoteSearchBar'
 import { RawNoteSearchBar } from './RawNoteSearchBar'
-import { RelatedNotesPanel } from './RelatedNotesPanel'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
@@ -360,7 +359,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (!isPaneActive) return
     const handleAddTab = () => {
       if (!noteRef.current) return
-      const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', isRawMode: true }
+      const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
       const sections = [...noteRef.current.sections, newSection]
       updateNote(noteRef.current.id, { sections })
       setRawContent('')
@@ -569,7 +568,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   }
 
   const handleAddSection = () => {
-    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '', isRawMode: true }
+    const newSection: NoteSection = { id: nanoid(6), name: 'New', content: '' }
     const sections = [...note.sections, newSection]
     updateNote(note.id, { sections })
     setRawContent('')
@@ -1174,13 +1173,6 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           )}
         </div>
 
-        <RelatedNotesPanel
-          noteId={note.id}
-          activeSectionId={activeSection?.id ?? null}
-          activeSectionName={activeSection?.name ?? ''}
-          noteUpdated={note.updated}
-          encrypted={!!note.encryption}
-        />
       </div>
     </>
   )

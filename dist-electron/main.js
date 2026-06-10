@@ -815,6 +815,10 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
+        // Download done — signal the install phase so the UI can show "Installing…"
+        // for the brief moment before the app quits/relaunches. (spawn below is
+        // instantaneous on Windows, so we can't derive this from the 100% progress.)
+        electron_1.BrowserWindow.getAllWindows().forEach(w => w.webContents.send('update:installing'));
         if (process.platform === 'linux') {
             // Detect package type from filename
             const isPacman = dest.endsWith('.pkg.tar.zst') || dest.endsWith('.pacman');
@@ -854,12 +858,51 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
                 });
             }
             else {
-                // AppImage or other format - just open it
-                await electron_1.shell.openPath(dest);
+                // AppImage: replace the running AppImage in place and relaunch.
+                // process.env.APPIMAGE holds the absolute path of the AppImage the user
+                // launched (set by the AppImage runtime). No root needed: it lives in the
+                // user's space.
+                const appImagePath = process.env.APPIMAGE;
+                if (appImagePath) {
+                    try {
+                        const dir = path_1.default.dirname(appImagePath);
+                        const tmpTarget = path_1.default.join(dir, `.${path_1.default.basename(appImagePath)}.new`);
+                        // Copy into the target dir, then atomic rename. The rename leaves the
+                        // currently-running inode untouched (the FUSE mount keeps working) and
+                        // points the path at the new file — never overwrite the mounted file
+                        // in place, that would corrupt the running process.
+                        fs_1.default.copyFileSync(dest, tmpTarget);
+                        fs_1.default.chmodSync(tmpTarget, 0o755);
+                        fs_1.default.renameSync(tmpTarget, appImagePath);
+                        electron_1.app.relaunch({ execPath: appImagePath });
+                        electron_1.app.quit();
+                    }
+                    catch (err) {
+                        console.error('AppImage in-place update failed, opening file:', err);
+                        await electron_1.shell.openPath(dest);
+                    }
+                }
+                else {
+                    // Not running from an AppImage (dev / unusual packaging) — just open it.
+                    await electron_1.shell.openPath(dest);
+                }
             }
         }
         else {
-            await electron_1.shell.openPath(dest);
+            // Windows: run the NSIS installer with --updated (NOT /S). This keeps the
+            // installer's native progress window visible while skipping the "please close
+            // the application" popup: electron-builder's app-running check auto-closes the
+            // running instance (no MessageBox) when the --updated flag is set. --force-run
+            // relaunches NoteFlow when done. We also app.quit() ourselves so the exit is
+            // graceful and prompt — otherwise the installer would force-kill us after a
+            // retry, since our window-close hides to tray instead of quitting. detached+unref
+            // keep the installer alive after we exit. (per-user NSIS install → no UAC.)
+            const installer = (0, child_process_1.spawn)(dest, ['--updated', '--force-run'], {
+                detached: true,
+                stdio: 'ignore',
+            });
+            installer.unref();
+            setTimeout(() => electron_1.app.quit(), 1000);
         }
         return { success: true };
     }
@@ -1087,13 +1130,24 @@ function emitAiProgress(progress) {
 }
 electron_1.ipcMain.handle('ai:get-settings', () => readAiSettings());
 electron_1.ipcMain.handle('ai:set-settings', async (_event, patch) => {
-    const next = { ...readAiSettings(), ...patch };
-    writeAiSettings(next);
-    await aiIndex.applySettings(next);
-    return next;
+    const prev = readAiSettings();
+    const next = { ...prev, ...patch };
+    try {
+        await aiIndex.applySettings(next);
+        writeAiSettings(next); // persist only once activation/teardown actually succeeded
+        return next;
+    }
+    catch (err) {
+        // Activation failed (e.g. model download/load error). Roll the in-memory settings back so a
+        // retry re-triggers activation instead of silently no-op'ing (a persisted enabled:true would
+        // make applySettings skip the load+reindex). Surface the error to the renderer.
+        aiIndex.primeSettings(prev);
+        throw err;
+    }
 });
 electron_1.ipcMain.handle('ai:related', (_event, noteId, sectionId, k) => aiIndex.related(noteId, sectionId, k));
 electron_1.ipcMain.handle('ai:search', (_event, query, k) => aiIndex.search(query, k));
+electron_1.ipcMain.handle('ai:graph', () => aiIndex.graph());
 electron_1.ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll());
 electron_1.ipcMain.on('settings:get-theme', (event) => {
     event.returnValue = readSettings().theme ?? null;

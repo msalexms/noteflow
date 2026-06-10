@@ -163,7 +163,7 @@ export function serializeNote(note: Pick<Note, keyof NoteMeta | 'sections'>): st
 
 export function defaultSections(): NoteSection[] {
   return [
-    { id: nanoid(6), name: 'Note', content: '', isRawMode: true },
+    { id: nanoid(6), name: 'Note', content: '' },
   ]
 }
 

@@ -74,6 +74,9 @@ const api = {
   onUpdateProgress: (callback: (percent: number) => void) => {
     ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent))
   },
+  onUpdateInstalling: (callback: () => void) => {
+    ipcRenderer.on('update:installing', () => callback())
+  },
 
   // Export / Import
   exportNotes: (entries: Array<{ filename: string; content: string }>, format: string, hint?: string): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
@@ -134,6 +137,7 @@ const api = {
   setAiSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('ai:set-settings', patch),
   aiRelated: (noteId: string, sectionId: string, k?: number) => ipcRenderer.invoke('ai:related', noteId, sectionId, k),
   aiSearch: (query: string, k?: number) => ipcRenderer.invoke('ai:search', query, k),
+  aiGraph: () => ipcRenderer.invoke('ai:graph'),
   aiReindexAll: () => ipcRenderer.invoke('ai:reindex-all'),
   onAiReindexProgress: (cb: (progress: { done: number; total: number; phase: string }) => void) => {
     const wrapper = (_event: any, progress: { done: number; total: number; phase: string }) => cb(progress)

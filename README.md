@@ -109,8 +109,8 @@ npm run dist
 
 ## License
 
-[Functional Source License, Version 1.1, Apache 2.0 Future License](LICENSE) (`FSL-1.1-Apache-2.0`).
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).
 
-NoteFlow is source-available: you can freely use, copy, modify, and distribute it,
-with the only restriction that you may not use it to compete with NoteFlow. On
-2028-06-06 this license automatically converts to Apache License 2.0.
+NoteFlow is free software: you can use, study, share, and modify it freely. Any
+distributed derivative work must also be released under the GPL-3.0 (or a later
+version), keeping the source available under the same copyleft terms.

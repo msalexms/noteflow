@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useState } from 'react'
+import { Fragment, useLayoutEffect, useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -71,6 +71,47 @@ function dayKeyToDate(dayKey: string): Date {
 }
 
 const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
+
+// Context menu that measures its own size after rendering and shifts itself back
+// into the viewport when it would overflow — the menu's height varies (encryption
+// state, section colors, group submenus…), so a fixed height estimate can't reliably
+// keep the bottom options visible.
+function ContextMenu({ x, y, className, children }: {
+  x: number
+  y: number
+  className: string
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: x, top: y })
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const margin = 8
+    const { width, height } = el.getBoundingClientRect()
+    let left = x
+    let top = y
+    if (top + height > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - height - margin)
+    }
+    if (left + width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - width - margin)
+    }
+    setPos((prev) => (prev.left === left && prev.top === top ? prev : { left, top }))
+  })
+
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{ left: pos.left, top: pos.top }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  )
+}
 
 export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
@@ -346,6 +387,29 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const hasArchivedFilter = showArchived
   const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
   const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
+
+  // Section headers ("groups" / "notes") mirror the favorites label. Compute the
+  // first group that will actually render and the first ungrouped note, so each
+  // header is emitted exactly once, right before its block.
+  const hasFavorites = notes.some((n) => n.favorited)
+  const firstRenderableGroupId = (() => {
+    for (const it of items) {
+      if (it.kind !== 'group') continue
+      if (hasActiveFilters && it.visibleCount === 0) continue
+      if (it.group.archived && !showArchived) continue
+      return it.group.id
+    }
+    return null
+  })()
+  const firstUngroupedNoteId = (() => {
+    for (const it of items) {
+      if (it.kind === 'note') return it.note.id
+    }
+    return null
+  })()
+  // Only label the ungrouped remainder ("notes") when something sits above it —
+  // a flat list with no favorites and no groups needs no header.
+  const showNotesHeader = firstUngroupedNoteId != null && (hasFavorites || firstRenderableGroupId != null)
   const activeSearchNoteId =
     hasSearchFilter && keyboardResultIndex >= 0 && keyboardResultIndex < visibleNoteIds.length
       ? visibleNoteIds[keyboardResultIndex]
@@ -588,7 +652,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     void reorderGroups(without)
   }
 
-  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean) {
+  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
     const isActive = activeNoteId === note.id
     const isSearchTarget = activeSearchNoteId === note.id
     const contextKey = getNoteContextKey(note, inFavorites)
@@ -598,6 +662,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       <li
         key={inFavorites ? `fav-${note.id}` : note.id}
         style={{ position: 'relative' }}
+        className={wrapperClassName}
         onDragOver={(e) => handleNoteReorderDragOver(e, note, contextKey)}
         onDragLeave={() => setNoteDropTarget((prev) => prev?.noteId === note.id ? null : prev)}
         onDrop={(e) => inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey)}
@@ -625,7 +690,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             e.preventDefault()
             setContextMenu({
               x: e.clientX,
-              y: Math.min(e.clientY, window.innerHeight - 260),
+              y: e.clientY,
               noteId: note.id,
               sectionId: null,
             })
@@ -660,11 +725,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             sectionTagColors={sectionTagColors}
             onSectionClick={(sectionId, e) => {
               e.stopPropagation()
-              // When the group overview is open the editor is unmounted, so a synchronous
-              // request-section event is lost. Stash the target section (the editor reads it on
-              // mount) and re-emit once it's listening (next macrotask) — same as GroupOverview.
-              const fromGroupView = useNotesStore.getState().groupViewId !== null
-              if (fromGroupView) {
+              // When the group overview or brain view is open the editor is unmounted, so a
+              // synchronous request-section event is lost. Stash the target section (the editor
+              // reads it on mount) and re-emit once it's listening (next macrotask) — same as
+              // GroupOverview / BrainView.
+              const { groupViewId, brainViewOpen } = useNotesStore.getState()
+              const editorUnmounted = groupViewId !== null || brainViewOpen
+              if (editorUnmounted) {
                 useNotesStore.setState({ pendingInitialSectionId: sectionId })
               }
               window.dispatchEvent(new CustomEvent('noteflow:request-section', {
@@ -676,7 +743,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }
               setOpenNoteIds([note.id])
               setActiveNote(note.id)
-              if (fromGroupView) {
+              if (editorUnmounted) {
                 setTimeout(() => {
                   window.dispatchEvent(new CustomEvent('noteflow:request-section', {
                     detail: { noteId: note.id, sectionId },
@@ -689,7 +756,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               e.stopPropagation()
               setContextMenu({
                 x: e.clientX,
-                y: Math.min(e.clientY, window.innerHeight - 260),
+                y: e.clientY,
                 noteId: note.id,
                 sectionId,
               })
@@ -737,7 +804,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             collapsed={collapsed}
             onToggle={() => toggleFolderCollapsed(folder.id)}
             onContextMenu={(e) => {
-              setFolderContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 160), folderId: folder.id })
+              setFolderContextMenu({ x: e.clientX, y: e.clientY, folderId: folder.id })
             }}
           />
         )}
@@ -1060,7 +1127,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <span className="text-xs font-mono">{rawNotes.length > 0 ? 'No notes match current filters' : 'No notes'}</span>
           </div>
         ) : (
-          <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-2">
+          <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-8">
             {/* ── Favorites section ───────────────────────────────────────── */}
             {(() => {
               const allFavorites = notes.filter((n) => n.favorited)
@@ -1079,9 +1146,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     const noteGroup = note.group ? groups.find((g) => g.id === note.group) ?? null : null
                     return renderNoteButton(note, noteGroup, undefined, true)
                   })}
-                  <li className="px-1 pt-2 pb-1.5">
-                    <div className="h-px bg-border/50" />
-                  </li>
                 </>
               )
             })()}
@@ -1092,8 +1156,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 if (hasActiveFilters && item.visibleCount === 0) return null
                 // Archived groups are hidden unless "Show archived" is on (then shown dimmed)
                 if (group.archived && !showArchived) return null
+                const isFirstGroup = group.id === firstRenderableGroupId
                 return (
-                  <li key={`group-${group.id}`} className={`first:mt-0 mt-2.5 ${group.archived ? 'opacity-50' : ''}`}>
+                  <Fragment key={`group-${group.id}`}>
+                    {isFirstGroup && (
+                      <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-2.5">
+                        <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">groups</span>
+                      </li>
+                    )}
+                  <li className={`${isFirstGroup ? '' : 'first:mt-0 mt-2.5'} ${group.archived ? 'opacity-50' : ''}`}>
                     {/* Group header / rename input — draggable to reorder groups */}
                     <div
                       style={{ position: 'relative', opacity: draggingGroupId === group.id ? 0.4 : 1 }}
@@ -1149,7 +1220,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           onToggle={() => toggleGroupCollapsed(group.id)}
                           onOpenGroupView={() => setGroupView(group.id)}
                           onContextMenu={(e) => {
-                            setGroupContextMenu({ x: e.clientX, y: Math.min(e.clientY, window.innerHeight - 120), groupId: group.id })
+                            setGroupContextMenu({ x: e.clientX, y: e.clientY, groupId: group.id })
                           }}
                         />
                       )}
@@ -1216,10 +1287,21 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       </div>
                     </div>
                   </li>
+                  </Fragment>
                 )
               }
 
               // kind === 'note' (ungrouped)
+              if (showNotesHeader && item.note.id === firstUngroupedNoteId) {
+                return (
+                  <Fragment key={`note-${item.note.id}`}>
+                    <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-2.5">
+                      <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">notes</span>
+                    </li>
+                    {renderNoteButton(item.note, null)}
+                  </Fragment>
+                )
+              }
               return renderNoteButton(item.note, null)
             })}
           </ul>
@@ -1228,10 +1310,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
       {/* ── New note context menu ───────────────────────────────────────────── */}
       {newNoteCtx && (
-        <div
+        <ContextMenu
+          x={newNoteCtx.x}
+          y={newNoteCtx.y}
           className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-52 animate-in fade-in zoom-in duration-100"
-          style={{ left: newNoteCtx.x, top: newNoteCtx.y }}
-          onClick={(e) => e.stopPropagation()}
         >
           <button
             onClick={() => { createTempNote(); setNewNoteCtx(null) }}
@@ -1240,7 +1322,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             <Timer size={12} />
             Temporary note (24h)
           </button>
-        </div>
+        </ContextMenu>
       )}
 
       {/* ── Note Context Menu ────────────────────────────────────────────────── */}
@@ -1255,10 +1337,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
           : undefined
         return (
-          <div
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
             className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={() => { updateNote(note.id, { favorited: !note.favorited }); closeAllMenus() }}
@@ -1589,7 +1671,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               <Trash2 size={12} />
               Delete note
             </button>
-          </div>
+          </ContextMenu>
         )
       })()}
 
@@ -1598,10 +1680,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         const group = groups.find(g => g.id === groupContextMenu.groupId)
         if (!group) return null
         return (
-          <div
+          <ContextMenu
+            x={groupContextMenu.x}
+            y={groupContextMenu.y}
             className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
-            style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={(e) => { e.stopPropagation(); setGroupView(group.id); closeAllMenus() }}
@@ -1698,7 +1780,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               <Trash2 size={12} />
               Delete group
             </button>
-          </div>
+          </ContextMenu>
         )
       })()}
 
@@ -1707,10 +1789,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         const folder = folders.find(f => f.id === folderContextMenu.folderId)
         if (!folder) return null
         return (
-          <div
+          <ContextMenu
+            x={folderContextMenu.x}
+            y={folderContextMenu.y}
             className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 overflow-hidden animate-in fade-in zoom-in duration-100"
-            style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
           >
             <button
               onClick={(e) => { e.stopPropagation(); createNoteInFolder(folder.groupId, folder.id) }}
@@ -1749,7 +1831,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               <Trash2 size={12} />
               Delete folder
             </button>
-          </div>
+          </ContextMenu>
         )
       })()}
 

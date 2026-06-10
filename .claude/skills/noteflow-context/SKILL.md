@@ -48,7 +48,11 @@ noteflow/
 │   ├── main.ts          # Proceso principal: IPC, tray, ventanas, settings, alarmas,
 │   │                    #   auto-update, temp-notes, single-instance, fs.watch, sticky anim
 │   ├── preload.ts       # Bridge IPC expuesto al renderer como window.noteflow
-│   └── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull, cifrado token)
+│   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull, cifrado token)
+│   └── ai/              # Índice semántico local ("El Cerebro" Fase 1)
+│       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
+│       ├── aiIndex.ts   #   Lifecycle del worker en el main (fork/respawn, debounce, API)
+│       └── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
 ├── cli/
 │   ├── noteflow.js      # CLI companion (Node.js standalone, sin deps de Electron)
 │   ├── noteflow.cmd     # Wrapper Windows (entra en PATH vía NSIS)
@@ -66,7 +70,8 @@ noteflow/
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── themeStore.ts             # Tema — lee/escribe settings.json vía IPC (sendSync)
 │   │   ├── editorSettingsStore.ts    # Tamaño de fuente del editor (localStorage)
-│   │   └── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
+│   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
+│   │   └── aiStore.ts                # Estado de la IA (enabled, related, progreso) vía IPC ai:*
 │   ├── components/
 │   │   ├── Editor/
 │   │   │   ├── Editor.tsx               # Instancia TipTap, conversión md↔html
@@ -79,7 +84,8 @@ noteflow/
 │   │   │   ├── TableContextMenu.tsx     # Menú contextual de tablas
 │   │   │   ├── SearchHighlightExtension.ts # Resaltado de matches de búsqueda in-note
 │   │   │   ├── InNoteSearchBar.tsx      # Barra búsqueda dentro de la nota (modo WYSIWYG)
-│   │   │   └── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo raw)
+│   │   │   ├── RawNoteSearchBar.tsx     # Barra búsqueda dentro de la nota (modo raw)
+│   │   │   └── RelatedNotesPanel.tsx    # Panel "Related notes" (IA) al pie del editor
 │   │   ├── Sidebar/
 │   │   │   ├── Sidebar.tsx              # Lista de notas, filtros, búsqueda, grupos/carpetas
 │   │   │   ├── NoteGroupHeader.tsx      # Cabecera de grupo (nombre→group overview; resto→colapsar)
@@ -89,6 +95,12 @@ noteflow/
 │   │   ├── GroupOverview/
 │   │   │   └── GroupOverview.tsx        # Vista de grupo (sustituye editor): bandas por carpeta
 │   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
+│   │   ├── Brain/                       # Vista cerebro ("El Cerebro" Fase 2 — grafo de notas)
+│   │   │   ├── BrainView.tsx            #   Orquestador full-screen + toolbar + CTA de activación IA
+│   │   │   ├── BrainCanvas.tsx          #   <canvas> 2D: dibujo, pan/zoom/drag, hover, click→navega
+│   │   │   ├── useBrainGraph.ts         #   Modelo: nodos (grupo/carpeta/nota) + 2 capas de aristas
+│   │   │   ├── useForceLayout.ts        #   Simulación d3-force (estructura firme + contenido débil)
+│   │   │   └── brainColors.ts           #   Resuelve CSS vars del tema → RGB para el canvas
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless)
 │   │   ├── TitleBarMenu.tsx            # Menú desplegable del titlebar
@@ -177,10 +189,17 @@ Renderer (React)
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
 | `sync:pull` | handle | Pull manual desde el remoto |
+| `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
+| `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
+| `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). Sin UI aún — para Fase 3 (RAG) |
+| `ai:graph` | handle | Aristas de contenido nota-a-nota (centroides por nota + coseno) para la vista cerebro (Fase 2) |
+| `ai:reindex-all` | handle | Reindexa TODAS las secciones en background (lotes de 16) con progreso |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
 `new-note`, `notes-updated` (filePath?, senderId?), `update:download-progress` (percent),
-`sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`.
+`update:installing` (fase de instalación, post-descarga),
+`sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
+`ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice).
 
 ### Modelo de almacenamiento
 
@@ -358,14 +377,37 @@ en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
 - **Notas temporales:** archivos con `expiresAt` vencido se borran del disco y del remoto.
 
 ### Auto-update in-app
-`app:check-update` consulta la última release (API GitHub). En Linux elige el artefacto según la
-distro detectada: **Arch-based** (`/etc/arch-release`, `/etc/cachyos-release` o `/usr/bin/pacman`)
-→ `.pkg.tar.zst`; **Debian-based** (`/etc/debian_version` o `/usr/bin/dpkg`) → `.deb`; resto →
-`.AppImage` (universal). `app:download-and-install` descarga el artefacto con una **allowlist
-estricta de hosts** (github.com + objects/release-assets de githubusercontent.com) y de extensiones
-(`.exe`, `.deb`, `.AppImage`, `.pkg.tar.zst`), emite `update:download-progress`, y lanza el
-instalador: en Linux `pkexec dpkg -i` (deb), `pkexec pacman -U --noconfirm` (pacman) o `shell.openPath`
-(AppImage), con fallback a `xdg-open` si `pkexec` no está. `NOTEFLOW_NATIVE=1` (lo setea el wrapper
+`app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora
+prereleases**; compara con `latest !== current`, así que cualquier versión local distinta dispara
+el update — útil para probar el flujo bajando a una versión inferior a la publicada). En Linux
+elige el artefacto según la distro detectada: **Arch-based** (`/etc/arch-release`,
+`/etc/cachyos-release` o `/usr/bin/pacman`) → `.pkg.tar.zst`; **Debian-based**
+(`/etc/debian_version` o `/usr/bin/dpkg`) → `.deb`; resto → `.AppImage` (universal).
+`app:download-and-install` descarga el artefacto con una **allowlist estricta de hosts**
+(github.com + objects/release-assets de githubusercontent.com) y de extensiones (`.exe`, `.deb`,
+`.AppImage`, `.pkg.tar.zst`), emite `update:download-progress` durante la descarga y
+`update:installing` al terminarla (la UI muestra un spinner "Installing…" en el botón del
+TitleBar), y luego instala **sin depender de popups del SO**:
+- **Windows:** `spawn(setup, ['--updated','--force-run'], {detached:true}).unref()` + `app.quit()`
+  (tras ~1s). **No usa `/S`**: así la **ventana de progreso nativa de NSIS sí se ve**. El flag
+  `--updated` activa el `isUpdated` del macro `_CHECK_APP_RUNNING` de electron-builder, que **se
+  salta el popup "cierra la aplicación"** y cierra la instancia él solo (el `MessageBox` solo
+  aparece en instalación no-update); `--force-run` la relanza al terminar; al ser instalación
+  **per-user** no hay UAC. **Clave:** el `app.quit()` explícito es imprescindible porque el cierre
+  de ventana hace hide-to-tray (no sale) — sin él, el instalador tendría que force-killear la app
+  tras un retry. Decisión de diseño: se eligió `--updated` (con barra de progreso) sobre `/S`
+  (totalmente silencioso) para dar feedback visual de la instalación.
+- **Linux deb/pacman:** `pkexec dpkg -i` / `pkexec pacman -U --noconfirm` (el diálogo de PolicyKit
+  pidiendo root es esperado e inevitable: instalar a nivel de sistema requiere elevación), con
+  fallback a `shell.openPath` si `pkexec` no está; al instalar hace `app.relaunch()` + `app.quit()`.
+- **AppImage:** reemplazo en sitio — copia al dir de `$APPIMAGE`, `chmod +x`, **rename atómico**
+  sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) +
+  `app.relaunch({execPath})` + `quit()`. Sin `$APPIMAGE` (dev/empaquetado raro) cae a `shell.openPath`.
+
+> **Pendiente de verificar** en build empaquetado real (Win silent + AppImage in-place): probado
+> de momento solo a nivel de compilación/typecheck.
+
+`NOTEFLOW_NATIVE=1` (lo setea el wrapper
 del PKGBUILD) hace que la app trate la instalación nativa de Arch como `isPackaged` para rutas de
 iconos y modo no-dev.
 
@@ -373,6 +415,64 @@ iconos y modo no-dev.
 AES-256-GCM + PBKDF2 (310.000 iteraciones por defecto, SHA-256) vía WebCrypto. La nota cifrada
 guarda solo el bloque `encryption`; sin contraseña no hay secciones legibles. Sin master key ni
 backdoor.
+
+### Índice semántico local — "El Cerebro" Fases 1-2 (`electron/ai/`, `src/components/Brain/`)
+Subsistema de IA **100% local/offline** que indexa cada **sección** de cada nota como un
+**embedding** (vector). El índice es un **artefacto derivado y reconstruible** desde los `.md` (si
+se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Related notes", hecha)
+→ **Fase 2 (vista cerebro/grafo, hecha)** → Fase 3 (chat RAG) → Fase 4 (nube/monetización).
+**Principio: un índice, tres consumidores** (related ✅, grafo ✅, chat). Plan de Fase 2:
+`C:\Users\yagoi\.claude\plans\vamos-a-planificar-la-peaceful-manatee.md`.
+
+- **3 procesos:** renderer (`aiStore` + `RelatedNotesPanel`) → main (`aiIndex`, lifecycle +
+  debounce + progreso) → **`utilityProcess`** (`aiWorker`, no bloquea el main).
+- **Worker (`aiWorker.ts`):** embeddings con **Transformers.js** (`@huggingface/transformers`,
+  runtime `onnxruntime-node` nativo, cuantización q8→fp32 fallback) + índice **SQLite**
+  (`better-sqlite3`) con vectores (`sqlite-vec`, tabla `vec0`) y texto (`FTS5`). **Las notas
+  cifradas se omiten** (no entra texto plano al índice).
+- **DB:** `userData/ai-index/index.db` (en dev `userData` = `.electron-dev/`). **Fuera del dir de
+  notas** → NO se sincroniza a GitHub. Tablas: `notes`, `chunks`, `vec_chunks` (vec0),
+  `fts_chunks` (FTS5), `meta` (modelId/dim/schemaVersion). Dimensión **dinámica** (detectada del
+  modelo); cambiar `settings.ai.modelId` o el schema dispara **reindex automático**.
+- **Modelo por defecto:** `Xenova/paraphrase-multilingual-mpnet-base-v2` (768-d), elegido por
+  benchmark sobre las notas reales (ES+EN+código). Se descarga en el primer uso a
+  `userData/ai-models`. Alternativa rápida: `paraphrase-multilingual-MiniLM-L12-v2` (384-d).
+- **Indexado incremental:** enganchado a `fs:write-note` (`aiIndex.scheduleIndex`, debounce 2.5s)
+  y `fs:delete-note` (`removeFromIndex`); hash por sección para no re-embeber lo que no cambió.
+  `stripNoise` quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
+- **related (por sección activa):** centroides por sección → **centrado por la media global**
+  (corrige anisotropía) → coseno → de otras notas la mejor por nota, hermanas de la misma nota
+  individuales → umbral + top-k. **search:** híbrido vector+FTS5 con fusión RRF (para Fase 3).
+- **graph (Fase 2, `ai:graph` → `SqliteIndex.contentEdges`):** **centroide por nota** del
+  `chunkCache` → centrado por media global + normalización → coseno todas-las-parejas → umbral
+  (`0.05`) + poda top-`maxPerNote` (mutual top-k) → `GraphEdge[]` nota-a-nota. Es la **capa de
+  contenido** del grafo; la **estructura** (grupo→carpeta→nota) la arma el renderer con
+  `useSidebarGroups`. Consumido por `aiStore.fetchGraphEdges` → `useBrainGraph`.
+- **Vista cerebro (`src/components/Brain/`):** modo full-screen conmutable (botón "Cerebro" en el
+  TitleBar → `notesStore.brainViewOpen`, espejo de `groupViewId`; sustituye el editor en `App.tsx`,
+  `setActiveNote` lo cierra). Render `d3-force` (layout) + `<canvas>` 2D propio (pan/zoom/drag/hover,
+  click en nota → `openSection` con el baile `pendingInitialSectionId`+`noteflow:request-section`).
+  Dos capas de aristas: estructura sólida (color de grupo) + contenido tenue (resaltada al
+  seleccionar/hover, con toggle). Excluye notas archivadas/cifradas/temporales. Smoke headless:
+  `scripts/ai-graph-smoke.cjs`.
+- **Activación:** flag `settings.ai.enabled` (default `false`). **UI definitiva de activación: el
+  overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
+  desde ahí descarga el modelo + reindexa con barra de progreso). Queda además el toggle temporal
+  "Local AI" en el menú del TitleBar. Arranque del worker diferido ~4s tras el boot (`primeSettings`).
+- **Deps nativas (IMPRESCINDIBLE):** `better-sqlite3` + `onnxruntime-node` + `sqlite-vec` son
+  binarios nativos. `package.json` lleva **`"postinstall": "electron-builder install-app-deps"`**
+  (recompila para el ABI de Electron tras cada `npm install`) y entradas en **`build.asarUnpack`**.
+  Si el worker sale con "exited before init (code 1)": `npx @electron/rebuild -f -o better-sqlite3`.
+- **Deps de la Fase 2:** `d3-force` (+ `@types/d3-force`) — JS puro, sin binario nativo (no toca
+  `asarUnpack` ni el `postinstall`).
+- **Scripts (`scripts/`):** `ai-smoke.cjs` (test e2e headless related/search), `ai-graph-smoke.cjs`
+  (test del grafo: clusters por contenido), `ai-inspect.cjs` (inspecciona la DB real), `ai-bench.cjs`
+  (benchmark de modelos → `scripts/bench-out/REPORT.md`). Ejecutar con
+  `unset ELECTRON_RUN_AS_NODE; npx electron scripts/ai-smoke.cjs`.
+- **Pendiente:** probar el **build empaquetado** (`npm run dist`) en Win/Linux — validar que
+  `asarUnpack` y la descarga del modelo funcionan en el instalado (NO verificado aún). Fase 2:
+  **detalle progresivo** (expandir secciones como sub-nodos al seleccionar/zoom) está **diferido**
+  (los labels de notas ya aparecen al hacer zoom).
 
 ### CLI companion (`cli/noteflow.js`)
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
@@ -487,9 +587,19 @@ Se dispara con tags `v*`. Dos jobs:
     { "from": "cli/noteflow.js",  "to": "cli/noteflow.js" },
     { "from": "cli/noteflow.cmd", "to": "cli/noteflow.cmd" }
   ],
+  "asarUnpack": [
+    "**/node_modules/better-sqlite3/**", "**/node_modules/bindings/**",
+    "**/node_modules/file-uri-to-path/**", "**/node_modules/sqlite-vec/**",
+    "**/node_modules/sqlite-vec-*/**", "**/node_modules/onnxruntime-node/**"
+  ],
   "files": ["dist/**/*", "dist-electron/**/*"]
 }
 ```
+
+> **Deps nativas de la IA:** los binarios (`better-sqlite3`, `onnxruntime-node`, `sqlite-vec`) no
+> pueden ir dentro del `.asar`, de ahí `asarUnpack`. Y `package.json` lleva
+> `"postinstall": "electron-builder install-app-deps"` para recompilarlos al ABI de Electron tras
+> cada install. Ver "Índice semántico local" arriba.
 
 > **Nota (electron-builder 26+):** las props del `.desktop` de Linux van dentro de
 > `desktop.entry`, NO directamente en `desktop`. Error conocido que rompió el release en v1.2.3.

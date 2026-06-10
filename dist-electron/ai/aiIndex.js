@@ -14,6 +14,7 @@ exports.removeFromIndex = removeFromIndex;
 exports.reindexAll = reindexAll;
 exports.search = search;
 exports.related = related;
+exports.graph = graph;
 /**
  * aiIndex.ts — runs in the main process. Owns the AI utilityProcess lifecycle and
  * exposes a small async API consumed by the IPC handlers and the fs:write-note hook.
@@ -51,39 +52,42 @@ function isEnabled() {
     return settings.enabled;
 }
 /**
- * Set the persisted settings at boot WITHOUT starting the worker on the critical path.
- * If enabled, the worker is warmed up a few seconds later so loading the model (and any
- * reindex) doesn't compete with the app's first paint. Lazy callers (related/search/
- * scheduleIndex) also start it on demand.
+ * Set the persisted settings at boot. Nothing is started here: the lightweight worker (SQLite
+ * only, ~70 MB) spins up lazily the first time the brain view asks for graph/related, and the
+ * heavy model loads only on an explicit reindex / reactivate. So a fresh boot costs 0 MB of AI.
  */
 function primeSettings(next) {
     settings = next;
-    if (next.enabled) {
-        setTimeout(() => {
-            ensureStarted().catch((err) => console.error('[aiIndex] warmup failed:', String(err)));
-        }, 4000);
-    }
 }
 function getSettings() {
     return settings;
+}
+/** Load the heavy model (lazy, in the worker) and reindex if the stored vectors are stale/missing.
+ *  This is the "reactivate" path — the only thing besides the Reindex button that wakes the model. */
+async function activateModel() {
+    await ensureStarted(); // light SQLite worker
+    const res = (await request('load-model', {}));
+    if (res?.needsReindex)
+        await reindexAll();
 }
 /** Apply a new settings snapshot: start/stop/restart the worker as needed. */
 async function applySettings(next) {
     const prev = settings;
     settings = next;
     if (!next.enabled) {
+        // Disable → fully stop the worker (drops both SQLite and the model).
         await stop();
         return;
     }
-    if (!child) {
-        await ensureStarted();
-        return;
-    }
-    if (prev.modelId !== next.modelId) {
-        // Model changed → restart; the worker detects the meta mismatch and reindexes.
+    const modelChanged = prev.modelId !== next.modelId;
+    if (modelChanged && child) {
+        // Model swap → restart so the worker picks up the new model on its next lazy load.
         await stop();
-        await ensureStarted();
     }
+    await ensureStarted(); // light worker (SQLite only); the model stays unloaded until needed
+    // Turning AI on, or switching models, is an explicit activation → load the model + reindex.
+    if (!prev.enabled || modelChanged)
+        await activateModel();
 }
 /** Debounced incremental index of a single note (called from fs:write-note). */
 function scheduleIndex(filePath, content) {
@@ -95,8 +99,11 @@ function scheduleIndex(filePath, content) {
         clearTimeout(existing);
     indexTimers.set(key, setTimeout(async () => {
         indexTimers.delete(key);
+        // Only index if the model is already up this session — never wake the worker/model from a save.
+        // While dormant the edit is skipped; the next explicit reindex catches it up.
+        if (!child || !ready)
+            return;
         try {
-            await ensureStarted();
             await request('index-note', { filePath, content });
         }
         catch (err) {
@@ -138,6 +145,20 @@ async function related(noteId, sectionId, k = 6) {
         return [];
     }
 }
+/** Note-to-note content edges for the brain graph (Phase 2). [] if AI is off or empty. */
+async function graph() {
+    if (!settings.enabled)
+        return [];
+    try {
+        await ensureStarted();
+        return await request('graph', {});
+    }
+    catch (err) {
+        // Worker stopped/restarting (e.g. user toggled off mid-request) → no edges, not an error.
+        console.warn('[aiIndex] graph aborted:', String(err));
+        return [];
+    }
+}
 // ── Worker lifecycle ────────────────────────────────────────────────────────
 function ensureStarted() {
     if (child && ready)
@@ -173,15 +194,14 @@ async function start() {
             onExit(code);
         });
         // Send init once spawned. Electron queues the message until the child port is up.
+        // init is light (opens the DB, no model) → resolves fast. We never reindex here: the model
+        // is only loaded on an explicit reindex/reactivate, so a fresh start costs ~70 MB, not ~600.
         proc.once('spawn', () => {
             request('init', { modelId: settings.modelId, cacheDir, dbPath })
-                .then((res) => {
+                .then(() => {
                 ready = true;
                 settled = true;
                 resolve();
-                if (res?.needsReindex) {
-                    reindexAll().catch((err) => console.error('[aiIndex] initial reindex failed:', String(err)));
-                }
             })
                 .catch((err) => {
                 if (!settled) {

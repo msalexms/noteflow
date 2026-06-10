@@ -31,22 +31,29 @@ export interface SemanticHit {
   snippet: string
 }
 
+// A content (semantic) edge between two notes — powers the brain graph's content layer.
+export interface GraphEdge { a: string; b: string; score: number }   // a, b = noteId
+
 // ── Requests (main → worker) ────────────────────────────────────────────────
 
 export interface InitPayload { modelId: string; cacheDir: string; dbPath: string }
 export interface IndexNotePayload { filePath: string; content: string }
+export type LoadModelPayload = Record<string, never>
 export interface RemovePayload { filePath: string }
 export interface ReindexPayload { notesDir: string }
 export interface SearchPayload { query: string; k: number }
 export interface RelatedPayload { noteId: string; sectionId: string; k: number }
+export interface GraphPayload { minScore?: number; maxPerNote?: number }
 
 export type WorkerRequest =
   | { type: 'init';        id: number; payload: InitPayload }
+  | { type: 'load-model';  id: number; payload: LoadModelPayload }
   | { type: 'index-note';  id: number; payload: IndexNotePayload }
   | { type: 'remove-note'; id: number; payload: RemovePayload }
   | { type: 'reindex-all'; id: number; payload: ReindexPayload }
   | { type: 'search';      id: number; payload: SearchPayload }
   | { type: 'related';     id: number; payload: RelatedPayload }
+  | { type: 'graph';       id: number; payload: GraphPayload }
 
 // ── Responses (worker → main) ───────────────────────────────────────────────
 

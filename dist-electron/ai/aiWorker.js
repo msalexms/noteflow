@@ -103,6 +103,16 @@ function buildFtsQuery(text, maxTerms = 24) {
 function floatBuf(v) {
     return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 }
+// sqlite-vec ships its vector engine as a native library (vec0.dll/.dylib/.so) loaded through
+// SQLite's loadExtension — a raw OS call that cannot read from inside the packed app.asar. When the
+// app is packaged, asarUnpack extracts sqlite-vec* to app.asar.unpacked, so the path sqlite-vec
+// resolves (which points into app.asar) must be rewritten to that unpacked copy. In dev there is no
+// asar, so the replace is a harmless no-op.
+function loadVecExtension(db) {
+    const resolved = sqliteVec.getLoadablePath();
+    const unpacked = resolved.replace(`app.asar${path_1.default.sep}`, `app.asar.unpacked${path_1.default.sep}`);
+    db.loadExtension(unpacked);
+}
 function extractSections(raw) {
     const normalized = raw.replace(/\r\n/g, '\n');
     let frontmatter = '';
@@ -148,6 +158,8 @@ class EmbeddingProvider {
     }
     /** Output embedding dimension, detected at init (so any model works). */
     get dim() { return this._dim; }
+    /** Whether the heavy embedding model is loaded in memory. */
+    get ready() { return this.extractor !== null; }
     async init(modelId, cacheDir) {
         const transformers = await dynamicImport('@huggingface/transformers');
         const { pipeline, env } = transformers;
@@ -156,11 +168,27 @@ class EmbeddingProvider {
         env.allowLocalModels = true;
         this.isE5 = /e5/i.test(modelId); // e5 models need "passage:"/"query:" prefixes
         emitState('downloading-model'); // best-effort: first run downloads, later runs hit cache
+        // Report aggregate download progress so the first run shows a real %, not a frozen spinner.
+        // Transformers.js fetches several files (config, tokenizer, ONNX weights); we sum bytes across
+        // every file seen and emit one combined figure. Cached runs fire no 'progress' events → no-op.
+        const fileBytes = new Map();
+        const progress_callback = (info) => {
+            if (info?.status !== 'progress' || !info.file || typeof info.loaded !== 'number' || typeof info.total !== 'number')
+                return;
+            fileBytes.set(info.file, { loaded: info.loaded, total: info.total });
+            let loaded = 0, total = 0;
+            for (const f of fileBytes.values()) {
+                loaded += f.loaded;
+                total += f.total;
+            }
+            if (total > 0)
+                emitProgress({ done: loaded, total, phase: 'downloading' });
+        };
         try {
-            this.extractor = await pipeline('feature-extraction', modelId, { dtype: 'q8' });
+            this.extractor = await pipeline('feature-extraction', modelId, { dtype: 'q8', progress_callback });
         }
         catch {
-            this.extractor = await pipeline('feature-extraction', modelId); // model may lack a q8 build
+            this.extractor = await pipeline('feature-extraction', modelId, { progress_callback }); // model may lack a q8 build
         }
         // Probe the real output dimension so the vector index sizes its column correctly.
         const probe = await this.embed(['x'], 'passage');
@@ -169,6 +197,22 @@ class EmbeddingProvider {
     }
     prefix(text, kind) {
         return this.isE5 ? `${kind}: ${text}` : text;
+    }
+    /** Free the model's ONNX session(s) and native memory. Vectors already live in SQLite, so the
+     *  index keeps serving graph/related afterwards — only the heavy ~500 MB of weights is released. */
+    async unload() {
+        const ex = this.extractor;
+        this.extractor = null;
+        this._dim = 0;
+        if (!ex)
+            return;
+        try {
+            if (typeof ex.dispose === 'function')
+                await ex.dispose();
+            else if (ex.model && typeof ex.model.dispose === 'function')
+                await ex.model.dispose();
+        }
+        catch { /* best effort — the reference is already dropped for GC */ }
     }
     async embed(texts, kind) {
         if (!this.extractor)
@@ -187,7 +231,7 @@ class SqliteIndex {
         fs_1.default.mkdirSync(path_1.default.dirname(dbPath), { recursive: true });
         this.db = new better_sqlite3_1.default(dbPath);
         this.db.pragma('journal_mode = WAL');
-        sqliteVec.load(this.db);
+        loadVecExtension(this.db);
     }
     getMeta(key) {
         const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
@@ -240,6 +284,22 @@ class SqliteIndex {
     isEmpty() {
         const row = this.db.prepare('SELECT COUNT(*) AS n FROM chunks').get();
         return row.n === 0;
+    }
+    tableExists(name) {
+        return !!this.db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?").get(name);
+    }
+    /** True when the index holds servable vectors — graph/related work WITHOUT loading the model. */
+    isServable() {
+        if (!this.tableExists('vec_chunks') || !this.tableExists('chunks'))
+            return false;
+        const row = this.db.prepare('SELECT COUNT(*) AS n FROM chunks').get();
+        return row.n > 0;
+    }
+    /** True when the stored vectors match the active model + schema (otherwise they're stale). */
+    metaMatches(modelId) {
+        if (!this.tableExists('meta'))
+            return false;
+        return this.getMeta('modelId') === modelId && this.getMeta('schemaVersion') === String(protocol_1.SCHEMA_VERSION);
     }
     getNoteSections(noteId) {
         const rows = this.db.prepare('SELECT section_id, content_hash, chunk_id FROM chunks WHERE note_id = ?').all(noteId);
@@ -495,11 +555,130 @@ class SqliteIndex {
             .slice(0, k)
             .map((b) => ({ ...this.chunkDisplay(b.chunkId), score: b.score }));
     }
+    /**
+     * Note-to-note content edges for the brain graph. Builds one centroid per note from its
+     * section vectors, centers each by the global mean and normalises (same anisotropy fix as
+     * relatedBySection), then computes cosine over all note pairs. Keeps edges above minScore,
+     * pruned to the top `maxPerNote` per note (kept if either endpoint ranks it) to avoid a
+     * hairball. Returns an undirected edge list (a < b) — the renderer adds the structure layer.
+     */
+    contentEdges(minScore = 0.05, maxPerNote = 6) {
+        const { items, mean } = this.getChunkCache();
+        if (items.length === 0)
+            return [];
+        const dim = items[0].vec.length;
+        // Centroid per note (averaged section vectors).
+        const sums = new Map();
+        for (const it of items) {
+            let acc = sums.get(it.noteId);
+            if (!acc) {
+                acc = { vec: new Float32Array(dim), count: 0 };
+                sums.set(it.noteId, acc);
+            }
+            for (let i = 0; i < dim; i++)
+                acc.vec[i] += it.vec[i];
+            acc.count++;
+        }
+        // Center by global mean + L2-normalise the centroid.
+        const noteIds = [];
+        const centroids = [];
+        for (const [noteId, acc] of sums) {
+            const c = new Float32Array(dim);
+            let norm = 0;
+            for (let i = 0; i < dim; i++) {
+                const v = acc.vec[i] / acc.count - mean[i];
+                c[i] = v;
+                norm += v * v;
+            }
+            norm = Math.sqrt(norm) || 1;
+            for (let i = 0; i < dim; i++)
+                c[i] /= norm;
+            noteIds.push(noteId);
+            centroids.push(c);
+        }
+        // All pairs cosine (centroids are already normalised → cosine = dot).
+        const n = noteIds.length;
+        const candByNote = new Map();
+        const push = (i, j, score) => {
+            const arr = candByNote.get(i) ?? [];
+            arr.push({ j, score });
+            candByNote.set(i, arr);
+        };
+        for (let i = 0; i < n; i++) {
+            const ci = centroids[i];
+            for (let j = i + 1; j < n; j++) {
+                const cj = centroids[j];
+                let dot = 0;
+                for (let d = 0; d < dim; d++)
+                    dot += ci[d] * cj[d];
+                if (dot > minScore) {
+                    push(i, j, dot);
+                    push(j, i, dot);
+                }
+            }
+        }
+        // Keep an edge if it's within either endpoint's top `maxPerNote`.
+        const keep = new Set();
+        for (const [i, arr] of candByNote) {
+            arr.sort((a, b) => b.score - a.score);
+            for (const { j } of arr.slice(0, maxPerNote)) {
+                const lo = Math.min(i, j), hi = Math.max(i, j);
+                keep.add(`${lo}|${hi}`);
+            }
+        }
+        const edges = [];
+        for (const key of keep) {
+            const [lo, hi] = key.split('|').map(Number);
+            const ci = centroids[lo], cj = centroids[hi];
+            let dot = 0;
+            for (let d = 0; d < dim; d++)
+                dot += ci[d] * cj[d];
+            edges.push({ a: noteIds[lo], b: noteIds[hi], score: dot });
+        }
+        return edges;
+    }
 }
 // ── Orchestration ───────────────────────────────────────────────────────────
 const provider = new EmbeddingProvider();
 let index = null;
 let currentModelId = '';
+let currentCacheDir = '';
+// Once the model has finished its embedding work, hold it this long with no further embed activity
+// before releasing it back to dormant (~70 MB). A short grace avoids reload thrash if the user
+// reindexes twice in a row or keeps editing right after.
+const MODEL_IDLE_UNLOAD_MS = 30000;
+let unloadTimer = null;
+function cancelModelUnload() {
+    if (unloadTimer) {
+        clearTimeout(unloadTimer);
+        unloadTimer = null;
+    }
+}
+// (Re)arm the release timer. Called after every embed task; reset each time so the model only drops
+// once embedding has been idle for the full window. Graph/related never call this (they don't load it).
+function scheduleModelUnload() {
+    cancelModelUnload();
+    unloadTimer = setTimeout(() => {
+        unloadTimer = null;
+        if (!provider.ready)
+            return;
+        void provider.unload().then(() => {
+            emitState('idle'); // index still servable from disk; just no model resident now
+        });
+    }, MODEL_IDLE_UNLOAD_MS);
+}
+// Lazily load the heavy embedding model the first time text must be turned into vectors
+// (reindex / index-note / search / explicit activate). Graph & related never call this — they
+// read the stored vectors. Returns whether a full reindex is needed (model/schema/dim changed).
+async function ensureModelLoaded() {
+    if (!index)
+        throw new Error('Index not initialised');
+    cancelModelUnload(); // about to use the model — don't let a pending release fire mid-task
+    if (!provider.ready)
+        await provider.init(currentModelId, currentCacheDir);
+    // Now the real embedding dim is known → size/verify the schema; reindex if it changed or is empty.
+    return index.ensure(currentModelId, provider.dim) || index.isEmpty();
+}
 // Strip base64 data URIs (embedded images) — huge, zero semantic value, and catastrophically
 // slow to embed/tokenize if left in (a single pasted image can take tens of seconds).
 function stripNoise(text) {
@@ -511,6 +690,10 @@ function chunkTextFor(s) {
 async function handleIndexNote(filePath, content) {
     if (!index)
         throw new Error('Index not initialised');
+    // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
+    // reindex picks up the change. This keeps note saves from waking the heavy model.
+    if (!provider.ready)
+        return { ok: true, skipped: true };
     const parsed = extractSections(content);
     if (!parsed.noteId || parsed.encrypted) {
         index.removeNoteByFilePath(filePath);
@@ -547,6 +730,7 @@ const REINDEX_BATCH = 16; // embed many sections per inference call → much bet
 async function handleReindexAll(notesDir) {
     if (!index)
         throw new Error('Index not initialised');
+    await ensureModelLoaded(); // reindex needs to embed text → load the model now
     emitState('indexing');
     index.clearAll();
     // 1) Collect every section across all notes (skip encrypted/empty).
@@ -591,13 +775,23 @@ async function handleReindexAll(notesDir) {
 async function handleSearch(query, k) {
     if (!index)
         throw new Error('Index not initialised');
+    await ensureModelLoaded(); // search must embed the query → load the model now
     const [qvec] = await provider.embed([query], 'query');
     return index.hybrid([qvec], query, k);
 }
 async function handleRelated(noteId, sectionId, k) {
     if (!index)
         throw new Error('Index not initialised');
+    if (!index.isServable())
+        return []; // no stored vectors yet → nothing to relate (no model needed)
     return index.relatedBySection(noteId, sectionId, k);
+}
+function handleGraph(minScore, maxPerNote) {
+    if (!index)
+        throw new Error('Index not initialised');
+    if (!index.isServable())
+        return []; // served straight from stored vectors; model not required
+    return index.contentEdges(minScore, maxPerNote);
 }
 // ── Message loop ────────────────────────────────────────────────────────────
 parentPort.on('message', async (e) => {
@@ -606,18 +800,27 @@ parentPort.on('message', async (e) => {
         switch (req.type) {
             case 'init': {
                 currentModelId = req.payload.modelId;
+                currentCacheDir = req.payload.cacheDir;
                 index = new SqliteIndex(req.payload.dbPath);
-                // Load the model first so we know its embedding dimension, then size the index.
-                await provider.init(req.payload.modelId, req.payload.cacheDir);
-                // Reindex when the model/schema/dim changed OR the index is empty (fresh DB, or a
-                // DB that only ever had its metadata written). Avoids an empty Related panel.
-                const needsReindex = index.ensure(req.payload.modelId, provider.dim) || index.isEmpty();
+                // Light start: open the DB only — the model loads lazily (reindex/search/activate). When the
+                // stored vectors match the active model, graph & related are servable right now without it.
+                const indexReady = index.isServable() && index.metaMatches(currentModelId);
+                send({ type: 'result', id: req.id, payload: { ok: true, indexReady } });
+                break;
+            }
+            case 'load-model': {
+                // Explicit activation (reactivate / model swap): load the model and report if a reindex
+                // is needed because the stored vectors are stale or missing.
+                const needsReindex = await ensureModelLoaded();
                 send({ type: 'result', id: req.id, payload: { ok: true, needsReindex } });
+                scheduleModelUnload(); // if no reindex follows, release the model after the grace window
                 break;
             }
             case 'index-note': {
                 const r = await handleIndexNote(req.payload.filePath, req.payload.content);
                 send({ type: 'result', id: req.id, payload: r });
+                if (!r.skipped)
+                    scheduleModelUnload(); // keep the model alive while edits keep arriving
                 break;
             }
             case 'remove-note': {
@@ -628,15 +831,22 @@ parentPort.on('message', async (e) => {
             case 'reindex-all': {
                 const r = await handleReindexAll(req.payload.notesDir);
                 send({ type: 'result', id: req.id, payload: r });
+                scheduleModelUnload(); // work done + persisted → release the model back to dormant
                 break;
             }
             case 'search': {
                 const r = await handleSearch(req.payload.query, req.payload.k);
                 send({ type: 'result', id: req.id, payload: r });
+                scheduleModelUnload();
                 break;
             }
             case 'related': {
                 const r = await handleRelated(req.payload.noteId, req.payload.sectionId, req.payload.k);
+                send({ type: 'result', id: req.id, payload: r });
+                break;
+            }
+            case 'graph': {
+                const r = handleGraph(req.payload.minScore, req.payload.maxPerNote);
                 send({ type: 'result', id: req.id, payload: r });
                 break;
             }
@@ -645,6 +855,7 @@ parentPort.on('message', async (e) => {
     catch (err) {
         const id = req.id ?? -1;
         emitState('idle');
+        scheduleModelUnload(); // don't leave the model resident after a failed embed task
         send({ type: 'error', id, error: String(err?.stack ?? err) });
     }
 });
