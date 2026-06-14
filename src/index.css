@@ -71,6 +71,26 @@ button {
   height: 100%;
 }
 
+/* Miniature read-only note preview (Note overview cards). Renders the exact
+   prose markup the editor uses, but shrunk via `zoom` so the few visible lines
+   read like the open note in miniature. The card supplies its own insets, so the
+   ProseMirror padding is zeroed and the first block's top margin is removed. */
+.note-preview .prose-editor {
+  height: auto;
+}
+.note-preview .prose-editor .ProseMirror {
+  min-height: 0;
+  padding: 0;
+  caret-color: transparent;
+}
+.note-preview .prose-editor .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.note-preview .prose-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
 .prose-editor .ProseMirror {
   min-height: 100%;
   padding: 1.25rem 1.5rem 4rem;

@@ -21,6 +21,8 @@ import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as aiIndex from './ai/aiIndex'
+import * as noteFormat from './noteFormat'
+import { migrateNotesDirToV2 } from './migration'
 
 
 function getIconPath(): string {
@@ -38,11 +40,12 @@ let tray: Tray | null = null
 let isQuitting = false
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 
-// Track files recently written by the app so fs.watch can ignore them
+// Track paths recently written by the app so fs.watch can ignore them.
+// Keys are notes-dir-relative with forward slashes: '<dir>' or '<dir>/<file>'.
 const recentInternalWrites = new Set<string>()
-function markInternalWrite(filename: string) {
-  recentInternalWrites.add(filename)
-  setTimeout(() => recentInternalWrites.delete(filename), 1500)
+function markInternalWrite(relPath: string) {
+  recentInternalWrites.add(relPath)
+  setTimeout(() => recentInternalWrites.delete(relPath), 1500)
 }
 
 const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
@@ -99,22 +102,24 @@ let alarmTimer: ReturnType<typeof setInterval> | null = null
 function checkExpiredNotes(): void {
   try {
     const now = new Date()
-    const files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
-    for (const filename of files) {
-      const filePath = path.join(NOTES_DIR, filename)
+    for (const dir of noteFormat.listNoteDirs(NOTES_DIR)) {
+      const dirPath = path.join(NOTES_DIR, dir)
       try {
-        const content = fs.readFileSync(filePath, 'utf-8')
+        const content = fs.readFileSync(path.join(dirPath, noteFormat.NOTE_MD), 'utf-8')
         const match = content.match(/^expiresAt:\s*(.+)$/m)
         if (!match) continue
         const raw = match[1].trim().replace(/^["']|["']$/g, '')
         const expiresAt = new Date(raw)
         if (isNaN(expiresAt.getTime()) || now < expiresAt) continue
-        markInternalWrite(filename)
-        fs.unlinkSync(filePath)
+        markInternalWrite(dir)
+        try {
+          for (const f of fs.readdirSync(dirPath)) markInternalWrite(`${dir}/${f}`)
+        } catch { /* ignore */ }
+        fs.rmSync(dirPath, { recursive: true, force: true })
         BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-        githubSync.scheduleDelete(filePath)
+        githubSync.scheduleDeleteDir(dir)
       } catch {
-        // ignore per-file errors
+        // ignore per-note errors
       }
     }
   } catch (err) {
@@ -187,9 +192,10 @@ const OLD_NOTES_DIR = path.join(os.homedir(), 'scratch-notes')
 // We intentionally avoid process.env.XDG_DATA_HOME because snap/flatpak runtimes
 // override it to their sandboxed paths, which would make notes inaccessible outside
 // the dev environment.
-const NOTES_DIR = process.platform === 'linux'
+// NOTEFLOW_NOTES_DIR overrides the location (testing / scripting; mirrors the CLI).
+const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (process.platform === 'linux'
   ? path.join(os.homedir(), '.local', 'share', 'noteflow-notes')
-  : path.join(os.homedir(), 'noteflow-notes')
+  : path.join(os.homedir(), 'noteflow-notes'))
 
 // Migrate old ~/scratch-notes → new NOTES_DIR
 if (fs.existsSync(OLD_NOTES_DIR) && !fs.existsSync(NOTES_DIR)) {
@@ -251,30 +257,36 @@ function sanitizeSectionColors(raw: unknown): Record<string, string> {
   return next
 }
 
-function ensureSafeNoteFilename(filePath: string): string {
-  if (typeof filePath !== 'string') throw new Error('Invalid note file path')
-  const filename = path.basename(filePath).trim()
-  if (!filename || filename === '.' || filename === '..') throw new Error('Invalid note filename')
-  if (filename.includes('/') || filename.includes('\\')) throw new Error('Invalid note filename')
-  if (!filename.toLowerCase().endsWith('.md')) throw new Error('Only markdown note files are allowed')
-  return filename
+// Root-level entries of the notes dir that can never be a note directory
+const RESERVED_ROOT_NAMES = new Set([
+  'groups.json',
+  'folders.json',
+  'section-colors.json',
+  'note-order.json',
+  'README.md',
+  noteFormat.FORMAT_MARKER_FILE,
+])
+
+/** Validates a note directory name (accepts an absolute dir path; uses its basename). */
+function ensureSafeDirname(dirOrPath: string): string {
+  if (typeof dirOrPath !== 'string') throw new Error('Invalid note directory')
+  const dir = path.basename(dirOrPath.replace(/[\\/]+$/, '')).trim()
+  if (!dir || dir === '.' || dir === '..') throw new Error('Invalid note directory')
+  if (dir.includes('/') || dir.includes('\\')) throw new Error('Invalid note directory')
+  if (dir.startsWith('.') || RESERVED_ROOT_NAMES.has(dir)) throw new Error('Invalid note directory')
+  if (dir.length > 160) throw new Error('Note directory name is too long')
+  return dir
 }
 
-function toSafeNotePath(filePath: string): string {
-  const filename = ensureSafeNoteFilename(filePath)
-  return path.join(NOTES_DIR, filename)
-}
-
-function ensureSafeImportFilename(filename: string): string {
-  if (typeof filename !== 'string') throw new Error('Invalid import filename')
-  const trimmed = filename.trim()
-  if (!trimmed) throw new Error('Import filename is empty')
-  if (trimmed.length > 160) throw new Error('Import filename is too long')
-  if (path.isAbsolute(trimmed)) throw new Error('Absolute import paths are not allowed')
-  if (trimmed.includes('/') || trimmed.includes('\\')) throw new Error('Nested import paths are not allowed')
-  if (trimmed === '.' || trimmed === '..') throw new Error('Invalid import filename')
-  if (!trimmed.toLowerCase().endsWith('.md')) throw new Error('Only markdown notes can be imported')
-  return trimmed
+/** Validates a file name inside a note directory (note.md or a section .md). */
+function ensureSafeNoteFile(file: string): string {
+  if (typeof file !== 'string') throw new Error('Invalid note file name')
+  const name = file.trim()
+  if (!name || name === '.' || name === '..') throw new Error('Invalid note file name')
+  if (name.includes('/') || name.includes('\\') || path.basename(name) !== name) throw new Error('Invalid note file name')
+  if (!name.toLowerCase().endsWith('.md')) throw new Error('Only markdown note files are allowed')
+  if (name.length > 160) throw new Error('Note file name is too long')
+  return name
 }
 
 function parseHttpsUrl(rawUrl: string): URL | null {
@@ -602,6 +614,101 @@ function toggleWindow() {
   }
 }
 
+/**
+ * Watches the notes dir for external changes (CLI, sync from another device).
+ * Events are normalized to '<dir>' or '<dir>/<file>' (forward slashes) and
+ * debounced per note dir; the broadcast always carries the note DIRECTORY path
+ * so the renderer re-reads the whole note. Root-level files (metadata json,
+ * README, format marker, leftover flat .md) are ignored.
+ *
+ * Windows/macOS use native recursive watching. Node has no recursive fs.watch
+ * on Linux, so there we watch the root (dir add/remove) plus one watcher per
+ * note dir (file changes), refreshing the watcher set on root events.
+ */
+function startNotesWatcher(): void {
+  const pendingWatchDebounce = new Map<string, ReturnType<typeof setTimeout>>()
+
+  const broadcastAll = () =>
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+  const broadcastDir = (dir: string) => {
+    const dirPath = path.join(NOTES_DIR, dir)
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', dirPath, null))
+  }
+
+  const handleEvent = (rel: string | null) => {
+    if (rel === null) {
+      // Filename unavailable (inotify edge case) — full reload covers all cases
+      const existing = pendingWatchDebounce.get('__all__')
+      if (existing) clearTimeout(existing)
+      pendingWatchDebounce.set('__all__', setTimeout(() => {
+        pendingWatchDebounce.delete('__all__')
+        broadcastAll()
+      }, 150))
+      return
+    }
+
+    const parts = rel.split('/')
+    const dir = parts[0]
+    // Root-level files (json/README/marker/flat .md) — note dirs never contain a dot
+    if (parts.length === 1 && dir.includes('.')) return
+    if (parts.length === 2 && !parts[1].endsWith('.md')) return
+    if (parts.length > 2) return
+    if (recentInternalWrites.has(rel) || recentInternalWrites.has(dir)) return
+
+    // Debounce per note dir: a single save touches note.md + section files,
+    // and fs.watch can fire multiple times per write (Windows). 150 ms lets
+    // the multi-file write settle into ONE broadcast.
+    const existing = pendingWatchDebounce.get(dir)
+    if (existing) clearTimeout(existing)
+    pendingWatchDebounce.set(dir, setTimeout(() => {
+      pendingWatchDebounce.delete(dir)
+      let isNoteDir = false
+      try {
+        isNoteDir = fs.existsSync(path.join(NOTES_DIR, dir, noteFormat.NOTE_MD))
+      } catch { /* treat as gone */ }
+      if (isNoteDir) broadcastDir(dir)
+      else broadcastAll() // dir deleted/renamed (or not a note dir) — full reload covers it
+    }, 150))
+  }
+
+  if (process.platform === 'linux') {
+    const dirWatchers = new Map<string, fs.FSWatcher>()
+    const watchDir = (dir: string) => {
+      if (dirWatchers.has(dir)) return
+      try {
+        const w = fs.watch(path.join(NOTES_DIR, dir), { persistent: false }, (_t, filename) => {
+          handleEvent(filename ? `${dir}/${filename}` : dir)
+        })
+        w.on('error', () => {
+          dirWatchers.delete(dir)
+          try { w.close() } catch { /* ignore */ }
+        })
+        dirWatchers.set(dir, w)
+      } catch { /* dir vanished between scan and watch */ }
+    }
+    const refreshDirWatchers = () => {
+      const current = new Set(noteFormat.listNoteDirs(NOTES_DIR))
+      for (const dir of current) watchDir(dir)
+      for (const [dir, w] of dirWatchers) {
+        if (!current.has(dir)) {
+          try { w.close() } catch { /* ignore */ }
+          dirWatchers.delete(dir)
+        }
+      }
+    }
+    refreshDirWatchers()
+    fs.watch(NOTES_DIR, { persistent: false }, (_t, filename) => {
+      // A root event usually means a note dir appeared/disappeared
+      setTimeout(refreshDirWatchers, 200)
+      handleEvent(filename ? filename.replace(/\\/g, '/') : null)
+    })
+  } else {
+    fs.watch(NOTES_DIR, { recursive: true, persistent: false }, (_t, filename) => {
+      handleEvent(filename ? filename.replace(/\\/g, '/') : null)
+    })
+  }
+}
+
 function registerGlobalShortcut() {
   // Ctrl+Shift+Space — toggle window from anywhere
   const ret = globalShortcut.register('CommandOrControl+Shift+Space', () => {
@@ -617,89 +724,89 @@ function registerGlobalShortcut() {
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
 
-ipcMain.handle('fs:list-notes', () => {
+ipcMain.handle('fs:read-note-dir', (_event, dir: string) => {
   try {
-    const files = fs.readdirSync(NOTES_DIR)
-    return files
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => {
-        const fullPath = path.join(NOTES_DIR, f)
-        const stat = fs.statSync(fullPath)
-        return {
-          filename: f,
-          path: fullPath,
-          mtime: stat.mtime.toISOString(),
-          ctime: stat.ctime.toISOString(),
-        }
-      })
-      .sort((a, b) => new Date(b.mtime).getTime() - new Date(a.mtime).getTime())
-  } catch {
-    return []
-  }
-})
-
-ipcMain.handle('fs:read-note', (_event, filePath: string) => {
-  try {
-    const safePath = toSafeNotePath(filePath)
-    return fs.readFileSync(safePath, 'utf-8')
+    const safeDir = ensureSafeDirname(dir)
+    return noteFormat.readNoteDirRecord(NOTES_DIR, safeDir)
   } catch {
     return null
   }
 })
 
-ipcMain.handle('fs:write-note', (event, filePath: string, content: string) => {
+interface NoteWritePayload {
+  dir: string
+  files: Record<string, string>
+  deleteFiles?: string[]
+}
+
+ipcMain.handle('fs:write-note', (event, payload: NoteWritePayload) => {
   try {
-    const safePath = toSafeNotePath(filePath)
-    fs.writeFileSync(safePath, content, 'utf-8')
-    markInternalWrite(path.basename(safePath))
-    // Broadcast to all windows
-    BrowserWindow.getAllWindows().forEach((win) => {
-      // Send the filePath and the sender's webContents ID
-      win.webContents.send('notes-updated', safePath, event.sender.id)
+    const dir = ensureSafeDirname(payload.dir)
+    const dirPath = path.join(NOTES_DIR, dir)
+
+    // Validate everything before touching disk
+    const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
+      if (typeof content !== 'string') throw new Error('Invalid note file content')
+      return [ensureSafeNoteFile(f), content] as const
     })
-    if (githubSync.getSyncStatus().connected) {
-      const filename = path.basename(safePath)
-      githubSync.schedulePush(safePath, content,
-        () => { pendingPushFiles.add(filename); notifyPushState() },
-        () => { pendingPushFiles.delete(filename); notifyPushState() }
-      )
-    } else {
-      githubSync.schedulePush(safePath, content)
+    const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f))
+    if (writes.length === 0) throw new Error('Empty note write')
+
+    fs.mkdirSync(dirPath, { recursive: true })
+    markInternalWrite(dir)
+    for (const [f] of writes) markInternalWrite(`${dir}/${f}`)
+    for (const f of deletes) markInternalWrite(`${dir}/${f}`)
+
+    // note.md first so a crash mid-write always leaves a consistent anchor
+    writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0))
+    for (const [f, content] of writes) {
+      fs.writeFileSync(path.join(dirPath, f), content, 'utf-8')
     }
+    for (const f of deletes) {
+      try { fs.unlinkSync(path.join(dirPath, f)) } catch { /* already gone */ }
+    }
+
+    // Single broadcast per note write — the renderer re-reads the whole dir
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('notes-updated', dirPath, event.sender.id)
+    })
+
+    const connected = githubSync.getSyncStatus().connected
+    for (const [f, content] of writes) {
+      const relPath = `${dir}/${f}`
+      if (connected) {
+        githubSync.schedulePush(relPath, content,
+          () => { pendingPushFiles.add(relPath); notifyPushState() },
+          () => { pendingPushFiles.delete(relPath); notifyPushState() }
+        )
+      } else {
+        githubSync.schedulePush(relPath, content)
+      }
+    }
+    for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
+
     // Keep the semantic index up to date (debounced; no-op when AI is disabled).
-    if (aiIndex.isEnabled()) aiIndex.scheduleIndex(safePath, content)
+    if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
   }
 })
 
-ipcMain.handle('fs:delete-note', (_event, filePath: string) => {
+ipcMain.handle('fs:delete-note', (_event, dirOrPath: string) => {
   try {
-    const safePath = toSafeNotePath(filePath)
-    markInternalWrite(path.basename(safePath))
-    fs.unlinkSync(safePath)
+    const dir = ensureSafeDirname(dirOrPath)
+    const dirPath = path.join(NOTES_DIR, dir)
+    markInternalWrite(dir)
+    try {
+      for (const f of fs.readdirSync(dirPath)) markInternalWrite(`${dir}/${f}`)
+    } catch { /* ignore */ }
+    fs.rmSync(dirPath, { recursive: true, force: true })
     BrowserWindow.getAllWindows().forEach((win) => {
       win.webContents.send('notes-updated')
     })
-    githubSync.scheduleDelete(safePath)
-    aiIndex.removeFromIndex(safePath)
-    return { ok: true }
-  } catch (err: unknown) {
-    return { ok: false, error: String(err) }
-  }
-})
-
-ipcMain.handle('fs:rename-note', (_event, oldPath: string, newPath: string) => {
-  try {
-    const safeOldPath = toSafeNotePath(oldPath)
-    const safeNewPath = toSafeNotePath(newPath)
-    markInternalWrite(path.basename(safeOldPath))
-    markInternalWrite(path.basename(safeNewPath))
-    fs.renameSync(safeOldPath, safeNewPath)
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('notes-updated')
-    })
+    githubSync.scheduleDeleteDir(dir)
+    aiIndex.removeFromIndex(dirPath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -711,21 +818,16 @@ ipcMain.handle('fs:read-all-notes', async () => {
   // distinguish a genuine empty directory from a transient FS failure.
   // On Windows, readdirSync can return [] without throwing when the filesystem
   // isn't ready yet (e.g. OS waking from sleep, app starting at boot).
-  // Retry up to 3 times so we don't mistake a transient empty result for no notes.
-  let files: string[] = []
+  // Retry so we don't mistake a transient empty result for no notes.
+  let dirs: string[] = []
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await new Promise<void>((r) => setTimeout(r, 800))
-    files = fs.readdirSync(NOTES_DIR).filter((f) => f.endsWith('.md'))
-    if (files.length > 0) break
+    dirs = noteFormat.listNoteDirs(NOTES_DIR)
+    if (dirs.length > 0) break
   }
-  return files.map((f) => {
-    const fullPath = path.join(NOTES_DIR, f)
-    try {
-      return { path: fullPath, content: fs.readFileSync(fullPath, 'utf-8') }
-    } catch {
-      return { path: fullPath, content: null }
-    }
-  })
+  return dirs
+    .map((dir) => noteFormat.readNoteDirRecord(NOTES_DIR, dir))
+    .filter((rec): rec is noteFormat.NoteDirRecord => rec !== null)
 })
 
 ipcMain.handle('fs:notes-dir', () => NOTES_DIR)
@@ -937,22 +1039,25 @@ ipcMain.handle('app:choose-notes-dir', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
-ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string; content: string }>, format: string, hint?: string) => {
+// For 'md'/'txt' the entries are plain { filename, content } files; for
+// '.noteflow'/'json' they are v2 folder bundles { dir, files } dumped as JSON.
+ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string; content: string }> | Array<{ dir: string; files: Record<string, string> }>, format: string, hint?: string) => {
   try {
     const safeHint = hint
       ? hint.replace(/[^a-z0-9 ._-]/gi, '').trim().replace(/\s+/g, '-') || 'note'
       : null
 
     if (format === 'txt' || format === 'md') {
-      if (entries.length === 1) {
-        const defaultName = safeHint ? `${safeHint}.${format}` : entries[0].filename
+      const plain = entries as Array<{ filename: string; content: string }>
+      if (plain.length === 1) {
+        const defaultName = safeHint ? `${safeHint}.${format}` : plain[0].filename
         const result = await dialog.showSaveDialog(mainWindow!, {
           title: 'Export note',
           defaultPath: path.join(os.homedir(), defaultName),
           filters: [{ name: format === 'txt' ? 'Plain Text' : 'Markdown', extensions: [format] }],
         })
         if (result.canceled || !result.filePath) return { ok: false, canceled: true }
-        fs.writeFileSync(result.filePath, entries[0].content, 'utf-8')
+        fs.writeFileSync(result.filePath, plain[0].content, 'utf-8')
         return { ok: true, filePath: result.filePath }
       } else {
         const result = await dialog.showOpenDialog(mainWindow!, {
@@ -961,7 +1066,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
         })
         if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
         const dir = result.filePaths[0]
-        for (const entry of entries) {
+        for (const entry of plain) {
           fs.writeFileSync(path.join(dir, entry.filename), entry.content, 'utf-8')
         }
         return { ok: true, filePath: dir }
@@ -985,7 +1090,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
       return { ok: false, canceled: true, error: 'Canceled' }
     }
     const exportFile = {
-      version: 1,
+      version: 2,
       exported: new Date().toISOString(),
       app: 'noteflow',
       notes: entries,
@@ -1021,62 +1126,76 @@ ipcMain.handle('notes:parse-import-file', async () => {
       const id = randomBytes(4).toString('hex')
       const secId = randomBytes(3).toString('hex')
       const now = new Date().toISOString()
-      const safeTitle = title.replace(/"/g, '\\"')
-      const indentedContent = textContent.split('\n').map((l) => `      ${l}`).join('\n')
-      const noteContent = [
-        '---',
-        `id: ${id}`,
-        `title: "${safeTitle}"`,
-        'tags: []',
-        `created: ${now}`,
-        `updated: ${now}`,
-        'sections:',
-        `  - id: ${secId}`,
-        '    name: Note',
-        '    content: |',
-        indentedContent,
-        '---',
-        textContent,
-      ].join('\n')
       const slug = title.replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-').toLowerCase() || 'note'
-      const filename = `${id}-${slug}.md`
+      const { files } = noteFormat.serializeNoteFolder({
+        id,
+        title,
+        tags: [],
+        created: now,
+        updated: now,
+        sections: [{ id: secId, name: 'Note', content: textContent, isRawMode: true }],
+      })
       return {
         ok: true,
         file: {
-          version: 1,
+          version: 2,
           exported: now,
           app: 'noteflow',
-          notes: [{ filename, content: noteContent }],
+          notes: [{ dir: `${slug}-${id}`, files }],
         },
       }
     }
 
     const raw = fs.readFileSync(filePath, 'utf-8')
     const parsed = JSON.parse(raw)
-    if (parsed.version !== 1 || parsed.app !== 'noteflow' || !Array.isArray(parsed.notes)) {
+    if (parsed.app !== 'noteflow' || !Array.isArray(parsed.notes)) {
       return { ok: false, error: 'Invalid .noteflow file format' }
     }
-    return { ok: true, file: parsed }
+    if (parsed.version === 2) {
+      return { ok: true, file: parsed }
+    }
+    if (parsed.version === 1) {
+      // Old export: each entry is one flat .md with inline sections — convert
+      // to a v2 folder bundle so the rest of the pipeline only sees v2.
+      const notes: Array<{ dir: string; files: Record<string, string> }> = []
+      for (const entry of parsed.notes as Array<{ filename?: string; content?: string }>) {
+        if (typeof entry?.filename !== 'string' || typeof entry?.content !== 'string') continue
+        const note = noteFormat.parseLegacyNoteRaw(entry.content)
+        const dir = entry.filename.replace(/\.md$/i, '')
+        const { files } = noteFormat.serializeNoteFolder(note, { preserveUpdated: true })
+        notes.push({ dir, files })
+      }
+      return { ok: true, file: { version: 2, exported: String(parsed.exported ?? ''), app: 'noteflow', notes } }
+    }
+    return { ok: false, error: 'Unsupported .noteflow version' }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
   }
 })
 
-ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ filename: string; content: string }>) => {
+ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: string; files: Record<string, string> }>) => {
   const written: string[] = []
   const errors: string[] = []
+  const connected = githubSync.getSyncStatus().connected
   for (const entry of entries) {
     try {
-      const safeFilename = ensureSafeImportFilename(entry.filename)
-      if (typeof entry.content !== 'string') {
-        throw new Error('Import content must be a string')
+      const dir = ensureSafeDirname(entry.dir)
+      const writes = Object.entries(entry.files ?? {}).map(([f, content]) => {
+        if (typeof content !== 'string') throw new Error('Import content must be a string')
+        return [ensureSafeNoteFile(f), content] as const
+      })
+      if (!writes.some(([f]) => f === noteFormat.NOTE_MD)) throw new Error('Imported note is missing note.md')
+      const dirPath = path.join(NOTES_DIR, dir)
+      fs.mkdirSync(dirPath, { recursive: true })
+      markInternalWrite(dir)
+      for (const [f, content] of writes) {
+        markInternalWrite(`${dir}/${f}`)
+        fs.writeFileSync(path.join(dirPath, f), content, 'utf-8')
+        if (connected) githubSync.schedulePush(`${dir}/${f}`, content)
       }
-      const dest = path.join(NOTES_DIR, safeFilename)
-      fs.writeFileSync(dest, entry.content, 'utf-8')
-      markInternalWrite(safeFilename)
-      written.push(safeFilename)
+      written.push(dir)
     } catch (err) {
-      errors.push(`${entry.filename}: ${String(err)}`)
+      errors.push(`${entry.dir}: ${String(err)}`)
     }
   }
   BrowserWindow.getAllWindows().forEach((win) => {
@@ -1099,6 +1218,11 @@ ipcMain.handle('sync:initiate', async (_event, repo: string) => {
     if (result.ok) {
       BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
       startAutoSync()
+      // Fresh connection: make sure the remote carries the v2 format marker
+      // (and convert any v1 leftovers if connecting to an old notes repo).
+      githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).catch((err) => {
+        console.error('[Sync] remote format migration failed:', String(err))
+      })
     }
   })
 })
@@ -1116,6 +1240,10 @@ ipcMain.handle('sync:disconnect', () => {
 
 ipcMain.handle('sync:pull', async () => {
   const result = await githubSync.pullNotes(NOTES_DIR)
+  // Guarded no-op once the remote is already on format v2
+  githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).catch((err) => {
+    console.error('[Sync] remote format migration failed:', String(err))
+  })
   if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
     // Full reload: covers deletions AND the case where the file was already on disk
     // (written by auto-sync) but the UI missed the event — manual sync should always
@@ -1288,7 +1416,7 @@ ipcMain.handle('groups:set', (event, groups: unknown[]) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush(GROUPS_FILE, content)
+  githubSync.schedulePush('groups.json', content)
 })
 
 ipcMain.handle('folders:get', () => {
@@ -1306,7 +1434,7 @@ ipcMain.handle('folders:set', (event, folders: unknown[]) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush(FOLDERS_FILE, content)
+  githubSync.schedulePush('folders.json', content)
 })
 
 ipcMain.handle('section-colors:get', () => {
@@ -1327,7 +1455,7 @@ ipcMain.handle('section-colors:set', (event, colors: unknown) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush(SECTION_COLORS_FILE, content)
+  githubSync.schedulePush('section-colors.json', content)
 })
 
 ipcMain.handle('note-order:get', () => {
@@ -1344,7 +1472,7 @@ ipcMain.handle('note-order:set', (event, order: unknown) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush(NOTE_ORDER_FILE, content)
+  githubSync.schedulePush('note-order.json', content)
 })
 
 // Window controls
@@ -1426,6 +1554,10 @@ app.whenReady().then(async () => {
   // Remove default menu for all windows
   Menu.setApplicationMenu(null)
 
+  // One-time local format migration (v1 flat .md → v2 folder-per-note).
+  // MUST run before the initial pull and before the fs watcher starts.
+  const migrationResult = migrateNotesDirToV2(NOTES_DIR)
+
   githubSync.loadSyncSettings()
   githubSync.onStatusChanged(() => emitSyncStatusChanged())
   const connected = githubSync.getSyncStatus().connected
@@ -1442,7 +1574,19 @@ app.whenReady().then(async () => {
     const runInitialPull = () =>
       githubSync
         .pullNotes(NOTES_DIR)
-        .then(broadcastPullResult)
+        .then((result) => {
+          broadcastPullResult(result)
+          // One-time remote format migration (v1 flat files → folders + marker).
+          // Internally guarded; no-op once the remote is already v2.
+          githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
+            if (didMigrate) {
+              // Remote-only notes may have been imported locally — full reload
+              BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+            }
+          }).catch((err) => {
+            console.error('[Startup] remote format migration failed:', String(err))
+          })
+        })
         .catch((err) => {
           console.error('[Startup] initial pull failed:', String(err))
           githubSync.setInitialPullStatus('failed')
@@ -1509,37 +1653,16 @@ app.whenReady().then(async () => {
   aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState })
   aiIndex.primeSettings(readAiSettings())
 
+  // The format migration rewrote every note path — the AI index stores stale
+  // file paths and must be rebuilt once. Deferred so it doesn't fight startup.
+  if (migrationResult.migrated > 0 && aiIndex.isEnabled()) {
+    setTimeout(() => {
+      aiIndex.reindexAll().catch((err) => console.error('[Migration] AI reindex failed:', String(err)))
+    }, 15_000)
+  }
+
   // Watch for external file changes (CLI, sync from another device, etc.)
-  // Debounce per-file: fs.watch can fire multiple times for a single write (Windows),
-  // and may fire before the OS has flushed the file — a 150 ms delay lets the write settle.
-  // If filename is null (Linux inotify edge case), fall back to a full reload.
-  const pendingWatchDebounce = new Map<string, ReturnType<typeof setTimeout>>()
-
-  fs.watch(NOTES_DIR, { persistent: false }, (_eventType, filename) => {
-    if (filename && !filename.endsWith('.md')) return
-    if (filename && recentInternalWrites.has(filename)) return
-
-    const key = filename ?? '__all__'
-    const existing = pendingWatchDebounce.get(key)
-    if (existing) clearTimeout(existing)
-
-    pendingWatchDebounce.set(key, setTimeout(() => {
-      pendingWatchDebounce.delete(key)
-
-      if (!filename) {
-        // Filename unavailable — full reload covers all cases
-        BrowserWindow.getAllWindows().forEach(win => {
-          win.webContents.send('notes-updated')
-        })
-        return
-      }
-
-      const filePath = path.join(NOTES_DIR, filename)
-      BrowserWindow.getAllWindows().forEach(win => {
-        win.webContents.send('notes-updated', filePath, null)
-      })
-    }, 150))
-  })
+  startNotesWatcher()
 
   app.on('activate', () => {
     showWindow()

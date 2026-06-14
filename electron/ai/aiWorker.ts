@@ -13,7 +13,6 @@
  */
 import fs from 'fs'
 import path from 'path'
-import yaml from 'js-yaml'
 import Database from 'better-sqlite3'
 import * as sqliteVec from 'sqlite-vec'
 import type { FeatureExtractionPipeline } from '@huggingface/transformers'
@@ -22,6 +21,7 @@ import {
   type WorkerRequest, type WorkerResponse, type IndexState, type IndexProgress,
   type RelatedNote, type SemanticHit, type GraphEdge,
 } from './protocol'
+import { listNoteDirs, parseNoteDir } from '../noteFormat'
 
 // Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
 // require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
@@ -95,7 +95,7 @@ function loadVecExtension(db: Database.Database): void {
   db.loadExtension(unpacked)
 }
 
-// ── Note parsing (mirrors src/lib/noteUtils.ts splitFrontmatter/parseNote) ────
+// ── Note parsing (folder-per-note; format logic lives in ../noteFormat) ──────
 
 interface ParsedSection { id: string; name: string; content: string }
 interface ParsedNote {
@@ -105,41 +105,16 @@ interface ParsedNote {
   sections: ParsedSection[]
 }
 
-function extractSections(raw: string): ParsedNote {
-  const normalized = raw.replace(/\r\n/g, '\n')
-  let frontmatter = ''
-  let body = normalized
-  if (normalized.startsWith('---\n')) {
-    const end = normalized.indexOf('\n---\n', 4)
-    if (end !== -1) {
-      frontmatter = normalized.slice(4, end)
-      body = normalized.slice(end + 5)
-    }
+/** Reads a note directory from disk. Null when note.md is missing (deleted). */
+function readNoteFolder(dirPath: string): ParsedNote | null {
+  const disk = parseNoteDir(dirPath)
+  if (!disk) return null
+  return {
+    noteId: disk.id || null,
+    title: disk.title,
+    encrypted: !!disk.encryption,
+    sections: disk.sections.map((s) => ({ id: s.id, name: s.name, content: s.content })),
   }
-
-  let data: Record<string, unknown> = {}
-  if (frontmatter) {
-    try { data = (yaml.load(frontmatter) as Record<string, unknown>) ?? {} } catch { /* malformed */ }
-  }
-
-  const noteId = typeof data.id === 'string' ? data.id : null
-  const title = typeof data.title === 'string' ? data.title : ''
-  const encrypted = !!(data.encryption && typeof data.encryption === 'object')
-
-  let sections: ParsedSection[] = []
-  if (!encrypted) {
-    if (Array.isArray(data.sections) && data.sections.length > 0) {
-      sections = (data.sections as Array<Record<string, unknown>>).map((s, i) => ({
-        id: String(s.id ?? `sec${i}`),
-        name: String(s.name ?? 'Section'),
-        content: String(s.content ?? ''),
-      }))
-    } else {
-      sections = [{ id: 'sec0', name: 'Note', content: body }]
-    }
-  }
-
-  return { noteId, title, encrypted, sections }
 }
 
 // ── Embedding provider ──────────────────────────────────────────────────────
@@ -694,14 +669,14 @@ function chunkTextFor(s: ParsedSection): string {
   return stripNoise(`${s.name}\n${s.content}`).trim()
 }
 
-async function handleIndexNote(filePath: string, content: string): Promise<{ ok: boolean; skipped?: boolean }> {
+async function handleIndexNote(dirPath: string): Promise<{ ok: boolean; skipped?: boolean }> {
   if (!index) throw new Error('Index not initialised')
   // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
   // reindex picks up the change. This keeps note saves from waking the heavy model.
   if (!provider.ready) return { ok: true, skipped: true }
-  const parsed = extractSections(content)
-  if (!parsed.noteId || parsed.encrypted) {
-    index.removeNoteByFilePath(filePath)
+  const parsed = readNoteFolder(dirPath)
+  if (!parsed || !parsed.noteId || parsed.encrypted) {
+    index.removeNoteByFilePath(dirPath)
     return { ok: true, skipped: true }
   }
 
@@ -730,7 +705,7 @@ async function handleIndexNote(filePath: string, content: string): Promise<{ ok:
     sectionId: d.sectionId, sectionName: d.sectionName, hash: d.hash, text: d.text, embedding: embeddings[i],
   }))
 
-  index.applyNoteUpdate(parsed.noteId, filePath, parsed.title, deleteChunkIds, inserts)
+  index.applyNoteUpdate(parsed.noteId, dirPath, parsed.title, deleteChunkIds, inserts)
   return { ok: true }
 }
 
@@ -742,21 +717,17 @@ async function handleReindexAll(notesDir: string): Promise<{ ok: boolean; indexe
   emitState('indexing')
   index.clearAll()
 
-  // 1) Collect every section across all notes (skip encrypted/empty).
-  let files: string[] = []
-  try { files = fs.readdirSync(notesDir).filter((f) => f.endsWith('.md')) } catch { /* empty */ }
+  // 1) Collect every section across all note directories (skip encrypted/empty).
   type Row = { noteId: string; filePath: string; title: string; sectionId: string; sectionName: string; text: string; hash: string }
   const rows: Row[] = []
-  for (const f of files) {
-    const full = path.join(notesDir, f)
-    let content: string
-    try { content = fs.readFileSync(full, 'utf-8') } catch { continue }
-    const parsed = extractSections(content)
-    if (!parsed.noteId || parsed.encrypted) continue
+  for (const dir of listNoteDirs(notesDir)) {
+    const dirPath = path.join(notesDir, dir)
+    const parsed = readNoteFolder(dirPath)
+    if (!parsed || !parsed.noteId || parsed.encrypted) continue
     for (const s of parsed.sections) {
       const text = chunkTextFor(s)
       if (!text) continue
-      rows.push({ noteId: parsed.noteId, filePath: full, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) })
+      rows.push({ noteId: parsed.noteId, filePath: dirPath, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) })
     }
   }
 
@@ -819,13 +790,13 @@ parentPort.on('message', async (e: { data: WorkerRequest }) => {
         break
       }
       case 'index-note': {
-        const r = await handleIndexNote(req.payload.filePath, req.payload.content)
+        const r = await handleIndexNote(req.payload.dirPath)
         send({ type: 'result', id: req.id, payload: r })
         if (!r.skipped) scheduleModelUnload() // keep the model alive while edits keep arriving
         break
       }
       case 'remove-note': {
-        index?.removeNoteByFilePath(req.payload.filePath)
+        index?.removeNoteByFilePath(req.payload.dirPath)
         send({ type: 'result', id: req.id, payload: { ok: true } })
         break
       }

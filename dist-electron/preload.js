@@ -4,13 +4,11 @@ const electron_1 = require("electron");
 const api = {
     // Identification
     windowId: () => electron_1.ipcRenderer.sendSync('window:get-id'),
-    // File system
-    listNotes: () => electron_1.ipcRenderer.invoke('fs:list-notes'),
-    readNote: (filePath) => electron_1.ipcRenderer.invoke('fs:read-note', filePath),
+    // File system (folder-per-note: one dir per note, one .md per section)
     readAllNotes: () => electron_1.ipcRenderer.invoke('fs:read-all-notes'),
-    writeNote: (filePath, content) => electron_1.ipcRenderer.invoke('fs:write-note', filePath, content),
-    deleteNote: (filePath) => electron_1.ipcRenderer.invoke('fs:delete-note', filePath),
-    renameNote: (oldPath, newPath) => electron_1.ipcRenderer.invoke('fs:rename-note', oldPath, newPath),
+    readNoteDir: (dir) => electron_1.ipcRenderer.invoke('fs:read-note-dir', dir),
+    writeNote: (payload) => electron_1.ipcRenderer.invoke('fs:write-note', payload),
+    deleteNote: (dir) => electron_1.ipcRenderer.invoke('fs:delete-note', dir),
     getNotesDir: () => electron_1.ipcRenderer.invoke('fs:notes-dir'),
     openNotesFolder: () => electron_1.ipcRenderer.invoke('app:open-notes-folder'),
     chooseNotesDir: () => electron_1.ipcRenderer.invoke('app:choose-notes-dir'),
@@ -50,7 +48,8 @@ const api = {
     onUpdateInstalling: (callback) => {
         electron_1.ipcRenderer.on('update:installing', () => callback());
     },
-    // Export / Import
+    // Export / Import — .noteflow entries are v2 folder bundles { dir, files };
+    // .md/.txt exports remain plain { filename, content } files.
     exportNotes: (entries, format, hint) => electron_1.ipcRenderer.invoke('notes:export', entries, format, hint),
     parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
     writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),

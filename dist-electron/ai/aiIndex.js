@@ -89,11 +89,11 @@ async function applySettings(next) {
     if (!prev.enabled || modelChanged)
         await activateModel();
 }
-/** Debounced incremental index of a single note (called from fs:write-note). */
-function scheduleIndex(filePath, content) {
+/** Debounced incremental index of a single note directory (called from fs:write-note). */
+function scheduleIndex(dirPath) {
     if (!settings.enabled)
         return;
-    const key = path_1.default.basename(filePath);
+    const key = path_1.default.basename(dirPath);
     const existing = indexTimers.get(key);
     if (existing)
         clearTimeout(existing);
@@ -104,17 +104,17 @@ function scheduleIndex(filePath, content) {
         if (!child || !ready)
             return;
         try {
-            await request('index-note', { filePath, content });
+            await request('index-note', { dirPath });
         }
         catch (err) {
             console.error('[aiIndex] index-note failed:', String(err));
         }
     }, INDEX_DEBOUNCE_MS));
 }
-function removeFromIndex(filePath) {
+function removeFromIndex(dirPath) {
     if (!settings.enabled || !child || !ready)
         return;
-    request('remove-note', { filePath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)));
+    request('remove-note', { dirPath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)));
 }
 async function reindexAll() {
     await ensureStarted();

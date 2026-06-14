@@ -7,6 +7,7 @@ import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { NoteEditor } from './components/Editor/NoteEditor'
 import { GroupOverview } from './components/GroupOverview/GroupOverview'
+import { NoteOverview } from './components/NoteOverview/NoteOverview'
 import { BrainView } from './components/Brain/BrainView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
@@ -28,6 +29,8 @@ export function App() {
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
   const groupViewId = useNotesStore((s) => s.groupViewId)
   const setGroupView = useNotesStore((s) => s.setGroupView)
+  const noteViewId = useNotesStore((s) => s.noteViewId)
+  const setNoteView = useNotesStore((s) => s.setNoteView)
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
@@ -484,6 +487,8 @@ export function App() {
             <BrainView onClose={() => setBrainView(false)} />
           ) : groupViewId ? (
             <GroupOverview groupId={groupViewId} onClose={() => setGroupView(null)} />
+          ) : noteViewId ? (
+            <NoteOverview noteId={noteViewId} onClose={() => setNoteView(null)} />
           ) : isLoading ? (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-5 h-5 border-2 border-text/20 border-t-text rounded-full animate-spin" />
@@ -578,7 +583,7 @@ export function App() {
             )
           )}
 
-          {draggingNoteId && !groupViewId && (
+          {draggingNoteId && !groupViewId && !noteViewId && !brainViewOpen && (
             <>
               <div
                 className={`absolute inset-5 z-20 pointer-events-none rounded-lg border-2 border-dashed transition-colors ${

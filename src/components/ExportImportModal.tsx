@@ -2,10 +2,31 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, PackageOpen, X } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useNotesStore } from '../stores/notesStore'
-import { noteFilename, parseNote, serializeNote } from '../lib/noteUtils'
+import {
+  NOTE_MD,
+  parseNoteFolder,
+  serializeNoteFolder,
+  noteDirname,
+  sectionFilename,
+  pathBasename,
+} from '../lib/noteUtils'
 import { getTagColor } from '../lib/tagColors'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
-import type { ImportConflictStrategy, ImportPreviewEntry, NoteflowExportEntry } from '../types'
+import type { ImportConflictStrategy, ImportPreviewEntry, Note, NoteflowExportEntry, PlainExportEntry } from '../types'
+
+/** Section-file map of a bundle (everything except note.md). */
+function bundleSectionFiles(files: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [f, content] of Object.entries(files)) {
+    if (f !== NOTE_MD) out[f] = content
+  }
+  return out
+}
+
+/** Parses a v2 folder bundle into an in-memory Note (for preview / keep-both). */
+function parseBundle(files: Record<string, string>): Note {
+  return parseNoteFolder(files[NOTE_MD] ?? '', bundleSectionFiles(files), '')
+}
 
 interface Props {
   mode: 'export' | 'import'
@@ -174,22 +195,33 @@ function ExportPanel({ onClose }: { onClose: () => void }) {
 
   async function handleExport() {
     setStep('exporting')
-    const entries: NoteflowExportEntry[] = visibleNotes
-      .filter((n) => selectedNoteIds.has(n.id))
-      .map((n) => {
+    const selected = visibleNotes.filter((n) => selectedNoteIds.has(n.id))
+
+    let entries: NoteflowExportEntry[] | PlainExportEntry[]
+    if (exportFormat === 'txt' || exportFormat === 'md') {
+      entries = selected.map((n) => ({
+        filename: `${sanitizeFilename(n.title || 'Untitled')}.${exportFormat}`,
+        content: buildPlainContent(n, selectedSections.get(n.id), exportFormat),
+      }))
+    } else {
+      // .noteflow: each note travels as its folder bundle
+      entries = selected.map((n): NoteflowExportEntry => {
+        const dir = pathBasename(n.filePath)
+        // Encrypted: only the anchor — never write plaintext section files,
+        // even if the note is session-unlocked in memory.
+        if (n.encryption) return { dir, files: { [NOTE_MD]: n.raw } }
         const sectionFilter = selectedSections.get(n.id)
-        if (exportFormat === 'txt' || exportFormat === 'md') {
-          const content = buildPlainContent(n, sectionFilter, exportFormat)
-          const filename = `${sanitizeFilename(n.title || 'Untitled')}.${exportFormat}`
-          return { filename, content }
-        }
         if (!sectionFilter) {
-          return { filename: noteFilename(n.id, n.title), content: n.raw }
+          // Verbatim bundle (preserves the on-disk `updated` timestamp)
+          const files: Record<string, string> = { [NOTE_MD]: n.raw }
+          for (const s of n.sections) files[sectionFilename(s.id)] = s.content
+          return { dir, files }
         }
         const filteredSections = n.sections.filter((s) => sectionFilter.has(s.id))
-        const content = serializeNote({ ...n, sections: filteredSections })
-        return { filename: noteFilename(n.id, n.title), content }
+        const { files } = serializeNoteFolder({ ...n, sections: filteredSections })
+        return { dir, files }
       })
+    }
 
     const singleNote = selectedNoteIds.size === 1
       ? visibleNotes.find((n) => selectedNoteIds.has(n.id))
@@ -384,24 +416,19 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
       }
 
       const existingIds = new Set(notes.map((n) => n.id))
-      const existingFilenames = new Set(
-        notes.map((n) => {
-          const parts = n.filePath.replace(/\\/g, '/').split('/')
-          return parts[parts.length - 1]
-        })
-      )
+      const existingDirs = new Set(notes.map((n) => pathBasename(n.filePath)))
 
       setExportedDate(result.file.exported)
       setEntries(
         result.file.notes.map((entry) => {
-          const parsed = parseNote(entry.content, '')
+          const parsed = parseBundle(entry.files)
           const idConflict = existingIds.has(parsed.id)
-          const filenameConflict = existingFilenames.has(entry.filename)
+          const dirConflict = existingDirs.has(entry.dir)
           const conflict: ImportPreviewEntry['conflict'] =
-            idConflict ? 'id' : filenameConflict ? 'filename' : 'none'
+            idConflict ? 'id' : dirConflict ? 'dir' : 'none'
           return {
-            filename: entry.filename,
-            content: entry.content,
+            dir: entry.dir,
+            files: entry.files,
             parsedTitle: parsed.title,
             parsedId: parsed.id,
             conflict,
@@ -426,15 +453,11 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
       .map((e) => {
         if (e.strategy === 'keep-both') {
           const newId = nanoid(8)
-          const parsed = parseNote(e.content, '')
-          const newContent = serializeNote({
-            ...parsed,
-            id: newId,
-            sections: parsed.sections,
-          })
-          return { filename: noteFilename(newId, parsed.title), content: newContent }
+          const parsed = parseBundle(e.files)
+          const { files } = serializeNoteFolder({ ...parsed, id: newId })
+          return { dir: noteDirname(newId, parsed.title), files }
         }
-        return { filename: e.filename, content: e.content }
+        return { dir: e.dir, files: e.files }
       })
 
     const result = await window.noteflow.writeImportedNotes(toWrite)
@@ -522,7 +545,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
                 <p className="text-xs font-mono text-text truncate">{entry.parsedTitle || 'Untitled'}</p>
                 {entry.conflict !== 'none' && (
                   <p className="text-xs font-mono text-yellow-500/80 mt-0.5">
-                    ⚠ {entry.conflict === 'id' ? 'ID already exists' : 'Filename already exists'}
+                    ⚠ {entry.conflict === 'id' ? 'ID already exists' : 'Folder already exists'}
                   </p>
                 )}
               </div>

@@ -515,21 +515,42 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
   for (let i = 0; i < vCount; i++) { sx += posArr[i * 3]; sy += posArr[i * 3 + 1]; sz += posArr[i * 3 + 2] }
   const centroid: Vec3 = [sx / vCount, sy / vCount, sz / vCount]
 
+  // Shortest path weighted by EUCLIDEAN edge length (Dijkstra), not hop count. This lets a relation
+  // dive straight through the interior fill when that's geometrically shorter than skimming the
+  // densely-triangulated surface — far-apart notes cross the volume, near ones hug the surface.
+  // (A hop-count BFS always preferred the surface, since it has many more short edges.) Cached by
+  // the unordered {a,b} pair; the returned path is reversed by callers when they need a fixed start.
   const pathCache = new Map<number, number[] | null>()
   const pathBetween = (a: number, b: number): number[] | null => {
     if (a === b) return [a]
     const key = Math.min(a, b) * vCount + Math.max(a, b)
     const cached = pathCache.get(key)
     if (cached !== undefined) return cached
+    const dist = new Float64Array(vCount).fill(Infinity)
     const prev = new Int32Array(vCount).fill(-1)
-    const seen = new Uint8Array(vCount)
-    const queue = [a]; seen[a] = 1
-    let head = 0, found = false
-    while (head < queue.length) {
-      const cur = queue[head++]
+    const done = new Uint8Array(vCount)
+    dist[a] = 0
+    // Binary min-heap of vertex ids keyed by dist[] (lazy deletion via the done[] guard).
+    const heap: number[] = [a]
+    const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
+    const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
+    const siftDown = (i: number) => {
+      const n = heap.length
+      for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
+    }
+    let found = false
+    while (heap.length) {
+      const cur = heap[0]
+      const last = heap.pop()!
+      if (heap.length) { heap[0] = last; siftDown(0) }
+      if (done[cur]) continue
+      done[cur] = 1
       if (cur === b) { found = true; break }
+      const dcur = dist[cur]
       for (const nb of adjacency[cur]) {
-        if (!seen[nb]) { seen[nb] = 1; prev[nb] = cur; queue.push(nb) }
+        if (done[nb]) continue
+        const nd = dcur + Math.sqrt(dist2(cur, nb))
+        if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
       }
     }
     let path: number[] | null = null

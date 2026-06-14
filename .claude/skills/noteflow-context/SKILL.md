@@ -17,9 +17,9 @@ description: Contexto completo del proyecto NoteFlow — app de escritorio de no
 - **Rama principal:** `main`
 - **Directorio local:** raíz del repo clonado (la ruta absoluta varía por máquina).
 - **Versión actual:** ver `package.json` (`version`). Convención `vX.Y.Z`.
-- **Licencia:** `GPL-3.0-or-later` (GNU General Public License v3.0 — copyleft estándar). Antes fue
-  MIT y luego `FSL-1.1-Apache-2.0`. El `package.json` lleva el campo `license` y el
-  `PKGBUILD` usa `GPL-3.0-or-later`.
+- **Licencia:** `FSL-1.1-Apache-2.0` (Functional Source License — source-available; convierte a
+  Apache 2.0 el 2028-06-06). Antes era MIT. El `package.json` lleva el campo `license` y el
+  `PKGBUILD` usa `LicenseRef-FSL-1.1-Apache-2.0`.
 - **Skills hermanas:**
   - `noteflow-features` → funcionalidades, UI, UX, atajos (perspectiva de producto/usuario).
   - `noteflow-cli` → referencia completa del CLI companion.
@@ -48,7 +48,11 @@ noteflow/
 │   ├── main.ts          # Proceso principal: IPC, tray, ventanas, settings, alarmas,
 │   │                    #   auto-update, temp-notes, single-instance, fs.watch, sticky anim
 │   ├── preload.ts       # Bridge IPC expuesto al renderer como window.noteflow
-│   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull, cifrado token)
+│   ├── noteFormat.ts    # Formato v2 en el main (espejo de src/lib/noteUtils.ts):
+│   │                    #   parseNoteDir, serializeNoteFolder, listNoteDirs, parser legacy v1
+│   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
+│   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
+│   │                    #   Trees API, migración remota, cifrado token)
 │   └── ai/              # Índice semántico local ("El Cerebro" Fase 1)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
 │       ├── aiIndex.ts   #   Lifecycle del worker en el main (fork/respawn, debounce, API)
@@ -74,7 +78,7 @@ noteflow/
 │   │   └── aiStore.ts                # Estado de la IA (enabled, related, progreso) vía IPC ai:*
 │   ├── components/
 │   │   ├── Editor/
-│   │   │   ├── Editor.tsx               # Instancia TipTap, conversión md↔html
+│   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
 │   │   │   ├── NoteEditor.tsx           # Wrapper con tabs de secciones, atajos de fuente
 │   │   │   ├── EditorToolbar.tsx        # Toolbar de formato
 │   │   │   ├── DeadlineTaskItem.ts      # Extensión TipTap: task item con deadline+alarma
@@ -95,12 +99,23 @@ noteflow/
 │   │   ├── GroupOverview/
 │   │   │   └── GroupOverview.tsx        # Vista de grupo (sustituye editor): bandas por carpeta
 │   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
+│   │   ├── NoteOverview/
+│   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): una tarjeta por sección,
+│   │   │                                #   mini-mock del editor (título+fecha+toolbar+preview zoom)
 │   │   ├── Brain/                       # Vista cerebro ("El Cerebro" Fase 2 — grafo de notas)
-│   │   │   ├── BrainView.tsx            #   Orquestador full-screen + toolbar + CTA de activación IA
-│   │   │   ├── BrainCanvas.tsx          #   <canvas> 2D: dibujo, pan/zoom/drag, hover, click→navega
-│   │   │   ├── useBrainGraph.ts         #   Modelo: nodos (grupo/carpeta/nota) + 2 capas de aristas
-│   │   │   ├── useForceLayout.ts        #   Simulación d3-force (estructura firme + contenido débil)
-│   │   │   └── brainColors.ts           #   Resuelve CSS vars del tema → RGB para el canvas
+│   │   │   ├── BrainView.tsx            #   Orquestador full-screen + toolbar + CTA de activación IA;
+│   │   │   │                            #     ELIGE el render: 3D si hay WebGL, si no fallback 2D
+│   │   │   ├── BrainScene.tsx           #   *** RENDER POR DEFECTO *** — cerebro 3D inmersivo
+│   │   │   │                            #     (three.js: wireframe + bloom + orbit/zoom + impulsos)
+│   │   │   ├── brainMesh.ts             #   Malla 3D procedural del cerebro (icosphere deformada +
+│   │   │   │                            #     relleno interior + cerebelo + tronco; edges/BFS path)
+│   │   │   ├── assignVertices.ts        #   Asigna cada nodo del grafo a un vértice de la malla 3D
+│   │   │   ├── tunerState.ts            #   Params de forma/look del 3D (DEFAULT_LOOK, persistencia)
+│   │   │   ├── BrainTuner.tsx           #   Panel dev de escultura de la forma 3D (SHOW_TUNER=false)
+│   │   │   ├── BrainCanvas.tsx          #   FALLBACK 2D (sin WebGL): <canvas> + d3-force, pan/zoom/drag
+│   │   │   ├── useBrainGraph.ts         #   Modelo compartido: nodos (grupo/carpeta/nota/sección) + 2 capas de aristas
+│   │   │   ├── useForceLayout.ts        #   Simulación d3-force del fallback 2D (estructura + contenido)
+│   │   │   └── brainColors.ts           #   Resuelve CSS vars del tema → RGB (lo usan 2D y 3D)
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless)
 │   │   ├── TitleBarMenu.tsx            # Menú desplegable del titlebar
@@ -113,11 +128,14 @@ noteflow/
 │   │   ├── GitHubSyncModal.tsx         # UI conectar/desconectar GitHub, status, pull
 │   │   └── StickyApp.tsx               # Ventana sticky flotante (fold/unfold)
 │   ├── lib/
-│   │   ├── noteUtils.ts          # parseNote, serializeNote, extractTags, default title…
+│   │   ├── noteUtils.ts          # parseNoteFolder, serializeNoteFolder, buildNoteWritePayload,
+│   │   │                         #   noteFingerprint, noteDirname, extractTags, default title…
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines para programarlas
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 colores)
+│   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
+│   │   │                         #   usado por el editor TipTap y el preview de NoteOverview
 │   │   └── themes.ts             # Definición de los 12 temas (CSS vars)
 │   └── types/
 │       └── index.ts             # Tipos TS + declaración global window.noteflow
@@ -155,12 +173,10 @@ Renderer (React)
 
 | Canal | Tipo | Descripción |
 |---|---|---|
-| `fs:read-all-notes` | handle | Lee TODAS las notas en una sola llamada (batch, con reintentos) |
-| `fs:list-notes` | handle | Lista metadatos de archivos `.md` |
-| `fs:read-note` | handle | Lee un archivo concreto (path saneado) |
-| `fs:write-note` | handle | Escribe nota + broadcast + schedulePush a GitHub |
-| `fs:delete-note` | handle | Borra nota + broadcast + scheduleDelete en GitHub |
-| `fs:rename-note` | handle | Renombra archivo |
+| `fs:read-all-notes` | handle | Lee TODAS las carpetas de nota en una llamada → `NoteDirRecord[]` (`{dir,path,noteMd,sections:[{file,content}]}`; batch, con reintentos) |
+| `fs:read-note-dir` | handle | Lee UNA carpeta de nota → `NoteDirRecord \| null` (usado por syncNote) |
+| `fs:write-note` | handle | Escritura multi-archivo de una carpeta: `{dir, files, deleteFiles}` (note.md primero) + 1 broadcast + schedulePush por archivo + scheduleIndex |
+| `fs:delete-note` | handle | Borra la carpeta entera (rmSync recursivo) + broadcast + scheduleDeleteDir en GitHub |
 | `fs:notes-dir` | handle | Devuelve ruta del dir de notas |
 | `app:open-notes-folder` | handle | Abre la carpeta en el explorador |
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
@@ -211,7 +227,8 @@ Renderer (React)
 | Linux | `~/.local/share/noteflow-notes/` (XDG; migración automática desde `~/noteflow-notes` y `~/scratch-notes`) |
 
 Contenido del dir de notas:
-- `*.md` — una nota por archivo.
+- `<slug>-<id>/` — **una carpeta por nota** (`note.md` + un `.md` por sección; ver "Formato").
+- `.noteflow-format` — marcador de versión del formato (`2`).
 - `groups.json` — definición de grupos (`{id,name,color,order,archived?}`; `archived?` oculta el
   grupo y sus notas salvo con "Show archived").
 - `folders.json` — definición de carpetas (subcarpetas de grupos).
@@ -252,39 +269,49 @@ Estructura de `settings.json`:
 > **Importante:** grupos/carpetas/colores de sección NO están en `settings.json` — están en
 > archivos JSON dentro del dir de notas para poder sincronizarse entre dispositivos.
 
-## Formato de archivos de nota
+## Formato de archivos de nota (v2 — carpeta por nota)
 
-El cuerpo tras el frontmatter es **el contenido de la primera sección** (legible en editores
-externos). El resto de secciones viven solo en el frontmatter. Fuente de verdad:
-`src/lib/noteUtils.ts` (`parseNote` / `serializeNote`).
+Cada nota es un **directorio** `<slug>-<id>/` (nombre congelado al crear; cambiar el título NO
+renombra la carpeta). Dentro: `note.md` (**solo frontmatter**: metadatos + índice de secciones)
+y **un `.md` por sección** (`<sectionId>.md`, markdown puro sin frontmatter — editable con
+cualquier editor externo, diffs de git limpios). Fuente de verdad: `src/lib/noteUtils.ts`
+(`parseNoteFolder` / `serializeNoteFolder` / `buildNoteWritePayload`), **espejado** en
+`electron/noteFormat.ts` para main/worker y en `cli/noteflow.js` — mantener los tres en sync.
 
+```
+mi-nota-abc12345/
+  note.md       ← ancla de metadatos (frontmatter only)
+  sec001.md     ← cuerpo de la sección "Note"
+  sec002.md     ← cuerpo de la sección "Tasks"
+```
+
+`note.md`:
 ```markdown
 ---
 id: abc12345
 title: "Mi nota"
 tags: [javascript, react]
 created: 2026-01-01T00:00:00.000Z
-updated: 2026-01-02T00:00:00.000Z
+updated: 2026-01-02T00:00:00.000Z   # timestamp CANÓNICO de conflicto para TODA la nota
+formatVersion: 2
 group: grp001        # opcional — id de NoteGroup
 folder: fld001       # opcional — id de NoteFolder (requiere group)
 expiresAt: 2026-01-03T00:00:00.000Z   # opcional — nota temporal (autoborrado)
 sections:
   - id: sec001
     name: Note
-    content: |
-      Contenido de la primera sección
+    file: sec001.md
     isRawMode: true   # true = markdown/raw, false/ausente = rich text (TipTap HTML)
   - id: sec002
     name: Tasks
-    content: |
-      - [ ] tarea pendiente
+    file: sec002.md
 archived: true    # solo presente si true
 favorited: true   # solo presente si true
 ---
-Contenido de la primera sección
 ```
 
-Notas **cifradas** no llevan `sections` legibles; en su lugar:
+Notas **cifradas**: la carpeta contiene **solo `note.md`** (sin secciones en claro); el
+frontmatter lleva el bloque `encryption` de siempre:
 ```yaml
 encryption:
   alg: aes-256-gcm+pbkdf2
@@ -295,9 +322,31 @@ encryption:
   hashAlg: SHA-256     # omitido si es el default
 ```
 
-- Título por defecto de una nota nueva: `DD/MM/YYYY`.
-- Sección por defecto: una sola llamada `Note` en modo raw.
+- Marcador de versión: `<notesDir>/.noteflow-format` (contenido `2`).
+- En memoria el `Note` sigue hidratado (`sections[].content`); `Note.filePath` = **directorio**;
+  `Note.raw` = contenido de `note.md`. La UI (editor, sidebar, stickies) no cambió.
+- Título por defecto: `DD/MM/YYYY`. Sección por defecto: `Note` en raw.
 - Tags se extraen del contenido con `#nombre` (`extractTags`).
+- `NOTEFLOW_NOTES_DIR` (env) redirige el dir de notas en app y CLI (testing/scripting).
+- Los parsers toleran BOM UTF-8 (editores externos como Notepad lo añaden).
+
+### Migración v1 → v2
+- **Local** (`electron/migration.ts` → `migrateNotesDirToV2`): corre al arrancar, ANTES del pull
+  inicial y del watcher. Convierte cada `<slug>-<id>.md` plano de la raíz en carpeta (parser
+  legacy v1: sections inline / claves `section_*` / cuerpo plano), **preservando `updated`**,
+  con write→verify→unlink. Idempotente (re-absorbe planos sueltos aunque exista el marcador).
+  El CLI tiene `noteflow migrate` (local + remoto). Tras migrar, si la IA está activa se
+  programa un `reindexAll` (los `file_path` del índice quedaron obsoletos).
+- **Remota** (`githubSync.migrateRemoteToV2IfNeeded`): guardada por
+  `settings.githubSync.remoteFormatMigratedAt` + pull inicial OK; disparada desde el arranque,
+  `sync:pull` manual y al conectar. Importa los planos remotos que falten o sean más nuevos que
+  la carpeta local, hace `pushAllNotes`, borra los planos del remoto y sube el marcador
+  `.noteflow-format` AL FINAL. Mientras el remoto siga en v1 (planos y sin marcador), el pull es
+  **solo aditivo** (borrados deshabilitados) para no perder carpetas recién migradas.
+- **Orden de despliegue:** actualizar TODOS los clientes (desktop, CLI, móvil) antes de migrar;
+  un cliente v1 que escriba después re-crearía archivos planos (la migración los re-absorbe en
+  el siguiente arranque, pero mejor evitarlo).
+- Smoke test: `node scripts/format-migration-smoke.cjs` (migración + round-trip, sin Electron).
 
 ## Patrones y decisiones de arquitectura
 
@@ -314,6 +363,23 @@ para reorganizar por drag&drop. La navegación a una sección concreta usa `pend
 + un `noteflow:request-section` diferido con `setTimeout(0)` (el editor monta tras cerrar la vista;
 bajo StrictMode el efecto de montaje consume el `pending` dos veces, de ahí el re-aviso por evento).
 El ancho de tarjeta se guarda en `localStorage` (`noteflow:group-view-card-width`). Sin IPC nuevo.
+
+### Vista de nota (note overview)
+`notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es la **tercera vista full-area
+mutuamente excluyente** con la group overview y la brain view: los tres setters (`setGroupView`,
+`setNoteView`, `setBrainView`) y `setActiveNote` se limpian entre sí, así que abrir una cierra las
+otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
+misma prioridad de routing (brain → group → note → editor). **Entradas:** botón en la toolbar de
+`NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual del sidebar. Una
+**tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título+`created` de la
+nota, una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
+`htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
+CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. Click en una tarjeta navega a esa
+sección con el mismo baile `pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de
+tarjeta **fijo** (sin slider). Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC
+nuevo. **Nota CSS:** el reset global `button { border: none }` deja `border-style: none`, así que las
+tarjetas usan `border-solid` explícito para que el borde se vea (la utilidad `border` de Tailwind
+solo fija el ancho).
 
 ### Grupos archivados
 `NoteGroup.archived?` (en `groups.json`, vía `toggleGroupArchived` en `groupsStore`). Cuando
@@ -357,17 +423,31 @@ en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
   `github.com/login/device`. Client ID `Ov23liut9QOJ2pJFF0KR` (público por diseño).
 - **Token:** `safeStorage.encryptString()` (cifrado a nivel OS) con fallback a base64, en
   `settings.json`.
-- **Push:** `schedulePush(filePath, content, onStart?, onEnd?)` — debounce ~3s por archivo;
-  llamado desde `fs:write-note`, `groups:set`, `folders:set`, `section-colors:set`, `note-order:set`. Los
-  callbacks alimentan `pendingPushFiles` → evento `sync:push-state` (indicador de subida).
-- **Pull:** `pullNotes(notesDir)` — compara `updated:` del frontmatter; solo sobreescribe si el
-  remoto es más nuevo. Devuelve `{ pulled, deleted, updatedFiles, hadDeletions, hadMetadataChanges }`.
-  Se ejecuta al arrancar (bloqueante hasta 10s en modo startup) y vía `sync:pull`.
+- **Modelo de rutas:** el remoto espeja el local — `<dir>/note.md`, `<dir>/<secId>.md`; los json
+  de metadatos y README en la raíz. Las rutas relativas se codifican **por segmento**
+  (`encodeRemotePath`). Push/delete por archivo siguen usando la **Contents API** (acepta rutas
+  con `/`); el **listado** usa la **Git Trees API** (`GET /git/trees/{branch}?recursive=1`,
+  `default_branch` cacheado).
+- **Push:** `schedulePush(relPath, content, onStart?, onEnd?)` — debounce 5s **keyed por ruta
+  relativa** (dos archivos de la misma nota debouncen independientes); llamado desde
+  `fs:write-note` (por cada archivo escrito), `groups:set`, `folders:set`, `section-colors:set`,
+  `note-order:set`. Los callbacks alimentan `pendingPushFiles` → evento `sync:push-state`.
+- **Pull:** `pullNotes(notesDir)` — agrupa los blobs del árbol por carpeta de nota; la **carpeta
+  es la unidad de conflicto**: compara `updated:` de `note.md` y si el remoto es más nuevo
+  escribe la carpeta ENTERA (y borra secciones locales que ya no existan en remoto). Borrado de
+  notas a nivel carpeta con la regla de seguridad de siempre (`updated <= lastSync`), y **solo
+  si el remoto es v2** (marcador presente y sin planos) — guard de transición. `updatedFiles`
+  lleva paths de DIRECTORIOS.
+- **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
+  **note-order.json** (los dos en negrita se pusheaban pero NO se pulleaban — bug arreglado con
+  el cambio de formato).
 - **Autosync:** pull cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado.
-- **Delete:** `scheduleDelete(filePath)` — cancela push pendiente y elimina en GitHub.
+- **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
+  árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
-- **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito,
-  para no sobreescribir el remoto con datos locales obsoletos.
+- **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
+  `flushPendingLocalChanges` re-encola la carpeta entera cuando `note.md updated > lastSync`.
+- **Migración remota:** `migrateRemoteToV2IfNeeded(notesDir)` — ver "Migración v1 → v2".
 
 ### Motor de alarmas y notas temporales (en main)
 `setInterval` cada 60s ejecuta `checkAlarms()` + `checkExpiredNotes()`:
@@ -437,8 +517,10 @@ se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Rela
 - **Modelo por defecto:** `Xenova/paraphrase-multilingual-mpnet-base-v2` (768-d), elegido por
   benchmark sobre las notas reales (ES+EN+código). Se descarga en el primer uso a
   `userData/ai-models`. Alternativa rápida: `paraphrase-multilingual-MiniLM-L12-v2` (384-d).
-- **Indexado incremental:** enganchado a `fs:write-note` (`aiIndex.scheduleIndex`, debounce 2.5s)
-  y `fs:delete-note` (`removeFromIndex`); hash por sección para no re-embeber lo que no cambió.
+- **Indexado incremental:** enganchado a `fs:write-note` (`aiIndex.scheduleIndex(dirPath)`,
+  debounce 2.5s, una vez por nota) y `fs:delete-note` (`removeFromIndex(dirPath)`). El worker
+  **lee la carpeta de la nota desde disco** (`noteFormat.parseNoteDir`); `notes.file_path` en la
+  DB guarda el path del DIRECTORIO. Hash por sección para no re-embeber lo que no cambió.
   `stripNoise` quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
 - **related (por sección activa):** centroides por sección → **centrado por la media global**
   (corrige anisotropía) → coseno → de otras notas la mejor por nota, hermanas de la misma nota
@@ -450,11 +532,22 @@ se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Rela
   `useSidebarGroups`. Consumido por `aiStore.fetchGraphEdges` → `useBrainGraph`.
 - **Vista cerebro (`src/components/Brain/`):** modo full-screen conmutable (botón "Cerebro" en el
   TitleBar → `notesStore.brainViewOpen`, espejo de `groupViewId`; sustituye el editor en `App.tsx`,
-  `setActiveNote` lo cierra). Render `d3-force` (layout) + `<canvas>` 2D propio (pan/zoom/drag/hover,
-  click en nota → `openSection` con el baile `pendingInitialSectionId`+`noteflow:request-section`).
-  Dos capas de aristas: estructura sólida (color de grupo) + contenido tenue (resaltada al
-  seleccionar/hover, con toggle). Excluye notas archivadas/cifradas/temporales. Smoke headless:
-  `scripts/ai-graph-smoke.cjs`.
+  `setActiveNote` lo cierra). **`BrainView` elige el render según WebGL** (`detectWebGL()`):
+  - **`BrainScene.tsx` (3D, POR DEFECTO — Fase 2.5):** cerebro inmersivo con **three.js**
+    (`WebGLRenderer` + `EffectComposer`/`UnrealBloomPass` + `OrbitControls`). La forma es una malla
+    procedural (`brainMesh.ts`: icosphere deformada + relleno interior + cerebelo + tronco); cada
+    nodo del grafo se fija a un vértice (`assignVertices.ts`). Capas: wireframe tenue (vértices=dots,
+    aristas), estructura grupo→carpeta→nota y dendritas nota→sección (líneas), sinapsis de contenido
+    nota↔nota (ruteadas por la malla), nodos (dot + anillo de color) y labels HTML proyectados. Look
+    en `tunerState.ts` (`DEFAULT_LOOK`: bloom, `wireOpacity`, `dotOpacity`, fog…). Impulsos eléctricos:
+    pulso único en hover (nodo→relacionada) + chispas ambientales aleatorias por el wireframe.
+    `BrainTuner.tsx` es un panel dev de escultura (`SHOW_TUNER=false`). Click en nota → fly-in +
+    `openSection`. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`.
+  - **`BrainCanvas.tsx` (2D, FALLBACK sin WebGL):** `<canvas>` 2D propio + `d3-force`
+    (`useForceLayout.ts`) con pan/zoom/drag/hover.
+  Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de
+  grupo) + contenido tenue (resaltada al seleccionar/hover, con toggle). Excluye notas
+  archivadas/cifradas/temporales. Smoke headless: `scripts/ai-graph-smoke.cjs`.
 - **Activación:** flag `settings.ai.enabled` (default `false`). **UI definitiva de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
   desde ahí descarga el modelo + reindexa con barra de progreso). Queda además el toggle temporal
@@ -463,11 +556,13 @@ se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Rela
   binarios nativos. `package.json` lleva **`"postinstall": "electron-builder install-app-deps"`**
   (recompila para el ABI de Electron tras cada `npm install`) y entradas en **`build.asarUnpack`**.
   Si el worker sale con "exited before init (code 1)": `npx @electron/rebuild -f -o better-sqlite3`.
-- **Deps de la Fase 2:** `d3-force` (+ `@types/d3-force`) — JS puro, sin binario nativo (no toca
-  `asarUnpack` ni el `postinstall`).
+- **Deps de la Fase 2:** `three` (+ `@types/three`) para el render 3D por defecto (`BrainScene`,
+  lazy-loaded → chunk propio) y `d3-force` (+ `@types/d3-force`) para el fallback 2D. Ambas JS puro,
+  sin binario nativo (no tocan `asarUnpack` ni el `postinstall`).
 - **Scripts (`scripts/`):** `ai-smoke.cjs` (test e2e headless related/search), `ai-graph-smoke.cjs`
   (test del grafo: clusters por contenido), `ai-inspect.cjs` (inspecciona la DB real), `ai-bench.cjs`
-  (benchmark de modelos → `scripts/bench-out/REPORT.md`). Ejecutar con
+  (benchmark de modelos → `scripts/bench-out/REPORT.md`), `format-migration-smoke.cjs` (migración
+  v1→v2 + round-trip del formato; corre con `node`, sin Electron). Los de IA se ejecutan con
   `unset ELECTRON_RUN_AS_NODE; npx electron scripts/ai-smoke.cjs`.
 - **Pendiente:** probar el **build empaquetado** (`npm run dist`) en Win/Linux — validar que
   `asarUnpack` y la descarga del modelo funcionan en el instalado (NO verificado aún). Fase 2:
@@ -550,7 +645,7 @@ Se dispara con tags `v*`. Dos jobs:
   `noteflow` en `/usr/local/bin`.
 - **Linux (Arch/CachyOS/Manjaro):** `noteflow-X.Y.Z-x86_64.pkg.tar.zst` (target `pacman` de
   electron-builder). Hay además un `PKGBUILD` en la raíz para build manual/AUR (usa `electron` del
-  sistema y `NOTEFLOW_NATIVE=1`); licencia `GPL-3.0-or-later`.
+  sistema y `NOTEFLOW_NATIVE=1`); licencia `LicenseRef-FSL-1.1-Apache-2.0`.
 - **Linux (universal):** `NoteFlow-X.Y.Z-x86_64.AppImage` — funciona en cualquier distro.
 - Salida: `release/`.
 

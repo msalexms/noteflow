@@ -10,7 +10,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3,
-  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
@@ -51,9 +51,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     return s.notes.find((n) => n.id === targetId) ?? null
   })
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
+  const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
+  const archiveNote = useNotesStore((s) => s.archiveNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
+  const encryptNote = useNotesStore((s) => s.encryptNote)
+  const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
   const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
@@ -96,6 +100,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null)
   const [sectionColorPickerId, setSectionColorPickerId] = useState<string | null>(null)
   const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
+  const [sectionMenuOpen, setSectionMenuOpen] = useState(false)
+  const [encryptModalMode, setEncryptModalMode] = useState<'encrypt' | 'remove' | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
@@ -147,7 +153,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   }, [])
 
   useEffect(() => {
-    const close = () => setSectionColorPickerId(null)
+    const close = () => { setSectionColorPickerId(null); setSectionMenuOpen(false) }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
@@ -829,6 +835,22 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         />
       )}
 
+      {encryptModalMode && (
+        <EncryptionModal
+          mode={encryptModalMode}
+          noteTitle={note.title}
+          onConfirm={async (password, options) => {
+            if (encryptModalMode === 'encrypt') {
+              await encryptNote(note.id, password, options)
+            } else {
+              await removeNoteEncryption(note.id, password)
+            }
+            setEncryptModalMode(null)
+          }}
+          onCancel={() => setEncryptModalMode(null)}
+        />
+      )}
+
       <div
         className="flex flex-col h-full"
         onMouseDownCapture={() => {
@@ -966,37 +988,15 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             </button>
           )}
 
-          <div className="self-center w-px h-4 bg-border flex-shrink-0" />
+          <div className="self-center w-px h-4 bg-border flex-shrink-0 mx-1.5" />
 
-          <div className="flex items-center gap-0.5 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button
-              onClick={handleRawToggle}
-              title={rawMode ? 'Editor mode (Markdown view)' : 'Raw markdown mode'}
-              className={`p-1.5 rounded text-xs transition-colors
-                ${rawMode
-                  ? 'text-text bg-surface-3 border border-text/20'
-                  : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
-                }`}
-            >
-              {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
-            </button>
-            <button
-              onClick={handleCopyAllText}
-              title="Copy section text to clipboard"
+              onClick={() => setNoteView(note.id)}
+              title="Note overview — all sections at a glance"
               className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
-              <Copy size={13} />
-            </button>
-            <button
-              onClick={() => {
-                if (window.noteflow?.openSticky && activeSection?.id) {
-                  window.noteflow.openSticky(note.id, activeSection.id)
-                }
-              }}
-              title="Pop out section as Sticky Note"
-              className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
-            >
-              <ExternalLink size={13} />
+              <LayoutGrid size={13} />
             </button>
             <button
               onClick={() => updateNote(note.id, { favorited: !note.favorited })}
@@ -1006,13 +1006,85 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             >
               <Star size={13} />
             </button>
-            <button
-              onClick={openDeleteNoteModal}
-              title="Delete note (Del)"
-              className="p-1.5 rounded text-xs text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-            >
-              <Trash2 size={13} />
-            </button>
+            <div className="relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); setSectionMenuOpen((prev) => !prev) }}
+                title="Section options"
+                className={`p-1.5 rounded text-xs transition-colors
+                  ${sectionMenuOpen
+                    ? 'text-text bg-surface-3 border border-text/20'
+                    : 'text-text-muted hover:text-text hover:bg-surface-3 border border-transparent'
+                  }`}
+              >
+                <MoreHorizontal size={13} />
+              </button>
+              {sectionMenuOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 bg-surface-1 border border-border rounded shadow-lg z-50 py-1 min-w-[180px]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => { handleRawToggle(); setSectionMenuOpen(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                  >
+                    {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
+                    {rawMode ? 'Editor mode' : 'Raw markdown mode'}
+                  </button>
+                  <button
+                    onClick={() => { handleCopyAllText(); setSectionMenuOpen(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                  >
+                    <Copy size={13} />
+                    Copy section text
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.noteflow?.openSticky && activeSection?.id) {
+                        window.noteflow.openSticky(note.id, activeSection.id)
+                      }
+                      setSectionMenuOpen(false)
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                  >
+                    <ExternalLink size={13} />
+                    Open as sticky note
+                  </button>
+                  <button
+                    onClick={() => { setSectionMenuOpen(false); void archiveNote(note.id) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                  >
+                    <Archive size={13} />
+                    {note.archived ? 'Unarchive note' : 'Archive note'}
+                  </button>
+                  {!note.encryption && (
+                    <button
+                      onClick={() => { setSectionMenuOpen(false); setEncryptModalMode('encrypt') }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <Lock size={13} />
+                      Encrypt note
+                    </button>
+                  )}
+                  {note.encryption && sessionPasswords[note.id] && (
+                    <button
+                      onClick={() => { setSectionMenuOpen(false); setEncryptModalMode('remove') }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <Lock size={13} />
+                      Remove encryption
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    onClick={() => { setSectionMenuOpen(false); openDeleteNoteModal() }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 transition-colors text-left"
+                  >
+                    <Trash2 size={13} />
+                    Delete note
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

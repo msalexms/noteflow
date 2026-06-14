@@ -32,9 +32,19 @@ Node.js ≥ 18. Sin dependencias npm.
 
 ---
 
-## Formato de nota
+## Formato de nota (v2 — carpeta por nota)
 
-Cada nota es un archivo `.md` con YAML frontmatter:
+Cada nota es un **directorio** `<slug>-<id>/` con un `note.md` (solo frontmatter:
+metadatos + índice de secciones) y **un `.md` por sección** (markdown puro):
+
+```
+proyecto-alpha-abc12345/
+  note.md       ← ancla de metadatos
+  sec001.md     ← cuerpo de la sección "Note"
+  sec002.md     ← cuerpo de la sección "Tasks"
+```
+
+`note.md`:
 
 ```
 ---
@@ -43,22 +53,27 @@ title: "31-03-2026"
 tags: ["urgent", "backend"]
 created: "2026-03-31T10:00:00.000Z"
 updated: "2026-03-31T10:05:00.000Z"
+formatVersion: 2
 sections:
   - id: "sec001"
     name: "Note"
-    content: "texto aquí"
+    file: "sec001.md"
     isRawMode: true
   - id: "sec002"
     name: "Tasks"
-    content: "- [ ] tarea pendiente"
+    file: "sec002.md"
     isRawMode: true
 ---
-texto aquí
 ```
 
-- El cuerpo tras `---` es siempre el contenido de la primera sección (para legibilidad externa).
+- El contenido de cada sección vive en su archivo `<sectionId>.md` (sin frontmatter).
+- `updated:` de `note.md` es el timestamp canónico de sincronización de toda la nota.
 - `isRawMode: true` = modo markdown/raw. `false` = modo rich text (TipTap HTML).
-- Notas con `encryption:` en el frontmatter están cifradas — el CLI las ignora.
+- Notas con `encryption:` en `note.md` están cifradas (la carpeta solo contiene
+  `note.md`) — el CLI las ignora.
+- El marcador `.noteflow-format` (contenido `2`) en la raíz indica el formato v2.
+- La variable de entorno `NOTEFLOW_NOTES_DIR` permite apuntar a otro directorio
+  (scripting / testing).
 
 ---
 
@@ -101,7 +116,7 @@ noteflow new <título> [opciones]
 |---|---|
 | `--section <nombre>` | Nombre de la primera sección. Default: `Note` |
 | `--group <nombre>` | Asignar a un grupo |
-| `--json` | Devuelve `{ id, title, filename }` en JSON |
+| `--json` | Devuelve `{ id, title, dirname }` en JSON |
 
 ```bash
 noteflow new "Proyecto Alpha"
@@ -126,7 +141,7 @@ Muestra notas ordenadas por `updated` desc. Por defecto excluye archivadas.
 | `--archived` | Incluir notas archivadas |
 | `--json` | Array JSON con metadata completa de cada nota |
 
-Cada elemento del JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `pinned`, `sections` (array de nombres), `filename`.
+Cada elemento del JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `favorited`, `sections` (array de nombres), `dirname`.
 
 ```bash
 noteflow list
@@ -150,7 +165,7 @@ El título puede ser parcial — si hay varios matches, muestra la lista y pide 
 | `--section <nombre>` | Mostrar solo esta sección |
 | `--json` | JSON completo con todas las secciones y su contenido |
 
-El JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `pinned`, `sections[]` (con `id`, `name`, `content`, `isRawMode`), `filename`.
+El JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `favorited`, `sections[]` (con `id`, `name`, `content`, `isRawMode`), `dirname`.
 
 ```bash
 noteflow get "Proyecto Alpha"
@@ -197,7 +212,7 @@ noteflow delete "Borrador temporal" --yes
 noteflow rename <título-actual> <nuevo-título>
 ```
 
-Actualiza el campo `title` del frontmatter. El nombre de archivo no cambia (contiene el id).
+Actualiza el campo `title` de `note.md`. El nombre de la carpeta no cambia (contiene el id).
 
 ```bash
 noteflow rename "Reunión" "Reunión con cliente - Q2"
@@ -296,6 +311,18 @@ noteflow update   # alias
 
 Solo sobreescribe si el `updated:` remoto es más reciente que el local.
 
+### `migrate` — Migración única al formato v2
+
+```bash
+noteflow migrate
+```
+
+Convierte las notas planas v1 (`<slug>-<id>.md` en la raíz) al formato carpeta v2
+(`<slug>-<id>/note.md` + un `.md` por sección), escribe el marcador
+`.noteflow-format` y, si hay sync con token accesible, sube el nuevo layout y
+elimina los archivos planos del remoto. Idempotente. La app de escritorio ejecuta
+la misma migración local automáticamente al arrancar.
+
 ### `self-update` — Actualizar el CLI
 
 ```bash
@@ -347,7 +374,7 @@ noteflow list --json
 # Leer contenido de una nota específica
 noteflow get "Proyecto Alpha" --json
 
-# Crear nota y capturar el id/filename
+# Crear nota y capturar el id/dirname
 noteflow new "Auto-note" --json
 
 # Verificar estado del sync antes de operar
@@ -377,6 +404,7 @@ noteflow push
 ## Notas importantes
 
 - El CLI **no puede descifrar** tokens guardados por la app de escritorio con `safeStorage` de Electron. Requiere su propio `login`.
-- Notas encriptadas (`encryption:` en frontmatter) se **ignoran** en todos los comandos de lectura.
+- Notas encriptadas (`encryption:` en `note.md`) se **ignoran** en todos los comandos de lectura.
+- `NOTEFLOW_NOTES_DIR` (variable de entorno) redirige el directorio de notas — útil para scripts y tests.
 - El auto-sync de la app desktop (cada 5 min) puede sobreescribir cambios locales del CLI si ambos corren simultáneamente y el token de la app tiene acceso a GitHub.
 - `noteflow help <comando>` muestra ayuda detallada de un comando concreto.

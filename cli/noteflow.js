@@ -15,11 +15,20 @@ const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
 const GROUP_COLORS = ['--accent', '--accent-2', '--red', '--cyan', '--purple', '--text', '--orange', '--pink']
 
+// On-disk format v2: one DIRECTORY per note ('<slug>-<id>/') containing a
+// frontmatter-only note.md (metadata + section index) plus one '<secId>.md'
+// per section (plain markdown body). Mirrors the desktop app's format.
+const NOTE_MD = 'note.md'
+const FORMAT_VERSION = 2
+const FORMAT_MARKER = '.noteflow-format'
+const METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json']
+
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-const NOTES_DIR = process.platform === 'linux'
+// NOTEFLOW_NOTES_DIR overrides the default location (scripting / testing)
+const NOTES_DIR = process.env.NOTEFLOW_NOTES_DIR || (process.platform === 'linux'
   ? path.join(os.homedir(), '.local', 'share', 'noteflow-notes')
-  : path.join(os.homedir(), 'noteflow-notes')
+  : path.join(os.homedir(), 'noteflow-notes'))
 
 function getSettingsDir() {
   if (process.platform === 'win32')
@@ -44,9 +53,9 @@ function getTodayTitle() {
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`
 }
 
-function noteFilename(id, title) {
+function noteDirname(id, title) {
   const slug = title.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 40)
-  return `${slug ? slug + '-' : ''}${id}.md`
+  return `${slug ? slug + '-' : ''}${id}`
 }
 
 function out(msg) { console.log(msg) }
@@ -98,7 +107,8 @@ function findGroup(nameOrId) {
 // ── YAML parser ───────────────────────────────────────────────────────────────
 
 function splitFrontmatter(raw) {
-  const s = raw.replace(/\r\n/g, '\n')
+  // Strip UTF-8 BOM (external editors like Notepad may add it)
+  const s = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
   if (!s.startsWith('---\n')) return { frontmatter: '', body: s }
   const end = s.indexOf('\n---\n', 4)
   if (end === -1) return { frontmatter: '', body: s }
@@ -177,54 +187,81 @@ function parseNoteYaml(yamlStr) {
   return note
 }
 
-// ── YAML serializer ───────────────────────────────────────────────────────────
+// ── YAML serializer (format v2: frontmatter-only note.md + section files) ────
 
-function serializeNote(note) {
+function serializeNoteMd(note, opts = {}) {
   let y = ''
   y += `id: ${q(note.id)}\n`
   y += `title: ${q(note.title)}\n`
   y += `tags: [${(note.tags || []).map(q).join(', ')}]\n`
   y += `created: ${q(note.created)}\n`
-  y += `updated: ${q(note.updated)}\n`
+  y += `updated: ${q(opts.preserveUpdated ? note.updated : new Date().toISOString())}\n`
+  y += `formatVersion: ${FORMAT_VERSION}\n`
   y += 'sections:\n'
   for (const s of note.sections) {
     y += `  - id: ${q(s.id)}\n`
     y += `    name: ${q(s.name)}\n`
-    const c = s.content || ''
-    if (c === '') {
-      y += '    content: ""\n'
-    } else if (c.includes('\n')) {
-      const hasTrailing = c.endsWith('\n')
-      const contentLines = hasTrailing ? c.slice(0, -1).split('\n') : c.split('\n')
-      y += `    content: ${hasTrailing ? '|' : '|-'}\n`
-      for (const line of contentLines) y += '      ' + line + '\n'
-    } else {
-      y += `    content: ${q(c)}\n`
-    }
+    y += `    file: ${q(s.id + '.md')}\n`
     if (s.isRawMode) y += '    isRawMode: true\n'
   }
   if (note.archived)   y += 'archived: true\n'
   if (note.favorited)  y += 'favorited: true\n'
   if (note.group)    y += `group: ${q(note.group)}\n`
-  const body = note.sections[0]?.content || ''
-  return `---\n${y}---\n${body}`
+  if (note.folder)   y += `folder: ${q(note.folder)}\n`
+  return `---\n${y}---\n`
 }
 
-// ── Note file helpers ─────────────────────────────────────────────────────────
+// ── Note folder helpers ───────────────────────────────────────────────────────
+
+/** Reads one note directory; returns null if it isn't a note dir or is encrypted. */
+function readNoteFolder(dirname) {
+  const dirPath = path.join(NOTES_DIR, dirname)
+  const anchorPath = path.join(dirPath, NOTE_MD)
+  let raw
+  try { raw = fs.readFileSync(anchorPath, 'utf-8') } catch { return null }
+  const { frontmatter } = splitFrontmatter(raw)
+  const note = parseNoteYaml(frontmatter)
+  if (note.encryption) return null
+  for (const s of note.sections) {
+    const file = s.file || `${s.id}.md`
+    try { s.content = fs.readFileSync(path.join(dirPath, path.basename(file)), 'utf-8').replace(/\r\n/g, '\n') }
+    catch { s.content = '' }
+  }
+  return { ...note, filePath: dirPath, dirname, raw }
+}
 
 function loadAllNotes() {
   if (!fs.existsSync(NOTES_DIR)) return []
-  return fs.readdirSync(NOTES_DIR)
-    .filter(f => f.endsWith('.md'))
-    .map(f => {
-      const filePath = path.join(NOTES_DIR, f)
-      const raw = fs.readFileSync(filePath, 'utf-8')
-      if (raw.includes('encryption:')) return null
-      const { frontmatter } = splitFrontmatter(raw)
-      const note = parseNoteYaml(frontmatter)
-      return { ...note, filePath, filename: f, raw }
-    })
+  return fs.readdirSync(NOTES_DIR, { withFileTypes: true })
+    .filter(e => e.isDirectory() && fs.existsSync(path.join(NOTES_DIR, e.name, NOTE_MD)))
+    .map(e => readNoteFolder(e.name))
     .filter(Boolean)
+}
+
+/**
+ * Writes a note folder: note.md + one '<secId>.md' per section, removing
+ * section files that no longer belong. Returns the relative file names written
+ * (for sync pushing).
+ */
+function writeNoteFolder(dirname, note, opts = {}) {
+  const dirPath = path.join(NOTES_DIR, dirname)
+  fs.mkdirSync(dirPath, { recursive: true })
+  const written = []
+  const keep = new Set([NOTE_MD])
+  fs.writeFileSync(path.join(dirPath, NOTE_MD), serializeNoteMd(note, opts), 'utf-8')
+  written.push(NOTE_MD)
+  for (const s of note.sections) {
+    const file = `${s.id}.md`
+    keep.add(file)
+    fs.writeFileSync(path.join(dirPath, file), s.content || '', 'utf-8')
+    written.push(file)
+  }
+  for (const f of fs.readdirSync(dirPath)) {
+    if (f.endsWith('.md') && !keep.has(f)) {
+      try { fs.unlinkSync(path.join(dirPath, f)) } catch { /* ignore */ }
+    }
+  }
+  return written
 }
 
 function findNoteByTitle(titleQuery) {
@@ -321,35 +358,65 @@ async function ensureRepo(token, owner, repo) {
   }
 }
 
-async function upsertRemoteFile(token, owner, repo, filename, content, retrying = false) {
+// Remote paths are notes-dir-relative with forward slashes ('<dir>/<file>.md').
+// Each segment must be URL-encoded individually (the separators must survive).
+function encodeRemotePath(relPath) {
+  return relPath.split('/').map(encodeURIComponent).join('/')
+}
+
+async function getDefaultBranch(token, owner, repo) {
+  const info = await githubRequest(token, 'GET', `/repos/${owner}/${repo}`)
+  return info.default_branch || 'main'
+}
+
+/** Recursive blob listing via the Git Trees API (folder-per-note layout). */
+async function listRemoteTree(token, owner, repo) {
+  const branch = await getDefaultBranch(token, owner, repo)
+  const res = await githubRequest(token, 'GET',
+    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`)
+  return (res.tree || []).filter(t => t.type === 'blob')
+}
+
+async function upsertRemoteFile(token, owner, repo, relPath, content, retrying = false) {
   let sha
   try {
-    const existing = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`)
+    const existing = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`)
     sha = existing.sha
   } catch { /* new file */ }
   const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m)
-  const label = titleMatch ? titleMatch[1].trim() : filename.replace(/\.md$/, '')
+  const label = titleMatch ? titleMatch[1].trim() : relPath.replace(/\.md$/, '')
   try {
-    await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`, {
+    await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`, {
       message: sha ? `update: ${label}` : `add: ${label}`,
       content: Buffer.from(content).toString('base64'),
       ...(sha ? { sha } : {}),
     })
   } catch (e) {
     if (!retrying && (e.message.includes('409') || e.message.includes('conflict') || e.message.includes('is at') || e.message.includes('422')))
-      return upsertRemoteFile(token, owner, repo, filename, content, true)
+      return upsertRemoteFile(token, owner, repo, relPath, content, true)
     throw e
   }
 }
 
-async function syncPushFile(filePath) {
+async function removeRemoteFile(token, owner, repo, relPath, message) {
+  try {
+    const existing = await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`)
+    await githubRequest(token, 'DELETE', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`,
+      { message: message || `delete: ${relPath}`, sha: existing.sha })
+  } catch { /* not there — nothing to do */ }
+}
+
+/** Pushes the given files of a note dir ('<dirname>/<file>') to GitHub. */
+async function syncPushNoteFiles(dirname, files) {
   const sync = getSyncSettings()
   if (!sync.enabled || !sync.owner || !sync.repo) return
   const token = getToken()
   if (!token) return
   try {
-    const content = fs.readFileSync(filePath, 'utf-8')
-    await upsertRemoteFile(token, sync.owner, sync.repo, path.basename(filePath), content)
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(NOTES_DIR, dirname, f), 'utf-8')
+      await upsertRemoteFile(token, sync.owner, sync.repo, `${dirname}/${f}`, content)
+    }
     out('  Synced to GitHub')
   } catch (e) {
     err(`Sync failed: ${e.message}`)
@@ -376,19 +443,17 @@ async function cmdAdd(text, opts) {
   const isRaw = opts.raw !== false // default true (raw/markdown mode)
 
   // Find existing note by title
-  let notePath = null
+  let existing = null
   if (opts.title) {
     const matches = findNoteByTitle(opts.title)
-    if (matches.length) notePath = matches[0].filePath
+    if (matches.length) existing = matches[0]
   } else {
-    const todayNote = findTodayNote()
-    if (todayNote) notePath = todayNote.filePath
+    existing = findTodayNote()
   }
 
-  if (notePath) {
-    const raw = fs.readFileSync(notePath, 'utf-8')
-    const { frontmatter } = splitFrontmatter(raw)
-    const note = parseNoteYaml(frontmatter)
+  if (existing) {
+    const note = readNoteFolder(existing.dirname)
+    if (!note) { err(`Could not read note "${existing.title}"`); process.exit(1) }
     if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true }]
 
     // Find or create target section
@@ -400,16 +465,15 @@ async function cmdAdd(text, opts) {
     }
     const base = (sec.content || '').replace(/\n$/, '')
     sec.content = base ? base + '\n' + text : text
-    note.updated = new Date().toISOString()
     if (opts.tag && !note.tags.includes(opts.tag)) note.tags.push(opts.tag)
     if (opts.group) {
       const g = findGroup(opts.group)
       if (g) note.group = g.id
       else err(`Group not found: "${opts.group}"`)
     }
-    fs.writeFileSync(notePath, serializeNote(note), 'utf-8')
-    out(`  Added to ${path.basename(notePath)}${opts.section ? ` → ${sectionName}` : ''}`)
-    await syncPushFile(notePath)
+    writeNoteFolder(note.dirname, note)
+    out(`  Added to ${note.dirname}${opts.section ? ` → ${sectionName}` : ''}`)
+    await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
   } else {
     const id = nanoid(8)
     const now = new Date().toISOString()
@@ -426,11 +490,10 @@ async function cmdAdd(text, opts) {
       sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw }],
       ...(groupId ? { group: groupId } : {}),
     }
-    const filename = noteFilename(id, note.title)
-    const filePath = path.join(NOTES_DIR, filename)
-    fs.writeFileSync(filePath, serializeNote(note), 'utf-8')
-    out(`  Created ${filename}`)
-    await syncPushFile(filePath)
+    const dirname = noteDirname(id, note.title)
+    const written = writeNoteFolder(dirname, note)
+    out(`  Created ${dirname}/`)
+    await syncPushNoteFiles(dirname, written)
   }
 }
 
@@ -450,12 +513,11 @@ async function cmdNew(title, opts) {
     sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: true }],
     ...(groupId ? { group: groupId } : {}),
   }
-  const filename = noteFilename(id, title)
-  const filePath = path.join(NOTES_DIR, filename)
-  fs.writeFileSync(filePath, serializeNote(note), 'utf-8')
-  if (opts.json) { process.stdout.write(JSON.stringify({ id, title, filename }) + '\n'); return }
-  out(`  Created "${title}"  →  ${filename}`)
-  await syncPushFile(filePath)
+  const dirname = noteDirname(id, title)
+  const written = writeNoteFolder(dirname, note)
+  if (opts.json) { process.stdout.write(JSON.stringify({ id, title, dirname }) + '\n'); return }
+  out(`  Created "${title}"  →  ${dirname}/`)
+  await syncPushNoteFiles(dirname, written)
 }
 
 // noteflow list [--tag <t>] [--group <g>] [--archived] [--json]
@@ -475,7 +537,7 @@ function cmdList(opts) {
       id: n.id, title: n.title, tags: n.tags, group: n.group,
       created: n.created, updated: n.updated, archived: n.archived, favorited: n.favorited ?? n.pinned ?? false,
       sections: n.sections?.map(s => s.name),
-      filename: n.filename,
+      dirname: n.dirname,
     }))) + '\n')
     return
   }
@@ -490,7 +552,7 @@ function cmdList(opts) {
     const fav  = (n.favorited || n.pinned) ? ' ⭐' : ''
     const arc  = n.archived ? ' [archived]' : ''
     out(`  ${n.title}${fav}${arc}${tags}${grp}`)
-    out(`    ${n.filename}`)
+    out(`    ${n.dirname}/`)
   }
   out('')
 }
@@ -501,7 +563,7 @@ function cmdGet(titleQuery, opts) {
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1 && !opts.json) {
     out(`  Multiple matches — be more specific:`)
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`))
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
     process.exit(1)
   }
   const note = matches[0]
@@ -511,7 +573,7 @@ function cmdGet(titleQuery, opts) {
       id: note.id, title: note.title, tags: note.tags, group: note.group,
       created: note.created, updated: note.updated, archived: note.archived, favorited: note.favorited ?? note.pinned ?? false,
       sections: note.sections?.map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
-      filename: note.filename,
+      dirname: note.dirname,
     }
     process.stdout.write(JSON.stringify(result) + '\n')
     return
@@ -537,7 +599,7 @@ async function cmdDelete(titleQuery, opts) {
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`))
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
     process.exit(1)
   }
   const note = matches[0]
@@ -545,20 +607,21 @@ async function cmdDelete(titleQuery, opts) {
     const ok = await confirm(`Delete "${note.title}"?`)
     if (!ok) { out('  Cancelled'); return }
   }
-  fs.unlinkSync(note.filePath)
+  fs.rmSync(note.filePath, { recursive: true, force: true })
   out(`  Deleted "${note.title}"`)
 
-  // Remove from GitHub if connected
+  // Remove the whole note dir from GitHub if connected
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
     const token = getToken()
     if (token) {
       try {
-        const existing = await githubRequest(token, 'GET',
-          `/repos/${sync.owner}/${sync.repo}/contents/${encodeURIComponent(note.filename)}`)
-        await githubRequest(token, 'DELETE',
-          `/repos/${sync.owner}/${sync.repo}/contents/${encodeURIComponent(note.filename)}`,
-          { message: `delete: ${note.title}`, sha: existing.sha })
+        const blobs = await listRemoteTree(token, sync.owner, sync.repo)
+        for (const b of blobs) {
+          if (b.path.startsWith(`${note.dirname}/`)) {
+            await removeRemoteFile(token, sync.owner, sync.repo, b.path, `delete: ${note.title}`)
+          }
+        }
         out('  Deleted from GitHub')
       } catch { /* ignore remote errors */ }
     }
@@ -571,15 +634,14 @@ async function cmdFavorite(titleQuery) {
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
   }
   const note = matches[0]
   note.favorited = !(note.favorited || note.pinned)
   delete note.pinned
-  note.updated = new Date().toISOString()
-  fs.writeFileSync(note.filePath, serializeNote(note), 'utf-8')
+  writeNoteFolder(note.dirname, note)
   out(`  "${note.title}" ${note.favorited ? 'added to favorites' : 'removed from favorites'}`)
-  await syncPushFile(note.filePath)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
 // noteflow archive <title>
@@ -588,14 +650,13 @@ async function cmdArchive(titleQuery) {
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
   }
   const note = matches[0]
   note.archived = !note.archived
-  note.updated = new Date().toISOString()
-  fs.writeFileSync(note.filePath, serializeNote(note), 'utf-8')
+  writeNoteFolder(note.dirname, note)
   out(`  "${note.title}" ${note.archived ? 'archived' : 'unarchived'}`)
-  await syncPushFile(note.filePath)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
 // noteflow rename <old-title> <new-title>
@@ -604,14 +665,14 @@ async function cmdRename(oldTitle, newTitle) {
   if (!matches.length) { err(`No note found: "${oldTitle}"`); process.exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
   }
   const note = matches[0]
   note.title = newTitle
-  note.updated = new Date().toISOString()
-  fs.writeFileSync(note.filePath, serializeNote(note), 'utf-8')
+  // The directory name is frozen at creation — only note.md changes
+  writeNoteFolder(note.dirname, note)
   out(`  Renamed to "${newTitle}"`)
-  await syncPushFile(note.filePath)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
 // noteflow sections <title>
@@ -620,7 +681,7 @@ function cmdSections(titleQuery) {
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
   if (matches.length > 1) {
     out('  Multiple matches — be more specific:')
-    matches.forEach(n => out(`    ${n.title}  (${n.filename})`)); process.exit(1)
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`)); process.exit(1)
   }
   const note = matches[0]
   out(`\n  Sections of "${note.title}":`)
@@ -672,8 +733,7 @@ async function cmdGroupDelete(name, opts) {
   const notes = loadAllNotes()
   for (const n of notes.filter(n => n.group === g.id)) {
     delete n.group
-    n.updated = new Date().toISOString()
-    fs.writeFileSync(n.filePath, serializeNote(n), 'utf-8')
+    writeNoteFolder(n.dirname, n)
   }
   out(`  Deleted group "${g.name}"`)
 }
@@ -734,28 +794,41 @@ function cmdLogout() {
   out('  Disconnected from GitHub')
 }
 
+function listLocalNoteDirs() {
+  if (!fs.existsSync(NOTES_DIR)) return []
+  return fs.readdirSync(NOTES_DIR, { withFileTypes: true })
+    .filter(e => e.isDirectory() && fs.existsSync(path.join(NOTES_DIR, e.name, NOTE_MD)))
+    .map(e => e.name)
+}
+
 async function cmdPush() {
   const sync = getSyncSettings()
   if (!sync.enabled || !sync.owner || !sync.repo) { err('Not connected. Run: noteflow login'); process.exit(1) }
   const token = getToken()
   if (!token) { err('Token unavailable (encrypted by desktop app). Run: noteflow login'); process.exit(1) }
   if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
-  const files = fs.readdirSync(NOTES_DIR).filter(f => f.endsWith('.md'))
-  out(`  Pushing ${files.length} notes to ${sync.owner}/${sync.repo}...`)
+
+  // Every file of every note folder + root metadata + the format marker
+  const relPaths = []
+  for (const dir of listLocalNoteDirs()) {
+    for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
+      if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
+    }
+  }
+  for (const m of METADATA_FILES) {
+    if (fs.existsSync(path.join(NOTES_DIR, m))) relPaths.push(m)
+  }
+
+  out(`  Pushing ${relPaths.length} files to ${sync.owner}/${sync.repo}...`)
   let pushed = 0, errors = 0
-  for (const file of files) {
+  for (const relPath of relPaths) {
     try {
-      const content = fs.readFileSync(path.join(NOTES_DIR, file), 'utf-8')
-      await upsertRemoteFile(token, sync.owner, sync.repo, file, content)
-      pushed++; process.stdout.write(`\r  ${pushed}/${files.length}`)
-    } catch (e) { errors++; console.error(`\n  Failed: ${file} — ${e.message}`) }
+      const content = fs.readFileSync(path.join(NOTES_DIR, relPath), 'utf-8')
+      await upsertRemoteFile(token, sync.owner, sync.repo, relPath, content)
+      pushed++; process.stdout.write(`\r  ${pushed}/${relPaths.length}`)
+    } catch (e) { errors++; console.error(`\n  Failed: ${relPath} — ${e.message}`) }
   }
-  const groupsPath = path.join(NOTES_DIR, 'groups.json')
-  if (fs.existsSync(groupsPath)) {
-    try {
-      await upsertRemoteFile(token, sync.owner, sync.repo, 'groups.json', fs.readFileSync(groupsPath, 'utf-8'))
-    } catch { /* ignore */ }
-  }
+  try { await upsertRemoteFile(token, sync.owner, sync.repo, FORMAT_MARKER, `${FORMAT_VERSION}\n`) } catch { /* ignore */ }
   const settings = readSettings()
   settings.githubSync = { ...sync, lastSync: new Date().toISOString() }
   writeSettings(settings)
@@ -770,40 +843,130 @@ async function cmdPull(opts = {}) {
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const force = opts.force === true
   out(`  Pulling from ${sync.owner}/${sync.repo}...${force ? ' (--force)' : ''}`)
-  let remoteFiles = []
+
+  let blobs = []
   try {
-    const files = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/`)
-    remoteFiles = Array.isArray(files) ? files.filter(f => f.type === 'file' && f.name.endsWith('.md')) : []
+    blobs = await listRemoteTree(token, sync.owner, sync.repo)
   } catch (e) {
-    // 404 means the repo is empty (just initialized); any other error is real
-    if (e.message && !e.message.includes('404') && !e.message.toLowerCase().includes('not found')) {
+    // 404/409 means the repo is empty (just initialized); any other error is real
+    if (e.message && !e.message.includes('404') && !e.message.includes('409') && !e.message.toLowerCase().includes('not found') && !e.message.toLowerCase().includes('empty')) {
       err(`Could not list remote files: ${e.message}`)
       process.exit(1)
     }
   }
+
+  // Group blobs into note dirs ('<dir>/<file>.md' with a note.md anchor)
+  const remoteDirs = new Map()
+  for (const b of blobs) {
+    const i = b.path.indexOf('/')
+    if (i <= 0) continue
+    const rest = b.path.slice(i + 1)
+    if (rest.includes('/') || !rest.endsWith('.md')) continue
+    const dir = b.path.slice(0, i)
+    if (!remoteDirs.has(dir)) remoteDirs.set(dir, [])
+    remoteDirs.get(dir).push(rest)
+  }
+
+  async function fetchRemote(relPath) {
+    const remote = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/${encodeRemotePath(relPath)}`)
+    return Buffer.from(remote.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+  }
+
   let pulled = 0, skipped = 0
-  for (const file of remoteFiles) {
+  for (const [dir, files] of remoteDirs) {
+    if (!files.includes(NOTE_MD)) continue
     try {
-      const remote = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/${encodeURIComponent(file.name)}`)
-      const content = Buffer.from(remote.content.replace(/\n/g, ''), 'base64').toString('utf-8')
-      const localPath = path.join(NOTES_DIR, file.name)
-      if (!force && fs.existsSync(localPath)) {
-        const localContent = fs.readFileSync(localPath, 'utf-8')
-        const lu = extractUpdatedTimestamp(localContent), ru = extractUpdatedTimestamp(content)
+      const remoteAnchor = await fetchRemote(`${dir}/${NOTE_MD}`)
+      const localDirPath = path.join(NOTES_DIR, dir)
+      const localAnchorPath = path.join(localDirPath, NOTE_MD)
+      if (!force && fs.existsSync(localAnchorPath)) {
+        const lu = extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8'))
+        const ru = extractUpdatedTimestamp(remoteAnchor)
         if (lu && ru && ru <= lu) { skipped++; continue }
       }
-      fs.writeFileSync(localPath, content, 'utf-8'); pulled++; out(`  ${file.name}`)
-    } catch (e) { err(`${file.name}: ${e.message}`) }
+      fs.mkdirSync(localDirPath, { recursive: true })
+      fs.writeFileSync(localAnchorPath, remoteAnchor, 'utf-8')
+      for (const f of files) {
+        if (f === NOTE_MD) continue
+        try { fs.writeFileSync(path.join(localDirPath, f), await fetchRemote(`${dir}/${f}`), 'utf-8') }
+        catch { /* skip unreadable section */ }
+      }
+      // Sections removed remotely → remove their local files
+      for (const lf of fs.readdirSync(localDirPath)) {
+        if (lf.endsWith('.md') && lf !== NOTE_MD && !files.includes(lf)) {
+          try { fs.unlinkSync(path.join(localDirPath, lf)) } catch { /* ignore */ }
+        }
+      }
+      pulled++; out(`  ${dir}/`)
+    } catch (e) { err(`${dir}: ${e.message}`) }
   }
-  try {
-    const remote = await githubRequest(token, 'GET', `/repos/${sync.owner}/${sync.repo}/contents/groups.json`)
-    const content = Buffer.from(remote.content.replace(/\n/g, ''), 'base64').toString('utf-8')
-    fs.writeFileSync(path.join(NOTES_DIR, 'groups.json'), content, 'utf-8')
-  } catch { /* optional */ }
+
+  for (const m of METADATA_FILES) {
+    try { fs.writeFileSync(path.join(NOTES_DIR, m), await fetchRemote(m), 'utf-8') }
+    catch { /* optional */ }
+  }
   const settings = readSettings()
   settings.githubSync = { ...sync, lastSync: new Date().toISOString() }
   writeSettings(settings)
   out(`  Done: ${pulled} pulled${skipped ? `, ${skipped} skipped (local is newer — use --force to override)` : ''}`)
+}
+
+// noteflow migrate — one-time local v1→v2 conversion (flat .md → folders).
+// Idempotent; also pushes the new layout and removes remote flat files when
+// connected. The desktop app runs the same migration automatically on startup.
+async function cmdMigrate() {
+  if (!fs.existsSync(NOTES_DIR)) { out('  No notes directory'); return }
+  const flat = fs.readdirSync(NOTES_DIR).filter(f => f.endsWith('.md') && f !== 'README.md' &&
+    fs.statSync(path.join(NOTES_DIR, f)).isFile())
+
+  let migrated = 0
+  for (const filename of flat) {
+    try {
+      const raw = fs.readFileSync(path.join(NOTES_DIR, filename), 'utf-8')
+      const { frontmatter, body } = splitFrontmatter(raw)
+      const note = parseNoteYaml(frontmatter)
+      if (note.encryption) {
+        // Encrypted: keep the original frontmatter verbatim as note.md (the
+        // custom parser doesn't preserve the encryption block contents)
+        const dir = filename.replace(/\.md$/i, '')
+        fs.mkdirSync(path.join(NOTES_DIR, dir), { recursive: true })
+        fs.writeFileSync(path.join(NOTES_DIR, dir, NOTE_MD), `---\n${frontmatter}\n---\n`, 'utf-8')
+        fs.unlinkSync(path.join(NOTES_DIR, filename))
+        migrated++
+        continue
+      }
+      if (!note.sections.length) {
+        note.sections = [{ id: nanoid(6), name: 'Note', content: body, isRawMode: true }]
+      }
+      if (!note.id) note.id = nanoid(8)
+      const dir = filename.replace(/\.md$/i, '')
+      writeNoteFolder(dir, note, { preserveUpdated: true })
+      fs.unlinkSync(path.join(NOTES_DIR, filename))
+      migrated++
+      out(`  ${filename} → ${dir}/`)
+    } catch (e) {
+      err(`${filename}: ${e.message}`)
+    }
+  }
+  try { fs.writeFileSync(path.join(NOTES_DIR, FORMAT_MARKER), `${FORMAT_VERSION}\n`, 'utf-8') } catch { /* ignore */ }
+  out(`  Migrated ${migrated} note(s) to folder format v2`)
+
+  // Remote cleanup when connected: push folders, delete old flat files, marker
+  const sync = getSyncSettings()
+  const token = getToken()
+  if (sync.enabled && sync.owner && sync.repo && token) {
+    out('  Migrating remote repo...')
+    await cmdPush()
+    try {
+      const blobs = await listRemoteTree(token, sync.owner, sync.repo)
+      for (const b of blobs) {
+        if (!b.path.includes('/') && b.path.endsWith('.md') && b.path !== 'README.md') {
+          await removeRemoteFile(token, sync.owner, sync.repo, b.path, `migrate: remove flat ${b.path}`)
+        }
+      }
+    } catch (e) { err(`Remote cleanup failed: ${e.message}`) }
+    out('  Remote migration complete')
+  }
 }
 
 const SELF_UPDATE_URL = 'https://raw.githubusercontent.com/yagoid/noteflow/main/cli/noteflow.js'
@@ -846,7 +1009,7 @@ async function cmdSelfUpdate() {
 
 function cmdStatus(opts) {
   const sync = getSyncSettings()
-  const noteCount = fs.existsSync(NOTES_DIR) ? fs.readdirSync(NOTES_DIR).filter(f => f.endsWith('.md')).length : 0
+  const noteCount = listLocalNoteDirs().length
   const groups = readGroups()
   if (opts.json) {
     process.stdout.write(JSON.stringify({
@@ -954,6 +1117,7 @@ function cmdHelp(topic) {
     push                  Push all notes to GitHub
     pull / update         Pull notes from GitHub  [--force: overwrite even if local is newer]
     status                Show notes and sync status
+    migrate               One-time migration: flat .md notes → folder format v2
     self-update           Update this CLI script to the latest version
 
   Flags available on most commands:
@@ -1075,6 +1239,7 @@ async function main() {
     case 'push':    await cmdPush(); break
     case 'pull':
     case 'update':        await cmdPull(flags); break
+    case 'migrate':       await cmdMigrate(); break
     case 'self-update':   await cmdSelfUpdate(); break
     case 'status':  cmdStatus(flags); break
     default:

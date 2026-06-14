@@ -51,10 +51,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
  */
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-const js_yaml_1 = __importDefault(require("js-yaml"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const sqliteVec = __importStar(require("sqlite-vec"));
 const protocol_1 = require("./protocol");
+const noteFormat_1 = require("../noteFormat");
 // Transformers.js is ESM-only. A plain dynamic import() would be down-levelled to
 // require() by tsc (module: CommonJS) and crash. This Function wrapper preserves a
 // real runtime dynamic import.
@@ -113,41 +113,17 @@ function loadVecExtension(db) {
     const unpacked = resolved.replace(`app.asar${path_1.default.sep}`, `app.asar.unpacked${path_1.default.sep}`);
     db.loadExtension(unpacked);
 }
-function extractSections(raw) {
-    const normalized = raw.replace(/\r\n/g, '\n');
-    let frontmatter = '';
-    let body = normalized;
-    if (normalized.startsWith('---\n')) {
-        const end = normalized.indexOf('\n---\n', 4);
-        if (end !== -1) {
-            frontmatter = normalized.slice(4, end);
-            body = normalized.slice(end + 5);
-        }
-    }
-    let data = {};
-    if (frontmatter) {
-        try {
-            data = js_yaml_1.default.load(frontmatter) ?? {};
-        }
-        catch { /* malformed */ }
-    }
-    const noteId = typeof data.id === 'string' ? data.id : null;
-    const title = typeof data.title === 'string' ? data.title : '';
-    const encrypted = !!(data.encryption && typeof data.encryption === 'object');
-    let sections = [];
-    if (!encrypted) {
-        if (Array.isArray(data.sections) && data.sections.length > 0) {
-            sections = data.sections.map((s, i) => ({
-                id: String(s.id ?? `sec${i}`),
-                name: String(s.name ?? 'Section'),
-                content: String(s.content ?? ''),
-            }));
-        }
-        else {
-            sections = [{ id: 'sec0', name: 'Note', content: body }];
-        }
-    }
-    return { noteId, title, encrypted, sections };
+/** Reads a note directory from disk. Null when note.md is missing (deleted). */
+function readNoteFolder(dirPath) {
+    const disk = (0, noteFormat_1.parseNoteDir)(dirPath);
+    if (!disk)
+        return null;
+    return {
+        noteId: disk.id || null,
+        title: disk.title,
+        encrypted: !!disk.encryption,
+        sections: disk.sections.map((s) => ({ id: s.id, name: s.name, content: s.content })),
+    };
 }
 // ── Embedding provider ──────────────────────────────────────────────────────
 class EmbeddingProvider {
@@ -687,16 +663,16 @@ function stripNoise(text) {
 function chunkTextFor(s) {
     return stripNoise(`${s.name}\n${s.content}`).trim();
 }
-async function handleIndexNote(filePath, content) {
+async function handleIndexNote(dirPath) {
     if (!index)
         throw new Error('Index not initialised');
     // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
     // reindex picks up the change. This keeps note saves from waking the heavy model.
     if (!provider.ready)
         return { ok: true, skipped: true };
-    const parsed = extractSections(content);
-    if (!parsed.noteId || parsed.encrypted) {
-        index.removeNoteByFilePath(filePath);
+    const parsed = readNoteFolder(dirPath);
+    if (!parsed || !parsed.noteId || parsed.encrypted) {
+        index.removeNoteByFilePath(dirPath);
         return { ok: true, skipped: true };
     }
     const desired = parsed.sections
@@ -723,7 +699,7 @@ async function handleIndexNote(filePath, content) {
     const inserts = toEmbed.map((d, i) => ({
         sectionId: d.sectionId, sectionName: d.sectionName, hash: d.hash, text: d.text, embedding: embeddings[i],
     }));
-    index.applyNoteUpdate(parsed.noteId, filePath, parsed.title, deleteChunkIds, inserts);
+    index.applyNoteUpdate(parsed.noteId, dirPath, parsed.title, deleteChunkIds, inserts);
     return { ok: true };
 }
 const REINDEX_BATCH = 16; // embed many sections per inference call → much better CPU throughput
@@ -733,30 +709,17 @@ async function handleReindexAll(notesDir) {
     await ensureModelLoaded(); // reindex needs to embed text → load the model now
     emitState('indexing');
     index.clearAll();
-    // 1) Collect every section across all notes (skip encrypted/empty).
-    let files = [];
-    try {
-        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
-    }
-    catch { /* empty */ }
     const rows = [];
-    for (const f of files) {
-        const full = path_1.default.join(notesDir, f);
-        let content;
-        try {
-            content = fs_1.default.readFileSync(full, 'utf-8');
-        }
-        catch {
-            continue;
-        }
-        const parsed = extractSections(content);
-        if (!parsed.noteId || parsed.encrypted)
+    for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+        const dirPath = path_1.default.join(notesDir, dir);
+        const parsed = readNoteFolder(dirPath);
+        if (!parsed || !parsed.noteId || parsed.encrypted)
             continue;
         for (const s of parsed.sections) {
             const text = chunkTextFor(s);
             if (!text)
                 continue;
-            rows.push({ noteId: parsed.noteId, filePath: full, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) });
+            rows.push({ noteId: parsed.noteId, filePath: dirPath, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) });
         }
     }
     // 2) Embed in batches and write incrementally (progress is per-section → smooth bar).
@@ -817,14 +780,14 @@ parentPort.on('message', async (e) => {
                 break;
             }
             case 'index-note': {
-                const r = await handleIndexNote(req.payload.filePath, req.payload.content);
+                const r = await handleIndexNote(req.payload.dirPath);
                 send({ type: 'result', id: req.id, payload: r });
                 if (!r.skipped)
                     scheduleModelUnload(); // keep the model alive while edits keep arriving
                 break;
             }
             case 'remove-note': {
-                index?.removeNoteByFilePath(req.payload.filePath);
+                index?.removeNoteByFilePath(req.payload.dirPath);
                 send({ type: 'result', id: req.id, payload: { ok: true } });
                 break;
             }

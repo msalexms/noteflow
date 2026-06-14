@@ -37,9 +37,9 @@ export interface GraphEdge { a: string; b: string; score: number }   // a, b = n
 // ── Requests (main → worker) ────────────────────────────────────────────────
 
 export interface InitPayload { modelId: string; cacheDir: string; dbPath: string }
-export interface IndexNotePayload { filePath: string; content: string }
+export interface IndexNotePayload { dirPath: string }   // absolute path of the note directory
 export type LoadModelPayload = Record<string, never>
-export interface RemovePayload { filePath: string }
+export interface RemovePayload { dirPath: string }      // absolute path of the note directory
 export interface ReindexPayload { notesDir: string }
 export interface SearchPayload { query: string; k: number }
 export interface RelatedPayload { noteId: string; sectionId: string; k: number }

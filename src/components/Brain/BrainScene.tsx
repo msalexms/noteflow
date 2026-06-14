@@ -152,7 +152,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     // Scaffold tint: pull the text colour toward the bg so the lattice reads as a low-contrast
     // blue-grey instead of crisp white lines. Pull less on a light bg (normal blending darkens
     // rather than glows) so the scaffold doesn't fade into the background.
-    const wireColor = rgbTo(pal.text).lerp(bg, isDark ? 0.5 : 0.22)
+    const wireColor = rgbTo(pal.text).lerp(bg, isDark ? 0.44 : 0.22)
 
     // ── wireframe scaffold + fat vertex dots (geometry swapped on rebuild) ──
     const makeWireGeo = (m: BrainMesh) => {
@@ -276,32 +276,15 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       return g
     }
 
-    // Route a content edge (note↔note) THROUGH the interior fill instead of hugging the surface:
-    // dive to the interior vertex nearest the midpoint pulled toward the centre, then back out, so
-    // the relation travels the volume's lattice. Far-apart notes pull deeper; close ones stay
-    // shallow. Falls back to a plain surface route if there's no interior (e.g. fill disabled).
-    const INTERIOR_PULL = 0.55
-    const nearestInterior = (x: number, y: number, z: number): number => {
-      const iv = mesh.interiorVertices, pos = mesh.positions
-      let best = -1, bestD = Infinity
-      for (const v of iv) {
-        const d = (pos[v * 3] - x) ** 2 + (pos[v * 3 + 1] - y) ** 2 + (pos[v * 3 + 2] - z) ** 2
-        if (d < bestD) { bestD = d; best = v }
-      }
-      return best
-    }
+    // Route a content edge (note↔note) along the mesh lattice via the geometric shortest path
+    // (pathBetween is now Euclidean-weighted Dijkstra), so it naturally crosses the interior fill
+    // when that's shorter than skimming the surface, and hugs the surface when notes are close. We
+    // orient the returned path to start at `a` (the cache is keyed on the unordered pair, so it may
+    // come back reversed); callers reverse again as needed.
     const routeContent = (a: number, b: number): number[] => {
-      const surf = mesh.pathBetween(a, b)
-      const plain = surf && surf.length >= 2 ? surf : [a, b]
-      const pos = mesh.positions, c = mesh.centroid
-      const mx = (pos[a * 3] + pos[b * 3]) / 2, my = (pos[a * 3 + 1] + pos[b * 3 + 1]) / 2, mz = (pos[a * 3 + 2] + pos[b * 3 + 2]) / 2
-      const anchor = nearestInterior(
-        mx + (c[0] - mx) * INTERIOR_PULL, my + (c[1] - my) * INTERIOR_PULL, mz + (c[2] - mz) * INTERIOR_PULL,
-      )
-      if (anchor < 0 || anchor === a || anchor === b) return plain
-      const p1 = mesh.pathBetween(a, anchor), p2 = mesh.pathBetween(anchor, b)
-      if (!p1 || !p2) return plain
-      return p1.concat(p2.slice(1)) // drop the duplicated anchor at the seam
+      const p = mesh.pathBetween(a, b)
+      if (!p || p.length < 2) return [a, b]
+      return p[0] === a ? p : p.slice().reverse()
     }
 
     const rebuildData = (m: BrainGraphModel) => {
@@ -440,6 +423,71 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     }
     rebuildData(renderRef.current.model)
 
+    // ── Electric impulses (animated sparks) ──────────────────────────────────────
+    // A spark is a short comet (a bright head + a few fading tail points) that travels a polyline.
+    // Two flavours: hover sparks shoot from the focused node out along its content edges; ambient
+    // sparks rarely crawl a random wireframe edge. Both are THREE.Points updated per-frame.
+    interface PulsePath { pts: Float32Array; cum: Float32Array; total: number; r: number; g: number; b: number }
+    const TAIL = 4 // points per comet (head + fading tail)
+    const tmpV = new THREE.Vector3()
+    const sampleAt = (pp: PulsePath, u: number, out: THREE.Vector3) => {
+      const d = Math.max(0, Math.min(1, u)) * pp.total
+      let i = 1
+      while (i < pp.cum.length - 1 && pp.cum[i] < d) i++
+      const j = i - 1
+      const seg = pp.cum[i] - pp.cum[j] || 1
+      const f = (d - pp.cum[j]) / seg
+      out.set(
+        pp.pts[j * 3] + (pp.pts[i * 3] - pp.pts[j * 3]) * f,
+        pp.pts[j * 3 + 1] + (pp.pts[i * 3 + 1] - pp.pts[j * 3 + 1]) * f,
+        pp.pts[j * 3 + 2] + (pp.pts[i * 3 + 2] - pp.pts[j * 3 + 2]) * f,
+      )
+    }
+    // Bake a vertex-index sequence over the current mesh lattice into an arc-length polyline.
+    const pathFromSeq = (seq: number[], col: THREE.Color): PulsePath => {
+      const pos = mesh.positions
+      const pts = new Float32Array(seq.length * 3)
+      const cum = new Float32Array(seq.length)
+      for (let i = 0; i < seq.length; i++) {
+        pts[i * 3] = pos[seq[i] * 3]; pts[i * 3 + 1] = pos[seq[i] * 3 + 1]; pts[i * 3 + 2] = pos[seq[i] * 3 + 2]
+        if (i > 0) {
+          const dx = pts[i * 3] - pts[(i - 1) * 3]
+          const dy = pts[i * 3 + 1] - pts[(i - 1) * 3 + 1]
+          const dz = pts[i * 3 + 2] - pts[(i - 1) * 3 + 2]
+          cum[i] = cum[i - 1] + Math.hypot(dx, dy, dz)
+        }
+      }
+      return { pts, cum, total: cum[seq.length - 1] || 1, r: col.r, g: col.g, b: col.b }
+    }
+    const sparkMat = () => new THREE.PointsMaterial({
+      map: dotTex, vertexColors: true, transparent: true, depthWrite: false,
+      blending: wireBlend, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
+    })
+
+    const fxGroup = new THREE.Group()
+    brainGroup.add(fxGroup)
+
+    // Hover sweep — each related edge is a polyline that starts dark and lights up from the hovered
+    // node out to the far end on hover (a single sweep), then stays lit while hovering. The lines
+    // live in hoverGroup (rebuilt/cleared by rebuildHover); the per-frame colour fill is below.
+    interface HoverLine { colorAttr: THREE.BufferAttribute; arc: Float32Array; n: number; r: number; g: number; b: number }
+    let hoverLines: HoverLine[] = []
+    let hoverStartT = 0
+
+    // Ambient sparks — a small fixed pool, only a few alive at once, drawn via drawRange.
+    const AMBIENT_MAX = 6
+    interface Ambient { path: PulsePath; start: number; dur: number }
+    const ambient: Ambient[] = []
+    let nextAmbientAt = 1.5
+    const ambientCol = wireColor.clone().multiplyScalar(1.4)
+    const ambientGeo = new THREE.BufferGeometry()
+    ambientGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(AMBIENT_MAX * TAIL * 3), 3))
+    ambientGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(AMBIENT_MAX * TAIL * 3), 3))
+    ambientGeo.setDrawRange(0, 0)
+    const ambientMat = sparkMat(); ambientMat.size = 0.03
+    const ambientPulse = new THREE.Points(ambientGeo, ambientMat)
+    fxGroup.add(ambientPulse)
+
     // ── post-processing: bloom ──
     const composer = new EffectComposer(renderer)
     composer.addPass(new RenderPass(scene, camera))
@@ -564,6 +612,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     // Bright incident synapses + a marker when hovering a note/section.
     const rebuildHover = (id: string | null) => {
       clearGroup(hoverGroup)
+      hoverLines = []
       if (!id) return
       const info = placedNodes.get(id)
       if (!info) return
@@ -574,31 +623,47 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
         map: ringTex, color: colorOf(info.colorVar).clone().multiplyScalar(1.8), size: 0.07,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
       })))
-      // incident content edges, bright — routed along the scaffold (same as the faint synapses)
+      // Incident content edges as polylines, routed along the scaffold (same as the faint synapses),
+      // but oriented OUTWARD from the hovered node and starting fully dark — the animate loop fills
+      // each one with colour from the node end to the far end.
       const noteId = info.noteId
       if (!noteId) return
       const m = renderRef.current.model
       const assignment = assignmentRef.current
       const pos = mesh.positions
       const self = `n:${noteId}`
-      const lp: number[] = []
+      const col = colorOf(info.colorVar).clone().multiplyScalar(1.6)
       for (const e of m.contentEdges) {
-        if (e.source !== self && e.target !== self) continue
+        const isSrc = e.source === self, isTgt = e.target === self
+        if (!isSrc && !isTgt) continue
         const a = assignment.get(e.source), b = assignment.get(e.target)
         if (a == null || b == null) continue
-        const seq = routeContent(a, b)
-        for (let i = 0; i < seq.length - 1; i++) {
-          const u = seq[i], w = seq[i + 1]
-          lp.push(pos[u * 3], pos[u * 3 + 1], pos[u * 3 + 2], pos[w * 3], pos[w * 3 + 1], pos[w * 3 + 2])
+        let seq = routeContent(a, b)
+        if (!isSrc) seq = seq.slice().reverse() // always start at the hovered node
+        const n = seq.length
+        if (n < 2) continue
+        const posArr = new Float32Array(n * 3)
+        const arc = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          posArr[i * 3] = pos[seq[i] * 3]; posArr[i * 3 + 1] = pos[seq[i] * 3 + 1]; posArr[i * 3 + 2] = pos[seq[i] * 3 + 2]
+          if (i > 0) {
+            const dx = posArr[i * 3] - posArr[(i - 1) * 3]
+            const dy = posArr[i * 3 + 1] - posArr[(i - 1) * 3 + 1]
+            const dz = posArr[i * 3 + 2] - posArr[(i - 1) * 3 + 2]
+            arc[i] = arc[i - 1] + Math.hypot(dx, dy, dz)
+          }
         }
-      }
-      if (lp.length) {
+        const total = arc[n - 1] || 1
+        for (let i = 0; i < n; i++) arc[i] /= total // normalise to 0..1 along the edge
         const g = new THREE.BufferGeometry()
-        g.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3))
-        hoverGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
-          color: colorOf(info.colorVar).clone().multiplyScalar(1.4), transparent: true, opacity: 0.75,
-          depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+        g.setAttribute('position', new THREE.BufferAttribute(posArr, 3))
+        const colorAttr = new THREE.BufferAttribute(new Float32Array(n * 3), 3) // starts black = off
+        g.setAttribute('color', colorAttr)
+        // THREE.Line interpolates colour between consecutive vertices → smooth lit/unlit boundary.
+        hoverGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+          vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
         })))
+        hoverLines.push({ colorAttr, arc, n, r: col.r, g: col.g, b: col.b })
       }
     }
 
@@ -631,8 +696,53 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       }
       controls.update()
       synapseGroup.visible = renderRef.current.showContentEdges
-      if (hoverId !== lastHoverBuilt) { rebuildHover(hoverId); lastHoverBuilt = hoverId }
+      if (hoverId !== lastHoverBuilt) { rebuildHover(hoverId); lastHoverBuilt = hoverId; hoverStartT = t }
       updateLabels()
+
+      // ── Hover sweep: the related edge starts dark and lights up ONCE from the hovered node to the
+      // far end (a fast colour fill, not a dot moving over an already-lit line); then stays lit. ──
+      if (hoverLines.length) {
+        const h = Math.min(2, (t - hoverStartT) / 0.22) // sweep position (>1 = fully lit, resting)
+        const EDGE = 0.06 // soft leading edge width, in normalised arc units
+        for (const hl of hoverLines) {
+          const ca = hl.colorAttr
+          for (let i = 0; i < hl.n; i++) {
+            const f = Math.max(0, Math.min(1, (h - hl.arc[i]) / EDGE)) // 1 behind the sweep, 0 ahead
+            ca.setXYZ(i, hl.r * f, hl.g * f, hl.b * f)
+          }
+          ca.needsUpdate = true
+        }
+      }
+
+      // ── Ambient sparks: rare, faint comets crawling random wireframe edges ──
+      if (t >= nextAmbientAt && ambient.length < AMBIENT_MAX && mesh.edges.length >= 2) {
+        const ei = (Math.random() * (mesh.edges.length / 2)) | 0
+        let a = mesh.edges[ei * 2], b = mesh.edges[ei * 2 + 1]
+        if (Math.random() < 0.5) { const tmp = a; a = b; b = tmp }
+        ambient.push({ path: pathFromSeq([a, b], ambientCol), start: t, dur: 0.3 + Math.random() * 0.2 })
+        nextAmbientAt = t + 2.2 + Math.random() * 3 // sparse, irregular cadence
+      }
+      {
+        for (let i = ambient.length - 1; i >= 0; i--) if ((t - ambient[i].start) / ambient[i].dur >= 1) ambient.splice(i, 1)
+        const posAttr = ambientGeo.getAttribute('position') as THREE.BufferAttribute
+        const colAttr = ambientGeo.getAttribute('color') as THREE.BufferAttribute
+        let w = 0
+        for (const am of ambient) {
+          const head = (t - am.start) / am.dur
+          const env = Math.sin(Math.PI * Math.min(head, 1)) // fade in then out → very discreet
+          for (let k = 0; k < TAIL; k++) {
+            const u = head - k * 0.06
+            sampleAt(am.path, u, tmpV)
+            posAttr.setXYZ(w, tmpV.x, tmpV.y, tmpV.z)
+            const f = (u >= 0 ? env : 0) * (1 - k / TAIL)
+            colAttr.setXYZ(w, am.path.r * f, am.path.g * f, am.path.b * f)
+            w++
+          }
+        }
+        posAttr.needsUpdate = true; colAttr.needsUpdate = true
+        ambientGeo.setDrawRange(0, w)
+      }
+
       // Temporal pulse: gentle breathing of the global glow.
       bloom.strength = l.bloomStrength + 0.08 * Math.sin(t * 1.1)
       wireMat.opacity = wireOpacityFor(l.wireOpacity) + 0.015 * Math.sin(t * 1.1 + 1)
@@ -705,7 +815,8 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       dots.geometry.dispose(); dotMat.dispose(); dotTex.dispose()
       solid.geometry.dispose(); (solid.material as THREE.Material).dispose()
       markers.geometry.dispose(); markerMat.dispose(); markerTex.dispose()
-      disposeData(); ringTex.dispose()
+      disposeData(); clearGroup(hoverGroup); ringTex.dispose()
+      ambientGeo.dispose(); ambientMat.dispose()
       composer.dispose()
       renderer.dispose()
       if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement)

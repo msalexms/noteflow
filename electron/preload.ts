@@ -1,15 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export type NoteFileMeta = {
-  filename: string
+export type NoteDirRecord = {
+  dir: string
   path: string
-  mtime: string
-  ctime: string
+  noteMd: string
+  sections: { file: string; content: string }[]
 }
 
-export type NoteFileContent = {
-  path: string
-  content: string | null
+export type NoteWritePayload = {
+  dir: string
+  files: Record<string, string>
+  deleteFiles: string[]
 }
 
 export type FsResult = { ok: boolean; error?: string }
@@ -17,16 +18,13 @@ export type FsResult = { ok: boolean; error?: string }
 const api = {
   // Identification
   windowId: (): number => ipcRenderer.sendSync('window:get-id'),
-  
-  // File system
-  listNotes: (): Promise<NoteFileMeta[]> => ipcRenderer.invoke('fs:list-notes'),
-  readNote: (filePath: string): Promise<string | null> => ipcRenderer.invoke('fs:read-note', filePath),
-  readAllNotes: (): Promise<NoteFileContent[]> => ipcRenderer.invoke('fs:read-all-notes'),
-  writeNote: (filePath: string, content: string): Promise<FsResult> =>
-    ipcRenderer.invoke('fs:write-note', filePath, content),
-  deleteNote: (filePath: string): Promise<FsResult> => ipcRenderer.invoke('fs:delete-note', filePath),
-  renameNote: (oldPath: string, newPath: string): Promise<FsResult> =>
-    ipcRenderer.invoke('fs:rename-note', oldPath, newPath),
+
+  // File system (folder-per-note: one dir per note, one .md per section)
+  readAllNotes: (): Promise<NoteDirRecord[]> => ipcRenderer.invoke('fs:read-all-notes'),
+  readNoteDir: (dir: string): Promise<NoteDirRecord | null> => ipcRenderer.invoke('fs:read-note-dir', dir),
+  writeNote: (payload: NoteWritePayload): Promise<FsResult> =>
+    ipcRenderer.invoke('fs:write-note', payload),
+  deleteNote: (dir: string): Promise<FsResult> => ipcRenderer.invoke('fs:delete-note', dir),
   getNotesDir: (): Promise<string> => ipcRenderer.invoke('fs:notes-dir'),
   openNotesFolder: (): Promise<void> => ipcRenderer.invoke('app:open-notes-folder'),
   chooseNotesDir: (): Promise<string | null> => ipcRenderer.invoke('app:choose-notes-dir'),
@@ -78,12 +76,13 @@ const api = {
     ipcRenderer.on('update:installing', () => callback())
   },
 
-  // Export / Import
-  exportNotes: (entries: Array<{ filename: string; content: string }>, format: string, hint?: string): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
+  // Export / Import — .noteflow entries are v2 folder bundles { dir, files };
+  // .md/.txt exports remain plain { filename, content } files.
+  exportNotes: (entries: Array<{ filename: string; content: string }> | Array<{ dir: string; files: Record<string, string> }>, format: string, hint?: string): Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('notes:export', entries, format, hint),
-  parseImportFile: (): Promise<{ ok: boolean; file?: { version: number; exported: string; app: string; notes: Array<{ filename: string; content: string }> }; error?: string; canceled?: boolean }> =>
+  parseImportFile: (): Promise<{ ok: boolean; file?: { version: number; exported: string; app: string; notes: Array<{ dir: string; files: Record<string, string> }> }; error?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('notes:parse-import-file'),
-  writeImportedNotes: (entries: Array<{ filename: string; content: string }>): Promise<{ written: string[]; errors: string[] }> =>
+  writeImportedNotes: (entries: Array<{ dir: string; files: Record<string, string> }>): Promise<{ written: string[]; errors: string[] }> =>
     ipcRenderer.invoke('notes:write-imported', entries),
 
   // GitHub Sync

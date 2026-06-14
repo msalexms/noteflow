@@ -1,9 +1,30 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { Note, NoteSection } from '../types'
-import { parseNote, serializeNote, createEmptyNote, noteFilename, extractTags, isDefaultNoteTitle } from '../lib/noteUtils'
+import {
+  NOTE_MD,
+  parseNoteFolder,
+  buildNoteWritePayload,
+  noteFingerprint,
+  createEmptyNote,
+  noteDirname,
+  extractTags,
+  isDefaultNoteTitle,
+  pathBasename,
+} from '../lib/noteUtils'
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 import { collectAlarms } from '../lib/alarmUtils'
+
+/**
+ * Serializes `next`, computes the minimal multi-file diff against `prev`
+ * (note.md always; only changed section files; deletions of dropped sections)
+ * and writes it through IPC. Mutates next.raw to the written note.md.
+ */
+async function writeNoteToDisk(prev: Note | null, next: Note): Promise<void> {
+  const payload = buildNoteWritePayload(prev, next)
+  next.raw = payload.files[NOTE_MD] ?? next.raw
+  await window.noteflow.writeNote(payload)
+}
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
 function normalize(s: string): string {
@@ -18,6 +39,7 @@ interface NotesState {
   activeNoteId: string | null
   openNoteIds: string[]
   groupViewId: string | null  // when set, the main area shows the group overview instead of the editor
+  noteViewId: string | null   // when set, the main area shows the single-note overview instead of the editor
   brainViewOpen: boolean      // when true, the main area shows the brain graph instead of the editor
   notesDir: string
 
@@ -48,6 +70,7 @@ interface NotesState {
   setActiveNote: (id: string | null) => void
   setOpenNoteIds: (ids: string[]) => void
   setGroupView: (id: string | null) => void
+  setNoteView: (id: string | null) => void
   setBrainView: (open: boolean) => void
   openNoteInSplit: (id: string) => void
   closeOpenNote: (id: string) => void
@@ -77,6 +100,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   activeNoteId: null,
   openNoteIds: [],
   groupViewId: null,
+  noteViewId: null,
   brainViewOpen: false,
   notesDir: '',
   searchQuery: '',
@@ -93,16 +117,20 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   loadNotes: async () => {
     set({ isLoading: true })
     try {
-      const [dir, allFiles, uiState] = await Promise.all([
+      const [dir, allDirs, uiState] = await Promise.all([
         window.noteflow.getNotesDir(),
         window.noteflow.readAllNotes(),
         window.noteflow.getUiState(),
       ])
       set({ notesDir: dir })
 
-      const notes: Note[] = allFiles
-        .filter(({ content }) => content !== null)
-        .map(({ path, content }) => parseNote(content!, path))
+      const notes: Note[] = allDirs.map((rec) =>
+        parseNoteFolder(
+          rec.noteMd,
+          Object.fromEntries(rec.sections.map((s) => [s.file, s.content])),
+          rec.path,
+        )
+      )
 
       // Safety guard: if we got 0 notes but already had notes in memory, this is
       // likely a transient FS issue (e.g. Windows returning an empty dir on OS
@@ -135,8 +163,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   
   syncNote: async (filePath: string) => {
     try {
-      const raw = await window.noteflow.readNote(filePath)
-      if (!raw) {
+      // filePath is the absolute path of the note DIRECTORY
+      const rec = await window.noteflow.readNoteDir(pathBasename(filePath))
+      if (!rec) {
         const targetFilename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase()
         if (!targetFilename) return
 
@@ -175,16 +204,21 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         return
       }
       
-      const incomingNote = parseNote(raw, filePath)
+      const incomingNote = parseNoteFolder(
+        rec.noteMd,
+        Object.fromEntries(rec.sections.map((s) => [s.file, s.content])),
+        rec.path,
+      )
       const existingNote = get().notes.find(n => n.id === incomingNote.id)
-      
+
       if (!existingNote) {
         // New note created in another window
         set(s => ({ notes: [incomingNote, ...s.notes] }))
       } else {
-        // Compare raw content to avoid unnecessary updates
-        if (existingNote.raw === incomingNote.raw) return
-        
+        // Fingerprint compare (note.md + section bodies) to avoid unnecessary
+        // updates. Encrypted notes compare note.md only — see noteFingerprint.
+        if (noteFingerprint(existingNote) === noteFingerprint(incomingNote)) return
+
         set(s => ({
           notes: s.notes.map(n => n.id === incomingNote.id ? incomingNote : n)
         }))
@@ -197,18 +231,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   createNote: async () => {
     const draft = createEmptyNote()
     const dir = get().notesDir
-    const filename = noteFilename(draft.id, draft.title)
-    const filePath = `${dir}/${filename}`
-    const raw = serializeNote(draft)
-    const note: Note = { ...draft, filePath, raw }
+    const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
+    const note: Note = { ...draft, filePath, raw: '' }
 
-    await window.noteflow.writeNote(filePath, raw)
+    await writeNoteToDisk(null, note)
     set((s) => ({
       notes: [note, ...s.notes],
       activeNoteId: note.id,
       openNoteIds: [note.id],
       newlyCreatedNoteId: note.id,
       groupViewId: null,
+      noteViewId: null,
       brainViewOpen: false,
     }))
     return note
@@ -218,18 +251,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     const draft = { ...createEmptyNote(), expiresAt }
     const dir = get().notesDir
-    const filename = noteFilename(draft.id, draft.title)
-    const filePath = `${dir}/${filename}`
-    const raw = serializeNote(draft)
-    const note: Note = { ...draft, filePath, raw }
+    const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
+    const note: Note = { ...draft, filePath, raw: '' }
 
-    await window.noteflow.writeNote(filePath, raw)
+    await writeNoteToDisk(null, note)
     set((s) => ({
       notes: [note, ...s.notes],
       activeNoteId: note.id,
       openNoteIds: [note.id],
       newlyCreatedNoteId: note.id,
       groupViewId: null,
+      noteViewId: null,
       brainViewOpen: false,
     }))
     return note
@@ -251,17 +283,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       sections: source.sections.map((s) => ({ ...s, id: nanoid(8) })),
     }
     const dir = get().notesDir
-    const filename = noteFilename(draft.id, draft.title)
-    const filePath = `${dir}/${filename}`
-    const raw = serializeNote(draft as Note)
-    const note: Note = { ...draft, filePath, raw }
-    await window.noteflow.writeNote(filePath, raw)
+    const filePath = `${dir}/${noteDirname(draft.id, draft.title)}`
+    const note: Note = { ...draft, filePath, raw: '' }
+    await writeNoteToDisk(null, note)
     set((s) => ({
       notes: [note, ...s.notes],
       activeNoteId: note.id,
       openNoteIds: [note.id],
       newlyCreatedNoteId: note.id,
       groupViewId: null,
+      noteViewId: null,
       brainViewOpen: false,
     }))
     return note
@@ -284,18 +315,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
           ...note, ...patch, sections: newSections, tags, encryption,
           updated: new Date().toISOString(),
         }
-        const raw = serializeNote(updated)
-        updated.raw = raw
-        await window.noteflow.writeNote(note.filePath, raw)
+        await writeNoteToDisk(note, updated)
         set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
         window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
         return
       }
       // Non-section patches (favorited, title) always allowed for encrypted notes
       const updated: Note = { ...note, ...patch, updated: new Date().toISOString() }
-      const raw = serializeNote(updated)
-      updated.raw = raw
-      await window.noteflow.writeNote(note.filePath, raw)
+      await writeNoteToDisk(note, updated)
       set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
       return
     }
@@ -314,10 +341,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       updated: new Date().toISOString(),
     }
 
-    const raw = serializeNote(updated)
-    updated.raw = raw
-
-    await window.noteflow.writeNote(note.filePath, raw)
+    await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
     window.noteflow.scheduleAlarms(collectAlarms(get().notes.map(n => n.id === id ? updated : n)))
   },
@@ -350,10 +374,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (!note) return
 
     const updated: Note = { ...note, archived: !note.archived, updated: new Date().toISOString() }
-    const raw = serializeNote(updated)
-    updated.raw = raw
-
-    await window.noteflow.writeNote(note.filePath, raw)
+    await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
   },
 
@@ -373,16 +394,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       }
     }
     set((s) => {
-      // Selecting a note always returns to the editor (closes the group overview / brain view)
-      if (!id) return { activeNoteId: null, groupViewId: null, brainViewOpen: false }
-      if (s.openNoteIds.includes(id)) return { activeNoteId: id, groupViewId: null, brainViewOpen: false }
-      return { activeNoteId: id, openNoteIds: [id], groupViewId: null, brainViewOpen: false }
+      // Selecting a note always returns to the editor (closes the group / note / brain views)
+      if (!id) return { activeNoteId: null, groupViewId: null, noteViewId: null, brainViewOpen: false }
+      if (s.openNoteIds.includes(id)) return { activeNoteId: id, groupViewId: null, noteViewId: null, brainViewOpen: false }
+      return { activeNoteId: id, openNoteIds: [id], groupViewId: null, noteViewId: null, brainViewOpen: false }
     })
     if (id) window.noteflow.setUiState({ activeNoteId: id })
   },
-  // Group overview and brain view are mutually exclusive full-area views: opening one closes the other.
-  setGroupView: (id) => set({ groupViewId: id, brainViewOpen: false }),
-  setBrainView: (open) => set((s) => ({ brainViewOpen: open, groupViewId: open ? null : s.groupViewId })),
+  // Group overview, note overview and brain view are mutually exclusive full-area views: opening one closes the others.
+  setGroupView: (id) => set({ groupViewId: id, noteViewId: null, brainViewOpen: false }),
+  setNoteView: (id) => set({ noteViewId: id, groupViewId: null, brainViewOpen: false }),
+  setBrainView: (open) => set((s) => ({ brainViewOpen: open, groupViewId: open ? null : s.groupViewId, noteViewId: open ? null : s.noteViewId })),
   setOpenNoteIds: (ids) => {
     set((s) => {
       const existing = new Set(s.notes.map((n) => n.id))
@@ -476,9 +498,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (!note || note.encryption) return
     const encryption = await encryptSections(note.sections, password, options)
     const updated: Note = { ...note, sections: [], encryption, updated: new Date().toISOString() }
-    const raw = serializeNote(updated)
-    updated.raw = raw
-    await window.noteflow.writeNote(note.filePath, raw)
+    // buildNoteWritePayload deletes the plaintext section files on encrypt
+    await writeNoteToDisk(note, updated)
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }))
   },
 
@@ -510,9 +531,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     // Throws on wrong password — caller is responsible for catching
     const sections = await decryptSections(note.encryption, password)
     const updated: Note = { ...note, sections, encryption: undefined, updated: new Date().toISOString() }
-    const raw = serializeNote(updated)
-    updated.raw = raw
-    await window.noteflow.writeNote(note.filePath, raw)
+    // Recreates the plaintext section files (prev had none — it was encrypted)
+    await writeNoteToDisk(note, updated)
     set((s) => {
       const { [id]: _, ...sessionPasswords } = s.sessionPasswords
       return {

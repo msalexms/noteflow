@@ -57,39 +57,54 @@ export interface NoteMeta {
 
 export interface Note extends NoteMeta {
   sections: NoteSection[]  // ordered, user-defined content areas
-  raw: string              // full file content including frontmatter
-  filePath: string
+  raw: string              // content of note.md (frontmatter anchor)
+  filePath: string         // absolute path of the note DIRECTORY
 }
 
-export interface NoteFileMeta {
-  filename: string
-  path: string
-  mtime: string
-  ctime: string
+// On-disk folder record as returned by fs:read-all-notes / fs:read-note-dir
+export interface NoteDirRecord {
+  dir: string     // directory name ('<slug>-<id>')
+  path: string    // absolute path of the note directory
+  noteMd: string  // content of note.md
+  sections: { file: string; content: string }[]  // sibling section files
+}
+
+// Multi-file write of a note directory (computed by buildNoteWritePayload)
+export interface NoteWritePayload {
+  dir: string                     // directory name (single path segment)
+  files: Record<string, string>   // relative filename → content (includes note.md)
+  deleteFiles: string[]           // relative filenames to remove (dropped sections)
 }
 
 // ── Export / Import ───────────────────────────────────────────────────────────
 
+// v2: a note travels as its folder bundle (note.md + section files)
 export interface NoteflowExportEntry {
-  filename: string
-  content: string  // raw YAML frontmatter + markdown body
+  dir: string
+  files: Record<string, string>
 }
 
 export interface NoteflowExportFile {
-  version: 1
+  version: 2
   exported: string   // ISO 8601
   app: 'noteflow'
   notes: NoteflowExportEntry[]
 }
 
+// Plain single-file export entry (.md / .txt formats)
+export interface PlainExportEntry {
+  filename: string
+  content: string
+}
+
 export type ImportConflictStrategy = 'skip' | 'overwrite' | 'keep-both'
 
 export interface ImportPreviewEntry {
-  filename: string
-  content: string
+  dir: string
+  files: Record<string, string>
   parsedTitle: string
   parsedId: string
-  conflict: 'none' | 'id' | 'filename'
+  conflict: 'none' | 'id' | 'dir'
   strategy: ImportConflictStrategy
 }
 
@@ -139,12 +154,10 @@ export interface IndexProgress {
 declare global {
   interface Window {
     noteflow: {
-      listNotes: () => Promise<NoteFileMeta[]>
-      readNote: (filePath: string) => Promise<string | null>
-      readAllNotes: () => Promise<{ path: string; content: string | null }[]>
-      writeNote: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>
-      deleteNote: (filePath: string) => Promise<{ ok: boolean; error?: string }>
-      renameNote: (oldPath: string, newPath: string) => Promise<{ ok: boolean; error?: string }>
+      readAllNotes: () => Promise<NoteDirRecord[]>
+      readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
+      writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string }>
+      deleteNote: (dir: string) => Promise<{ ok: boolean; error?: string }>
       getNotesDir: () => Promise<string>
       openNotesFolder: () => Promise<void>
       chooseNotesDir: () => Promise<string | null>
@@ -180,7 +193,7 @@ declare global {
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
       onUpdateProgress: (callback: (percent: number) => void) => void
       onUpdateInstalling: (callback: () => void) => void
-      exportNotes: (entries: NoteflowExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
+      exportNotes: (entries: NoteflowExportEntry[] | PlainExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync

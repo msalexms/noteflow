@@ -286,10 +286,10 @@ noteflow push</code></pre>
 
         <section id="note-format">
           <h2>Note format</h2>
-          <p>Each note is a plain Markdown file with a YAML frontmatter header:</p>
+          <p>Each note is a <strong>folder</strong> containing a frontmatter-only <code>note.md</code> (metadata + section index) and one plain Markdown file per section:</p>
           <div class="docs__cmd">
             <div class="docs__cmd-header">
-              <span>31-03-2026.md</span>
+              <span>31-03-2026-abc12345/note.md</span>
               <button class="docs__copy-btn" type="button">copy</button>
             </div>
             <pre><code>---
@@ -298,22 +298,24 @@ title: "31-03-2026"
 tags: ["urgent", "backend"]
 created: "2026-03-31T10:00:00.000Z"
 updated: "2026-03-31T10:05:00.000Z"
+formatVersion: 2
 sections:
   - id: "sec001"
     name: "Note"
-    content: "texto aquí"
+    file: "sec001.md"
     isRawMode: true
   - id: "sec002"
     name: "Tasks"
-    content: "- [ ] tarea pendiente"
+    file: "sec002.md"
     isRawMode: true
----
-texto aquí</code></pre>
+---</code></pre>
           </div>
           <ul class="docs__list">
-            <li>The body after <code>---</code> is always the first section's content (for readability outside the app).</li>
+            <li>Each section's body lives in its own <code>&lt;sectionId&gt;.md</code> next to <code>note.md</code> — plain Markdown, editable with any external editor, with clean git diffs.</li>
+            <li><code>updated:</code> in <code>note.md</code> is the sync conflict timestamp for the whole note.</li>
             <li><code>isRawMode: true</code> = Markdown/raw mode. <code>false</code> = rich text (TipTap HTML).</li>
-            <li>Notes with <code>encryption:</code> in the frontmatter are <strong>ignored</strong> by the CLI — they can only be decrypted in the desktop app.</li>
+            <li>Encrypted notes keep only <code>note.md</code> (with the <code>encryption:</code> block) — they are <strong>ignored</strong> by the CLI and can only be decrypted in the desktop app.</li>
+            <li>Run <code>noteflow migrate</code> once to convert old flat <code>.md</code> notes to the folder format (the desktop app does this automatically on startup).</li>
           </ul>
         </section>
 
@@ -403,7 +405,7 @@ noteflow get "31-03" --json</code></pre>
           </div>
 
           <h3 id="cmd-rename"><code>rename</code> — Rename a note</h3>
-          <p>Updates the <code>title</code> field in the frontmatter. The filename (which contains the note id) is unchanged.</p>
+          <p>Updates the <code>title</code> field in <code>note.md</code>. The folder name (which contains the note id) is unchanged.</p>
           <div class="docs__cmd">
             <div class="docs__cmd-header">
               <span>bash</span>

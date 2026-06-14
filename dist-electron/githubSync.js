@@ -14,10 +14,13 @@ exports.pullNotes = pullNotes;
 exports.pushAllNotes = pushAllNotes;
 exports.schedulePush = schedulePush;
 exports.scheduleDelete = scheduleDelete;
+exports.scheduleDeleteDir = scheduleDeleteDir;
+exports.migrateRemoteToV2IfNeeded = migrateRemoteToV2IfNeeded;
 const electron_1 = require("electron");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const https_1 = __importDefault(require("https"));
+const noteFormat_1 = require("./noteFormat");
 // ── Constants ─────────────────────────────────────────────────────────────────
 const README_CONTENT = `# Your notes are synced with GitHub
 
@@ -37,9 +40,10 @@ This repository is **private**. As long as it stays that way, nobody else can se
 
 You are reading this note inside NoteFlow. It lives in your GitHub repository as \`README.md\` and will stay in sync like any other note.
 `;
-const GROUPS_FILENAME = 'groups.json';
-const SECTION_COLORS_FILENAME = 'section-colors.json';
-const METADATA_FILENAMES = [GROUPS_FILENAME, SECTION_COLORS_FILENAME];
+// Root-level JSON files that sync alongside the note folders.
+// folders.json / note-order.json were historically pushed but never pulled —
+// fixed here as part of the v2 format work.
+const METADATA_FILENAMES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json'];
 // ── Settings helpers ──────────────────────────────────────────────────────────
 function getSettingsPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), 'settings.json');
@@ -189,16 +193,71 @@ async function ensureRepo(token, owner, repo) {
         await upsertRemoteFile(token, owner, repo, 'README.md', README_CONTENT);
     }
 }
-async function listRemoteNotes(token, owner, repo) {
-    // Do NOT catch here — let network/API errors propagate to the caller (pullNotes).
-    // Returning [] on error would make the deletion logic treat all local files as
-    // "remotely deleted" and wipe them from disk when there is no internet connection.
-    const files = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/`));
-    return Array.isArray(files) ? files.filter((f) => f.type === 'file' && f.name.endsWith('.md') && f.name !== 'README.md') : [];
+// Remote paths are notes-dir-relative with forward slashes ('<dir>/<file>.md'
+// for note files, bare filenames for root metadata). The Contents API accepts
+// slash paths verbatim — but each SEGMENT must be URL-encoded individually
+// (encoding the whole path would escape the separators).
+function encodeRemotePath(relPath) {
+    return relPath.split('/').map(encodeURIComponent).join('/');
 }
-async function getRemoteFile(token, owner, repo, filename) {
+// Cached per connection; reset on disconnect
+let cachedDefaultBranch = null;
+async function getDefaultBranch(token, owner, repo) {
+    if (cachedDefaultBranch)
+        return cachedDefaultBranch;
+    const info = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}`));
+    cachedDefaultBranch = info.default_branch || 'main';
+    return cachedDefaultBranch;
+}
+/**
+ * Recursive listing of every blob in the repo via the Git Trees API — the
+ * Contents API only lists one directory level, the tree call returns the whole
+ * folder-per-note layout in a single request.
+ *
+ * Do NOT catch here — let network/API errors propagate to the caller (pullNotes).
+ * Returning [] on error would make the deletion logic treat all local notes as
+ * "remotely deleted" and wipe them from disk when there is no internet connection.
+ */
+async function listRemoteTree(token, owner, repo) {
+    const branch = await getDefaultBranch(token, owner, repo);
+    const res = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`));
+    if (res?.truncated)
+        console.warn('[GitHubSync] tree listing truncated — repo unusually large');
+    return (res?.tree ?? [])
+        .filter((t) => t.type === 'blob')
+        .map(({ path: p, sha }) => ({ path: p, sha }));
+}
+/** Groups tree blobs into note directories: dir → set of .md filenames inside it. */
+function groupRemoteNoteDirs(blobs) {
+    const dirs = new Map();
+    for (const b of blobs) {
+        const i = b.path.indexOf('/');
+        if (i <= 0)
+            continue;
+        const rest = b.path.slice(i + 1);
+        if (rest.includes('/') || !rest.endsWith('.md'))
+            continue; // deeper nesting / non-md: not ours
+        const dir = b.path.slice(0, i);
+        let set = dirs.get(dir);
+        if (!set) {
+            set = new Set();
+            dirs.set(dir, set);
+        }
+        set.add(rest);
+    }
+    // Only dirs anchored by a note.md are notes
+    for (const [dir, files] of dirs) {
+        if (!files.has(noteFormat_1.NOTE_MD))
+            dirs.delete(dir);
+    }
+    return dirs;
+}
+function rootFlatNoteBlobs(blobs) {
+    return blobs.filter((b) => !b.path.includes('/') && b.path.endsWith('.md') && b.path !== 'README.md');
+}
+async function getRemoteFile(token, owner, repo, relPath) {
     try {
-        const file = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`));
+        const file = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
         const content = Buffer.from(file.content.replace(/\n/g, ''), 'base64').toString('utf-8');
         return { content, sha: file.sha };
     }
@@ -206,19 +265,20 @@ async function getRemoteFile(token, owner, repo, filename) {
         return null;
     }
 }
-async function upsertRemoteFile(token, owner, repo, filename, content, _retrying = false) {
+async function upsertRemoteFile(token, owner, repo, relPath, content, _retrying = false) {
     let sha;
     try {
-        const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`));
+        const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
         sha = existing.sha;
     }
     catch {
         // File doesn't exist yet — will be created
     }
+    // note.md carries the title; section files fall back to '<dir>/<file>' label
     const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
-    const label = titleMatch ? titleMatch[1].trim() : filename.replace(/\.md$/, '');
+    const label = titleMatch ? titleMatch[1].trim() : relPath.replace(/\.md$/, '');
     try {
-        await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`, {
+        await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`, {
             message: sha ? `update: ${label}` : `add: ${label}`,
             content: Buffer.from(content).toString('base64'),
             ...(sha ? { sha } : {}),
@@ -229,16 +289,16 @@ async function upsertRemoteFile(token, owner, repo, filename, content, _retrying
         // Re-fetch the current SHA and retry once.
         const msg = err instanceof Error ? err.message : String(err);
         if (!_retrying && (msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409'))) {
-            await upsertRemoteFile(token, owner, repo, filename, content, true);
+            await upsertRemoteFile(token, owner, repo, relPath, content, true);
             return;
         }
         throw err;
     }
 }
-async function removeRemoteFile(token, owner, repo, filename) {
+async function removeRemoteFile(token, owner, repo, relPath) {
     try {
-        const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`));
-        await githubRequest(token, 'DELETE', `/repos/${owner}/${repo}/contents/${encodeURIComponent(filename)}`, { message: `delete: ${filename}`, sha: existing.sha });
+        const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
+        await githubRequest(token, 'DELETE', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`, { message: `delete: ${relPath}`, sha: existing.sha });
     }
     catch {
         // File doesn't exist remotely — nothing to do
@@ -393,6 +453,7 @@ function disconnectGitHub() {
     pushTimers.clear();
     syncSettings = { enabled: false };
     syncError = undefined;
+    cachedDefaultBranch = null;
     setInitialPullStatus('pending');
     const settings = readSettings();
     delete settings.githubSync;
@@ -429,57 +490,82 @@ async function pullNotes(notesDir) {
     let hadMetadataChanges = false;
     const previousLastSync = s.lastSync;
     try {
-        const remoteFiles = await listRemoteNotes(token, s.owner, s.repo);
-        for (const file of remoteFiles) {
+        const blobs = await listRemoteTree(token, s.owner, s.repo);
+        const remoteNoteDirs = groupRemoteNoteDirs(blobs);
+        const remoteHasMarker = blobs.some((b) => b.path === noteFormat_1.FORMAT_MARKER_FILE);
+        const remoteHasFlatNotes = rootFlatNoteBlobs(blobs).length > 0;
+        // Transition guard: while the remote is still (partly) on format v1 — flat
+        // .md files present and no v2 marker — the pull is ADDITIVE ONLY. The
+        // deletion rule below would otherwise wipe freshly-migrated local folders
+        // that the remote simply doesn't have yet.
+        const remoteIsV2 = remoteHasMarker && !remoteHasFlatNotes;
+        // Pull each remote note directory. The note dir is the unit of conflict
+        // resolution: note.md's `updated:` decides, and a newer remote wins
+        // WHOLESALE (all its section files mirrored, stale local sections removed).
+        for (const [dir, remoteFilesInDir] of remoteNoteDirs) {
             try {
-                const remote = await getRemoteFile(token, s.owner, s.repo, file.name);
-                if (!remote)
+                const anchorRel = `${dir}/${noteFormat_1.NOTE_MD}`;
+                const remoteAnchor = await getRemoteFile(token, s.owner, s.repo, anchorRel);
+                if (!remoteAnchor)
                     continue;
-                const localPath = path_1.default.join(notesDir, file.name);
-                if (fs_1.default.existsSync(localPath)) {
-                    const localContent = fs_1.default.readFileSync(localPath, 'utf-8');
-                    const localUpdated = extractUpdatedTimestamp(localContent);
-                    const remoteUpdated = extractUpdatedTimestamp(remote.content);
-                    const localUpdatedTs = parseUpdatedTimestamp(localUpdated);
-                    const remoteUpdatedTs = parseUpdatedTimestamp(remoteUpdated);
-                    // Skip if local is newer or equal
+                const localDirPath = path_1.default.join(notesDir, dir);
+                const localAnchorPath = path_1.default.join(localDirPath, noteFormat_1.NOTE_MD);
+                if (fs_1.default.existsSync(localAnchorPath)) {
+                    const localUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs_1.default.readFileSync(localAnchorPath, 'utf-8')));
+                    const remoteUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remoteAnchor.content));
+                    // Skip the whole dir if local is newer or equal
                     if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs)
                         continue;
                 }
-                fs_1.default.writeFileSync(localPath, remote.content, 'utf-8');
-                updatedFiles.push(localPath);
+                fs_1.default.mkdirSync(localDirPath, { recursive: true });
+                fs_1.default.writeFileSync(localAnchorPath, remoteAnchor.content, 'utf-8');
+                for (const f of remoteFilesInDir) {
+                    if (f === noteFormat_1.NOTE_MD)
+                        continue;
+                    const remoteSection = await getRemoteFile(token, s.owner, s.repo, `${dir}/${f}`);
+                    if (remoteSection)
+                        fs_1.default.writeFileSync(path_1.default.join(localDirPath, f), remoteSection.content, 'utf-8');
+                }
+                // Sections removed remotely → remove their local files
+                try {
+                    for (const lf of fs_1.default.readdirSync(localDirPath)) {
+                        if (!lf.endsWith('.md') || lf === noteFormat_1.NOTE_MD)
+                            continue;
+                        if (!remoteFilesInDir.has(lf)) {
+                            try {
+                                fs_1.default.unlinkSync(path_1.default.join(localDirPath, lf));
+                            }
+                            catch { /* ignore */ }
+                        }
+                    }
+                }
+                catch { /* ignore */ }
+                updatedFiles.push(localDirPath);
                 pulled++;
             }
             catch (err) {
-                errors.push(`${file.name}: ${String(err)}`);
+                errors.push(`${dir}: ${String(err)}`);
             }
         }
-        // Delete local notes that no longer exist on remote.
-        // Safety rule: only delete if the local file's `updated` timestamp is older
-        // than the last sync — meaning it was known to the remote at some point and
-        // was since deleted. Files newer than lastSync were created locally after the
-        // last sync and haven't been pushed yet, so we must not touch them.
+        // Delete local note dirs that no longer exist on remote.
+        // Safety rule: only delete if the local note.md's `updated` timestamp is
+        // older than the last sync — meaning it was known to the remote at some
+        // point and was since deleted. Dirs newer than lastSync were created
+        // locally after the last sync and haven't been pushed yet — keep them.
         const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null;
-        if (lastSyncTime !== null) {
-            const remoteFilenames = new Set(remoteFiles.map((f) => f.name));
-            let localFilenames = [];
-            try {
-                localFilenames = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md'));
-            }
-            catch { /* ignore */ }
-            for (const localFilename of localFilenames) {
-                if (remoteFilenames.has(localFilename))
+        if (lastSyncTime !== null && remoteIsV2) {
+            for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+                if (remoteNoteDirs.has(dir))
                     continue;
-                const localPath = path_1.default.join(notesDir, localFilename);
+                const localDirPath = path_1.default.join(notesDir, dir);
                 try {
-                    const localContent = fs_1.default.readFileSync(localPath, 'utf-8');
-                    const localUpdated = extractUpdatedTimestamp(localContent);
-                    const localUpdatedTime = parseUpdatedTimestamp(localUpdated);
+                    const localContent = fs_1.default.readFileSync(path_1.default.join(localDirPath, noteFormat_1.NOTE_MD), 'utf-8');
+                    const localUpdatedTime = parseUpdatedTimestamp(extractUpdatedTimestamp(localContent));
                     if (localUpdatedTime === null)
                         continue; // can't determine age — skip to be safe
                     if (localUpdatedTime > lastSyncTime)
                         continue; // created locally after last sync, not yet pushed
-                    fs_1.default.unlinkSync(localPath);
+                    fs_1.default.rmSync(localDirPath, { recursive: true, force: true });
                     deleted++;
                 }
                 catch { /* ignore */ }
@@ -552,29 +638,42 @@ async function pushAllNotes(notesDir) {
     }
     let pushed = 0;
     const errors = [];
-    let filesToPush;
+    // Every file of every note directory ('<dir>/<file>.md') + root metadata
+    const relPaths = [];
     try {
-        const noteFiles = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md');
-        const metadataFiles = METADATA_FILENAMES.filter((filename) => fs_1.default.existsSync(path_1.default.join(notesDir, filename)));
-        filesToPush = [...noteFiles, ...metadataFiles];
+        for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+            for (const f of fs_1.default.readdirSync(path_1.default.join(notesDir, dir))) {
+                if (f.endsWith('.md'))
+                    relPaths.push(`${dir}/${f}`);
+            }
+        }
+        for (const filename of METADATA_FILENAMES) {
+            if (fs_1.default.existsSync(path_1.default.join(notesDir, filename)))
+                relPaths.push(filename);
+        }
     }
     catch {
         return { pushed: 0, errors: [] };
     }
-    for (const filename of filesToPush) {
+    for (const relPath of relPaths) {
         try {
-            const content = fs_1.default.readFileSync(path_1.default.join(notesDir, filename), 'utf-8');
-            await upsertRemoteFile(token, s.owner, s.repo, filename, content);
+            const content = fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8');
+            await upsertRemoteFile(token, s.owner, s.repo, relPath, content);
             pushed++;
         }
         catch (err) {
-            errors.push(filename);
-            console.error(`[GitHubSync] pushAll failed for ${filename}:`, String(err));
+            errors.push(relPath);
+            console.error(`[GitHubSync] pushAll failed for ${relPath}:`, String(err));
         }
     }
     return { pushed, errors };
 }
-function schedulePush(filePath, content, onStart, onComplete) {
+/**
+ * Debounced single-file push. `relPath` is the notes-dir-relative remote path
+ * ('<dir>/<file>.md' for note files, '<name>.json' for root metadata) and is
+ * also the debounce key — two files of the same note debounce independently.
+ */
+function schedulePush(relPath, content, onStart, onComplete) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
         onComplete?.();
@@ -585,30 +684,29 @@ function schedulePush(filePath, content, onStart, onComplete) {
     // write already happened in the caller, so no data is lost by deferring.
     // Pending changes are flushed automatically when pullNotes transitions to 'ok'.
     if (initialPullStatus !== 'ok') {
-        console.warn(`[GitHubSync] Push deferred for ${path_1.default.basename(filePath)}: initialPullStatus=${initialPullStatus}`);
+        console.warn(`[GitHubSync] Push deferred for ${relPath}: initialPullStatus=${initialPullStatus}`);
         onComplete?.(`sync-gated:${initialPullStatus}`);
         return;
     }
-    schedulePushUnguarded(filePath, content, onStart, onComplete);
+    schedulePushUnguarded(relPath, content, onStart, onComplete);
 }
-function schedulePushUnguarded(filePath, content, onStart, onComplete) {
+function schedulePushUnguarded(relPath, content, onStart, onComplete) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) {
         onComplete?.();
         return;
     }
-    const filename = path_1.default.basename(filePath);
     // Debounce: reset timer if already queued for this file.
     // Previous callbacks are intentionally discarded — the new call supersedes them.
-    const existing = pushTimers.get(filename);
+    const existing = pushTimers.get(relPath);
     if (existing)
         clearTimeout(existing);
     const timer = setTimeout(async () => {
-        pushTimers.delete(filename);
+        pushTimers.delete(relPath);
         onStart?.(); // timer fired → HTTP request is about to start
         try {
             const token = decryptToken(s.encryptedToken);
-            await upsertRemoteFile(token, s.owner, s.repo, filename, content);
+            await upsertRemoteFile(token, s.owner, s.repo, relPath, content);
             syncSettings = { ...s, lastSync: new Date().toISOString() };
             const settings = readSettings();
             settings.githubSync = syncSettings;
@@ -622,55 +720,173 @@ function schedulePushUnguarded(filePath, content, onStart, onComplete) {
             onComplete?.(syncError);
         }
     }, 5000); // 5s debounce — avoids spamming API while typing
-    pushTimers.set(filename, timer);
+    pushTimers.set(relPath, timer);
 }
-// Called when pullNotes transitions from pending/failed → ok. Scans the notes
-// directory and re-queues pushes for any local file newer than the previous
-// lastSync (i.e. edits made while the push gate was closed). Survives restarts
-// because the detection is purely based on on-disk `updated:` timestamps.
+// Called when pullNotes transitions from pending/failed → ok. Scans the note
+// directories and re-queues pushes for every file of any note whose note.md is
+// newer than the previous lastSync (i.e. edits made while the push gate was
+// closed). The note.md timestamp can't tell WHICH section changed, so the
+// whole dir is re-queued. Survives restarts: detection is purely on-disk.
 function flushPendingLocalChanges(notesDir, previousLastSync) {
     const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null;
-    let files = [];
-    try {
-        files = fs_1.default.readdirSync(notesDir).filter((f) => f.endsWith('.md') && f !== 'README.md');
-    }
-    catch {
-        return;
-    }
-    for (const filename of files) {
-        const fullPath = path_1.default.join(notesDir, filename);
+    for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+        const dirPath = path_1.default.join(notesDir, dir);
         try {
-            const content = fs_1.default.readFileSync(fullPath, 'utf-8');
-            const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(content));
+            const anchor = fs_1.default.readFileSync(path_1.default.join(dirPath, noteFormat_1.NOTE_MD), 'utf-8');
+            const updatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(anchor));
             if (updatedMs === null)
                 continue;
             if (lastSyncMs !== null && updatedMs <= lastSyncMs)
                 continue;
-            schedulePushUnguarded(fullPath, content);
+            for (const f of fs_1.default.readdirSync(dirPath)) {
+                if (!f.endsWith('.md'))
+                    continue;
+                try {
+                    schedulePushUnguarded(`${dir}/${f}`, fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8'));
+                }
+                catch { /* unreadable file — skip */ }
+            }
         }
         catch {
-            // Unreadable file — skip.
+            // Unreadable dir — skip.
         }
     }
 }
-async function scheduleDelete(filePath) {
+/** Removes a single remote file ('<dir>/<file>.md') — used for dropped sections. */
+async function scheduleDelete(relPath) {
     const s = syncSettings ?? loadSyncSettings();
     if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
         return;
-    const filename = path_1.default.basename(filePath);
     // Cancel any pending push for this file before deleting
-    const existing = pushTimers.get(filename);
+    const existing = pushTimers.get(relPath);
     if (existing) {
         clearTimeout(existing);
-        pushTimers.delete(filename);
+        pushTimers.delete(relPath);
     }
     try {
         const token = decryptToken(s.encryptedToken);
-        await removeRemoteFile(token, s.owner, s.repo, filename);
+        await removeRemoteFile(token, s.owner, s.repo, relPath);
     }
     catch (err) {
         console.error('[GitHubSync] delete failed:', String(err));
     }
+}
+/** Removes a whole remote note directory (every blob under '<dir>/'). */
+async function scheduleDeleteDir(dir) {
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return;
+    // Cancel any pending pushes for files inside this dir
+    for (const key of [...pushTimers.keys()]) {
+        if (key.startsWith(`${dir}/`)) {
+            clearTimeout(pushTimers.get(key));
+            pushTimers.delete(key);
+        }
+    }
+    try {
+        const token = decryptToken(s.encryptedToken);
+        const blobs = await listRemoteTree(token, s.owner, s.repo);
+        for (const b of blobs) {
+            if (b.path.startsWith(`${dir}/`)) {
+                await removeRemoteFile(token, s.owner, s.repo, b.path);
+            }
+        }
+    }
+    catch (err) {
+        console.error('[GitHubSync] delete dir failed:', String(err));
+    }
+}
+// ── One-time remote format migration (v1 flat files → v2 folders) ────────────
+let remoteMigrationInFlight = false;
+/**
+ * Brings the remote repo to format v2: converts any remaining root-level flat
+ * note files into folders, pushes every local note folder, deletes the old
+ * flat files and finally uploads the `.noteflow-format` marker. Idempotent and
+ * cheap once done (guarded by `remoteFormatMigratedAt` in settings).
+ *
+ * Sequencing safety: callers run this AFTER a successful pull (which is
+ * additive-only while the remote is v1), and the marker is pushed LAST so
+ * other v2 clients keep their deletion logic disabled until the conversion
+ * has fully landed. Returns true when a migration actually ran.
+ */
+async function migrateRemoteToV2IfNeeded(notesDir) {
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return false;
+    if (s.remoteFormatMigratedAt)
+        return false;
+    if (initialPullStatus !== 'ok')
+        return false;
+    if (remoteMigrationInFlight)
+        return false;
+    remoteMigrationInFlight = true;
+    try {
+        const token = decryptToken(s.encryptedToken);
+        const blobs = await listRemoteTree(token, s.owner, s.repo);
+        const hasMarker = blobs.some((b) => b.path === noteFormat_1.FORMAT_MARKER_FILE);
+        const flatNotes = rootFlatNoteBlobs(blobs);
+        if (hasMarker && flatNotes.length === 0) {
+            // Remote already fully v2 (migrated by another device) — just record it.
+            persistMigratedAt(s);
+            return false;
+        }
+        console.log(`[GitHubSync] migrating remote to format v2 (${flatNotes.length} flat note(s))`);
+        // 1) Convert remote flat notes locally first so nothing is lost: notes that
+        //    only exist remotely (or are NEWER remotely — an old client pushed after
+        //    our local migration) are written as local folders before deletion.
+        for (const blob of flatNotes) {
+            try {
+                const remote = await getRemoteFile(token, s.owner, s.repo, blob.path);
+                if (!remote)
+                    continue;
+                const dir = blob.path.replace(/\.md$/i, '');
+                const localAnchorPath = path_1.default.join(notesDir, dir, noteFormat_1.NOTE_MD);
+                if (fs_1.default.existsSync(localAnchorPath)) {
+                    const localTs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs_1.default.readFileSync(localAnchorPath, 'utf-8')));
+                    const remoteTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remote.content));
+                    if (localTs !== null && remoteTs !== null && remoteTs <= localTs)
+                        continue; // local folder is current
+                }
+                const note = (0, noteFormat_1.parseLegacyNoteRaw)(remote.content);
+                const { files } = (0, noteFormat_1.serializeNoteFolder)(note, { preserveUpdated: true });
+                fs_1.default.mkdirSync(path_1.default.join(notesDir, dir), { recursive: true });
+                for (const [f, content] of Object.entries(files)) {
+                    fs_1.default.writeFileSync(path_1.default.join(notesDir, dir, f), content, 'utf-8');
+                }
+            }
+            catch (err) {
+                console.error(`[GitHubSync] remote migration: failed to convert ${blob.path}:`, String(err));
+            }
+        }
+        // 2) Push every local note folder + metadata
+        await pushAllNotes(notesDir);
+        // 3) Delete the old flat files from the remote
+        for (const blob of flatNotes) {
+            try {
+                await removeRemoteFile(token, s.owner, s.repo, blob.path);
+            }
+            catch (err) {
+                console.error(`[GitHubSync] remote migration: failed to delete ${blob.path}:`, String(err));
+            }
+        }
+        // 4) Marker LAST — it flips other clients into full v2 behaviour
+        await upsertRemoteFile(token, s.owner, s.repo, noteFormat_1.FORMAT_MARKER_FILE, `${noteFormat_1.NOTE_FORMAT_VERSION}\n`);
+        persistMigratedAt(s);
+        console.log('[GitHubSync] remote format migration complete');
+        return true;
+    }
+    finally {
+        remoteMigrationInFlight = false;
+    }
+}
+function persistMigratedAt(s) {
+    // Re-read the live settings — a debounced push may have bumped lastSync
+    // while the migration was running.
+    const latest = syncSettings ?? s;
+    syncSettings = { ...latest, remoteFormatMigratedAt: new Date().toISOString() };
+    const settings = readSettings();
+    settings.githubSync = syncSettings;
+    writeSettings(settings);
 }
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function extractUpdatedTimestamp(content) {

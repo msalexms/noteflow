@@ -123,6 +123,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setGroupView = useNotesStore((s) => s.setGroupView)
+  const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
@@ -308,7 +309,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           n.tags.some((t) => normalize(t).includes(q))
         )
       })
-      .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
+      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime())
   }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery, archivedGroupIds])
 
   const notes = useMemo(() => {
@@ -729,8 +730,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               // synchronous request-section event is lost. Stash the target section (the editor
               // reads it on mount) and re-emit once it's listening (next macrotask) — same as
               // GroupOverview / BrainView.
-              const { groupViewId, brainViewOpen } = useNotesStore.getState()
-              const editorUnmounted = groupViewId !== null || brainViewOpen
+              const { groupViewId, noteViewId, brainViewOpen } = useNotesStore.getState()
+              const editorUnmounted = groupViewId !== null || noteViewId !== null || brainViewOpen
               if (editorUnmounted) {
                 useNotesStore.setState({ pendingInitialSectionId: sectionId })
               }
@@ -1160,11 +1161,11 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 return (
                   <Fragment key={`group-${group.id}`}>
                     {isFirstGroup && (
-                      <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-2.5">
+                      <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-5">
                         <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">groups</span>
                       </li>
                     )}
-                  <li className={`${isFirstGroup ? '' : 'first:mt-0 mt-2.5'} ${group.archived ? 'opacity-50' : ''}`}>
+                  <li className={`${isFirstGroup ? '' : 'first:mt-0 mt-1.5'} ${group.archived ? 'opacity-50' : ''}`}>
                     {/* Group header / rename input — draggable to reorder groups */}
                     <div
                       style={{ position: 'relative', opacity: draggingGroupId === group.id ? 0.4 : 1 }}
@@ -1295,7 +1296,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               if (showNotesHeader && item.note.id === firstUngroupedNoteId) {
                 return (
                   <Fragment key={`note-${item.note.id}`}>
-                    <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-2.5">
+                    <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-5">
                       <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">notes</span>
                     </li>
                     {renderNoteButton(item.note, null)}
@@ -1356,15 +1357,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               <Archive size={12} />
               {note.archived ? 'Unarchive' : 'Archive'}
             </button>
-            {!note.encryption && (
-              <button
-                onClick={() => { closeAllMenus(); setEncModal({ mode: 'encrypt', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-              >
-                <Lock size={12} />
-                Encrypt note
-              </button>
-            )}
             {note.encryption && !sessionPasswords[note.id] && (
               <button
                 onClick={() => { closeAllMenus(); setEncModal({ mode: 'unlock', noteId: note.id }) }}
@@ -1408,6 +1400,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             >
               <Copy size={12} />
               Duplicate note
+            </button>
+            <button
+              onClick={() => { setNoteView(note.id); closeAllMenus() }}
+              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
+            >
+              <LayoutGrid size={12} />
+              Note overview
             </button>
 
             {currentSection && (
@@ -1666,7 +1665,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   onConfirm: () => { setModal(null); deleteNote(note.id) },
                 })
               }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
+              className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
             >
               <Trash2 size={12} />
               Delete note

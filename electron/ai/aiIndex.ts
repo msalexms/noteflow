@@ -100,10 +100,10 @@ export async function applySettings(next: AiSettings): Promise<void> {
   if (!prev.enabled || modelChanged) await activateModel()
 }
 
-/** Debounced incremental index of a single note (called from fs:write-note). */
-export function scheduleIndex(filePath: string, content: string): void {
+/** Debounced incremental index of a single note directory (called from fs:write-note). */
+export function scheduleIndex(dirPath: string): void {
   if (!settings.enabled) return
-  const key = path.basename(filePath)
+  const key = path.basename(dirPath)
   const existing = indexTimers.get(key)
   if (existing) clearTimeout(existing)
   indexTimers.set(key, setTimeout(async () => {
@@ -112,16 +112,16 @@ export function scheduleIndex(filePath: string, content: string): void {
     // While dormant the edit is skipped; the next explicit reindex catches it up.
     if (!child || !ready) return
     try {
-      await request('index-note', { filePath, content })
+      await request('index-note', { dirPath })
     } catch (err) {
       console.error('[aiIndex] index-note failed:', String(err))
     }
   }, INDEX_DEBOUNCE_MS))
 }
 
-export function removeFromIndex(filePath: string): void {
+export function removeFromIndex(dirPath: string): void {
   if (!settings.enabled || !child || !ready) return
-  request('remove-note', { filePath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)))
+  request('remove-note', { dirPath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)))
 }
 
 export async function reindexAll(): Promise<{ ok: boolean; indexed: number }> {

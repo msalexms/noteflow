@@ -168,13 +168,56 @@ Acento del color del grupo a la izquierda.
 
 ---
 
+## Vista de nota (note overview)
+
+Vista amplia que **sustituye el área del editor** para ver de un vistazo **todas las secciones de
+una nota**, cada una como una **mini-representación del editor** al abrir esa sección. El sidebar
+permanece visible como contexto. Pensada para saltar rápido a una sección concreta o repasar la
+estructura de una nota con muchas secciones. Es una de las tres vistas full-area mutuamente
+excluyentes (grupo / nota / cerebro): abrir una cierra las otras, y seleccionar cualquier nota
+vuelve al editor.
+
+**Cómo entrar:**
+- Botón **⊞** (icono de cuadrícula) en la toolbar del editor, justo **al lado de la estrella de
+  favoritos**.
+- **Click derecho** sobre la nota en el sidebar → **"Note overview"**.
+
+**Cómo salir:** `Esc`, el botón `✕` de la cabecera, o click en una tarjeta de sección (abre esa
+sección en el editor).
+
+**Disposición** (misma estética mono-minimalista que la group overview):
+- Cabecera: candado si está cifrada + título de la nota + estrella de favorito (toggle) + contador
+  (`N sections · fecha`) + botón **"Add section"** + `✕`.
+- Cuadrícula de **tarjetas de ancho fijo**, una por sección.
+
+**Tarjeta de sección** — replica lo que verías al pinchar esa sección (de las pestañas hacia abajo):
+- Etiqueta superior con el **nombre de la sección** y su color (identifica la tarjeta) + icono
+  rich/raw.
+- **Título de la nota + fecha de creación**.
+- Una **barra-toolbar representativa** (oscura, sin iconos — solo evoca la toolbar del editor).
+- **Unas pocas líneas** del contenido de la sección, renderizadas igual que en el editor pero
+  diminutas (vía `zoom`) y recortadas con un fade inferior. Las secciones vacías muestran "Empty
+  section".
+
+**Acciones:**
+- **Abrir sección** → click en la tarjeta (te lleva directo a esa sección en el editor).
+- **Add section** → crea una sección nueva y **navega al editor en ella** para escribir.
+- **Favorito** → toggle de la estrella en la cabecera.
+- Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin previews) hasta desbloquear
+  en el editor.
+
+---
+
 ## Secciones dentro de una nota
 
 Cada nota puede tener múltiples secciones independientes, como tabs:
 
 ```
-[Note ×] [Tasks ×] [Questions ×] [+]          [raw] [copy] [⧉] [📌] [🗑]
+[Note ×] [Tasks ×] [Questions ×] [+]                    [⊞] [⭐] [⋯]
 ```
+
+(`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar, sticky,
+archivar, cifrar, borrar nota)
 
 - **Agregar**: `Ctrl+T` o botón `+`.
 - **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
@@ -397,6 +440,7 @@ El CLI ignora las notas cifradas.
   🔒 Encrypt note   (o: Unlock / Lock / Remove encryption)
   ▥ Open alongside        ← abre en paralelo (split)
   📋 Duplicate note
+  ⊞ Note overview         ← abre la vista de nota (todas sus secciones)
   ─────────────
   🎨 Section color         ← solo si el click fue sobre un tag de sección
   ─────────────
