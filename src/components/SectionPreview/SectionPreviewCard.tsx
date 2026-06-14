@@ -1,0 +1,117 @@
+import { useMemo } from 'react'
+import { Eye, Edit3, Plus } from 'lucide-react'
+import { format } from 'date-fns'
+import { htmlFromMarkdown } from '../../lib/markdownHtml'
+import { getTagColor } from '../../lib/tagColors'
+import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
+import type { Note, NoteSection } from '../../types'
+
+// Fixed card width (px) — a section card is a small mock of the open editor.
+export const CARD_WIDTH = 240
+// Height of the clamped content area (≈ a handful of lines once zoomed).
+const PREVIEW_HEIGHT = 120
+// `zoom` shrinks the rendered body (Chromium-only, fine in Electron) so the few
+// visible lines read like the open note, just tiny.
+const PREVIEW_ZOOM = 0.5
+
+interface SectionPreviewCardProps {
+  note: Note
+  section: NoteSection
+  sectionTagColors: SectionTagColorMap
+  // `compact` shrinks the note title/date (used by the hover popover); the
+  // height/zoom of the body preview are overridable for the same reason.
+  compact?: boolean
+  previewHeight?: number
+  previewZoom?: number
+}
+
+// A small mock of the editor when that section is open. Pure presentation — the
+// caller decides how to wrap it (a clickable button in the Note overview, a
+// floating popover when hovering a navigation trigger).
+export function SectionPreviewCard({
+  note,
+  section,
+  sectionTagColors,
+  compact = false,
+  previewHeight = PREVIEW_HEIGHT,
+  previewZoom = PREVIEW_ZOOM,
+}: SectionPreviewCardProps) {
+  const colorStyle = getTagColor(section.name, sectionTagColors)
+  const hasContent = section.content.trim().length > 0
+  // Render the section body to the same HTML the editor produces, so the preview
+  // matches the open note exactly. Memoised — markdown→HTML isn't free per card.
+  const html = useMemo(
+    () => (hasContent ? htmlFromMarkdown(section.content) : ''),
+    [section.content, hasContent],
+  )
+
+  return (
+    <>
+      {/* Section label (the card's identity — which tab this represents) */}
+      <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border/60 bg-surface-2/50 group-hover:bg-surface-2/80 transition-colors">
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colorStyle.color }} />
+        <span className="text-[11px] font-mono font-medium truncate" style={{ color: colorStyle.color }}>
+          {section.name}
+        </span>
+        <span
+          className="ml-auto flex items-center text-text-muted/50 flex-shrink-0"
+          title={section.isRawMode ? 'Raw markdown section' : 'Rich text section'}
+        >
+          {section.isRawMode ? <Edit3 size={10} /> : <Eye size={10} />}
+        </span>
+      </div>
+
+      {/* Editor mock — title + date, a representational toolbar, then a few lines */}
+      <div className="flex flex-col" style={{ background: 'rgb(var(--bg-editor))' }}>
+        <div className="px-3 pt-2.5">
+          <div className={`${compact ? 'text-[11px]' : 'text-[12.5px]'} font-mono font-bold text-text truncate`}>
+            {note.title || 'Untitled'}
+          </div>
+          <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-0.5`}>
+            {format(new Date(note.created), 'MMM d, yyyy · HH:mm')}
+          </div>
+        </div>
+
+        {/* Toolbar — purely representational: a dark bar with a few faint marks */}
+        <div className="px-3 mt-2">
+          <div
+            className="h-3.5 rounded-sm flex items-center gap-1 px-1.5"
+            style={{ background: 'rgb(var(--bg-0) / 0.65)' }}
+          >
+            {Array.from({ length: 5 }).map((_, i) => (
+              <span key={i} className="w-2 h-1.5 rounded-[1px] bg-text/10" />
+            ))}
+          </div>
+        </div>
+
+        {/* A few lines of the section, as if the note were open — just tiny */}
+        <div
+          className="note-preview relative overflow-hidden px-3 pt-1.5"
+          style={{ height: previewHeight }}
+        >
+          {hasContent ? (
+            <div
+              className="prose-editor pointer-events-none select-none"
+              style={{ zoom: previewZoom }}
+            >
+              <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 pt-1 text-text-muted/35">
+              <Plus size={11} />
+              <span className="text-[10px] font-mono">Empty section</span>
+            </div>
+          )}
+
+          {/* Bottom fade — suggests there's more below the fold */}
+          {hasContent && (
+            <div
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-10"
+              style={{ background: 'linear-gradient(to top, rgb(var(--bg-editor)), transparent)' }}
+            />
+          )}
+        </div>
+      </div>
+    </>
+  )
+}

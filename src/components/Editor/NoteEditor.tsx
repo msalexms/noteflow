@@ -16,6 +16,7 @@ import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 
 // ---------------------------------------------------------------------------
 // Confirm modal state type
@@ -62,6 +63,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
   const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
   const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
+  const { previewProps } = useSectionHoverPreview()
 
   // Active section by id (not index — stable across reorders)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
@@ -939,6 +941,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   ) : (
                     // Normal tab
                     <button
+                      {...(isActive || !note ? {} : previewProps(note.id, section.id, { placement: 'cursor-below' }))}
                       onClick={() => handleSwitchSection(section.id)}
                       onDoubleClick={() => handleStartRename(section)}
                       className={`px-3 py-1 text-xs font-mono transition-colors whitespace-nowrap

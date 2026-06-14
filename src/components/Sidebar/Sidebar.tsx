@@ -720,6 +720,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             </span>
           </div>
           <SectionTabsRow
+            noteId={note.id}
             sections={note.sections}
             searchQuery={searchQuery}
             sectionFilter={sectionFilter}

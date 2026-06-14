@@ -12,6 +12,7 @@ import { BrainView } from './components/Brain/BrainView'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
+import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
@@ -433,6 +434,7 @@ export function App() {
   }
 
   return (
+    <HoverPreviewProvider>
     <div className="flex flex-col h-screen bg-surface-0 text-text overflow-hidden">
       <TitleBar />
 
@@ -440,7 +442,7 @@ export function App() {
         {/* ── Sidebar ───────────────────────────────────────────────── */}
         <div
           style={{
-            width: sidebarVisible ? sidebarWidth : 0,
+            width: brainViewOpen ? 0 : sidebarVisible ? sidebarWidth : 0,
             minWidth: 0,
             flexShrink: 0,
             overflow: 'hidden',
@@ -453,7 +455,7 @@ export function App() {
         </div>
 
         {/* Drag handle */}
-        {sidebarVisible && (
+        {sidebarVisible && !brainViewOpen && (
           <div
             onMouseDown={handleDragStart}
             className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
@@ -463,7 +465,7 @@ export function App() {
         )}
 
         {/* ── Collapse / expand toggle ──────────────────────────────── */}
-        {!sidebarVisible && (
+        {!sidebarVisible && !brainViewOpen && (
           <button
             onClick={() => setSidebarVisible(true)}
             title="Show sidebar (Ctrl+')"
@@ -618,7 +620,7 @@ export function App() {
                 }}
                 onDrop={handleStickyDrop}
               >
-                Soltar para abrir en ventana aparte
+                Drag here to open in a separate window
               </div>
             </>
           )}
@@ -627,6 +629,7 @@ export function App() {
 
       <CommandPalette />
     </div>
+    </HoverPreviewProvider>
   )
 }
 

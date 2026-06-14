@@ -452,6 +452,7 @@ function NoteCard({ note, color, sectionTagColors, onOpen, onOpenSection }: Note
       </span>
 
       <SectionTabsRow
+        noteId={note.id}
         sections={note.sections}
         searchQuery=""
         sectionFilter={null}

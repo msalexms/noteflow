@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getTagColor } from '../../lib/tagColors'
 import { normalize } from '../../lib/searchUtils'
+import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { NoteSection } from '../../types'
 
@@ -12,6 +13,7 @@ const EDGE_MASK =
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface SectionTabsRowProps {
+  noteId: string
   sections: NoteSection[]
   searchQuery: string
   sectionFilter?: string | null
@@ -24,6 +26,7 @@ interface SectionTabsRowProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SectionTabsRow({
+  noteId,
   sections,
   searchQuery,
   sectionFilter,
@@ -32,6 +35,7 @@ export function SectionTabsRow({
   onSectionContextMenu,
   renderHighlightedText,
 }: SectionTabsRowProps) {
+  const { previewProps } = useSectionHoverPreview()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -98,6 +102,7 @@ export function SectionTabsRow({
             key={section.id}
             role="button"
             tabIndex={0}
+            {...previewProps(noteId, section.id, { placement: 'cursor-below' })}
             onClick={(e) => onSectionClick(section.id, e)}
             onContextMenu={(e) => onSectionContextMenu(e, section.id)}
             onKeyDown={(e) => {
