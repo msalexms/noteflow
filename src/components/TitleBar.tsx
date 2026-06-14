@@ -167,7 +167,7 @@ export function TitleBar() {
               ? 'border-text-muted bg-surface-2 text-text'
               : 'border-text-muted/60 text-text-muted hover:text-text hover:border-text-muted hover:bg-surface-2'
           }`}
-          title={brainViewOpen ? 'Cerrar el cerebro' : 'Abrir el cerebro — grafo de notas'}
+          title={brainViewOpen ? 'Close brain view' : 'Open brain view'}
         >
           <Brain size={12} />
           <span>brain</span>

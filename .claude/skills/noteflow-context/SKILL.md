@@ -10,6 +10,10 @@ description: Contexto completo del proyecto NoteFlow — app de escritorio de no
 > esta (`noteflow-context`, arquitectura/IPC/release) y `noteflow-features` (UX/diseño/atajos).
 > Si la feature toca el CLI, actualizar también `cli/noteflow-cli/SKILL.md`. Mantenerlas al
 > día es lo que hace que la próxima sesión arranque con contexto correcto.
+>
+> **Idioma de la UI (REGLA para features nuevas):** todo el **texto visible de la aplicación va en
+> inglés** (labels, botones, placeholders, tooltips, mensajes de error de UI). El contenido del
+> usuario y las respuestas del LLM siguen el idioma del usuario; las skills/docs siguen en español.
 
 ## Repositorio y proyectos relacionados
 
@@ -53,10 +57,17 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
-│   └── ai/              # Índice semántico local ("El Cerebro" Fase 1)
+│   └── ai/              # Índice semántico local + LLM ("El Cerebro" Fases 1-3)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
 │       ├── aiIndex.ts   #   Lifecycle del worker en el main (fork/respawn, debounce, API)
-│       └── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
+│       ├── aiWorker.ts  #   utilityProcess: embeddings (Transformers.js) + SQLite index
+│       └── llm/         #   Proveedor LLM (Fase 3, corre en main; key NUNCA va al renderer)
+│           ├── presets.ts          #     Catálogo de proveedores (anthropic | openai-compatible)
+│           ├── types.ts            #     LlmProvider, ChatMessage, config (por preset)
+│           ├── secret.ts           #     Cifrado de API key (safeStorage, espejo de githubSync)
+│           ├── anthropic.ts        #     Provider SDK @anthropic-ai/sdk (messages.stream)
+│           ├── openaiCompatible.ts #     Provider fetch SSE (OpenAI/DeepSeek/MiniMax/Ollama/…)
+│           └── index.ts            #     getProvider/resolveConfig/toPublic + DEFAULT_LLM_CONFIG
 ├── cli/
 │   ├── noteflow.js      # CLI companion (Node.js standalone, sin deps de Electron)
 │   ├── noteflow.cmd     # Wrapper Windows (entra en PATH vía NSIS)
@@ -75,7 +86,8 @@ noteflow/
 │   │   ├── themeStore.ts             # Tema — lee/escribe settings.json vía IPC (sendSync)
 │   │   ├── editorSettingsStore.ts    # Tamaño de fuente del editor (localStorage)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
-│   │   └── aiStore.ts                # Estado de la IA (enabled, related, progreso) vía IPC ai:*
+│   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
+│   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
 │   ├── components/
 │   │   ├── Editor/
 │   │   │   ├── Editor.tsx               # Instancia TipTap (conversión md↔html en lib/markdownHtml.ts)
@@ -101,9 +113,21 @@ noteflow/
 │   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
 │   │   ├── NoteOverview/
 │   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): una tarjeta por sección,
-│   │   │                                #   mini-mock del editor (título+fecha+toolbar+preview zoom)
+│   │   │                                #   mini-mock del editor (envuelve SectionPreviewCard)
+│   │   ├── SectionPreview/              # Previsualización de sección reutilizable
+│   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan NoteOverview, hover y cerebro)
+│   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
+│   │   │   │                            #     1 popover central, cierra con cualquier click (pointerdown global)
+│   │   │   └── hoverPreviewContext.ts   #   Contexto + hook useSectionHoverPreview (archivo aparte: fast-refresh)
+│   │   ├── AiPanel/                     # Panel de IA (Fase 3) — mitad izq. de la vista cerebro
+│   │   │   ├── AiPanel.tsx              #   Contenedor con pestañas Chat / Related / Profile / ⚙ Settings
+│   │   │   ├── ChatView.tsx             #   Chat streaming + selector de modelo + historial + citas
+│   │   │   ├── RelatedView.tsx          #   "Related notes" por sección (movido aquí del cerebro)
+│   │   │   ├── LlmConfigView.tsx        #   Config del proveedor (preset, baseUrl, key, modelo, test)
+│   │   │   ├── ProfileFlow.tsx          #   Cuestionario inicial → genera nota de perfil (segundo cerebro)
+│   │   │   └── profileQuestions.ts      #   Preguntas fijas (UI en inglés) + detectLocale()
 │   │   ├── Brain/                       # Vista cerebro ("El Cerebro" Fase 2 — grafo de notas)
-│   │   │   ├── BrainView.tsx            #   Orquestador full-screen + toolbar + CTA de activación IA;
+│   │   │   ├── BrainView.tsx            #   Split AiPanel | canvas (Fase 3); divisor redimensionable;
 │   │   │   │                            #     ELIGE el render: 3D si hay WebGL, si no fallback 2D
 │   │   │   ├── BrainScene.tsx           #   *** RENDER POR DEFECTO *** — cerebro 3D inmersivo
 │   │   │   │                            #     (three.js: wireframe + bloom + orbit/zoom + impulsos)
@@ -115,7 +139,8 @@ noteflow/
 │   │   │   ├── BrainCanvas.tsx          #   FALLBACK 2D (sin WebGL): <canvas> + d3-force, pan/zoom/drag
 │   │   │   ├── useBrainGraph.ts         #   Modelo compartido: nodos (grupo/carpeta/nota/sección) + 2 capas de aristas
 │   │   │   ├── useForceLayout.ts        #   Simulación d3-force del fallback 2D (estructura + contenido)
-│   │   │   └── brainColors.ts           #   Resuelve CSS vars del tema → RGB (lo usan 2D y 3D)
+│   │   │   ├── brainColors.ts           #   Resuelve CSS vars del tema → RGB (lo usan 2D y 3D)
+│   │   │   └── BrainNodePreview.tsx     #   Ventanita clicable al pulsar un nodo nota/sección (click→navega)
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless)
 │   │   ├── TitleBarMenu.tsx            # Menú desplegable del titlebar
@@ -135,7 +160,7 @@ noteflow/
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 colores)
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
-│   │   │                         #   usado por el editor TipTap y el preview de NoteOverview
+│   │   │                         #   usado por el editor TipTap y SectionPreviewCard (previews)
 │   │   └── themes.ts             # Definición de los 12 temas (CSS vars)
 │   └── types/
 │       └── index.ts             # Tipos TS + declaración global window.noteflow
@@ -207,15 +232,29 @@ Renderer (React)
 | `sync:pull` | handle | Pull manual desde el remoto |
 | `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
 | `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
-| `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). Sin UI aún — para Fase 3 (RAG) |
+| `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
 | `ai:graph` | handle | Aristas de contenido nota-a-nota (centroides por nota + coseno) para la vista cerebro (Fase 2) |
 | `ai:reindex-all` | handle | Reindexa TODAS las secciones en background (lotes de 16) con progreso |
+| `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage` |
+| `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`) |
+| `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales |
+| `ai:chat` | handle | Chat **agéntico** con streaming: monta contexto RAG (`ai:search`+`ai:graph`) y corre un **bucle de tool-calling** (`provider.streamTurn` + `agentTools.executeTool`, máx. `MAX_AGENT_STEPS=12`); emite por eventos; resuelve al terminar |
+| `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
+| `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
+| `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
+| `ai:profile-generate` | handle | Segundo cerebro: respuestas del cuestionario → LLM → `{title, sections[]}` markdown |
+| `ai:profile-get-status` / `ai:profile-set-completed` | handle | Flag `settings.aiProfile.completedAt` (cuestionario mostrado una vez) |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
 `new-note`, `notes-updated` (filePath?, senderId?), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
-`ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice).
+`ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
+`ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
+`ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),
+`ai:chat-tool-call` (`{requestId,toolCallId,name,input}`), `ai:chat-tool-result`
+(`{requestId,toolCallId,status,summary}`), `ai:chat-confirm-request`
+(`{requestId,toolCallId,name,input}` — tool destructiva esperando confirmación).
 
 ### Modelo de almacenamiento
 
@@ -262,12 +301,23 @@ Estructura de `settings.json`:
     "owner": "username",
     "repo": "noteflow-notes",
     "lastSync": "2026-03-25T10:00:00.000Z"
-  }
+  },
+  "ai": { "enabled": false, "modelId": "..." },
+  "aiLlm": {
+    "active": "anthropic",
+    "byPreset": {
+      "anthropic": { "model": "claude-opus-4-8", "encryptedApiKey": "<safe:...>" },
+      "ollama":    { "baseUrl": "http://localhost:11434/v1", "model": "..." }
+    }
+  },
+  "aiProfile": { "completedAt": "2026-06-14T10:00:00.000Z" }
 }
 ```
 
 > **Importante:** grupos/carpetas/colores de sección NO están en `settings.json` — están en
-> archivos JSON dentro del dir de notas para poder sincronizarse entre dispositivos.
+> archivos JSON dentro del dir de notas para poder sincronizarse entre dispositivos. El **historial
+> de chats** vive en `userData/ai-chats.json` (local, no se sincroniza); las **API keys del LLM** se
+> cifran por proveedor en `settings.aiLlm.byPreset[*].encryptedApiKey` (nunca cruzan al renderer).
 
 ## Formato de archivos de nota (v2 — carpeta por nota)
 
@@ -374,12 +424,32 @@ misma prioridad de routing (brain → group → note → editor). **Entradas:** 
 **tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título+`created` de la
 nota, una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
 `htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
-CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. Click en una tarjeta navega a esa
-sección con el mismo baile `pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de
-tarjeta **fijo** (sin slider). Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC
-nuevo. **Nota CSS:** el reset global `button { border: none }` deja `border-style: none`, así que las
-tarjetas usan `border-solid` explícito para que el borde se vea (la utilidad `border` de Tailwind
-solo fija el ancho).
+CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. El mock visual vive en
+`SectionPreview/SectionPreviewCard.tsx` (componente puro, props `compact`/`previewHeight`/`previewZoom`);
+`NoteOverview` lo envuelve en su `<button>`. Click en una tarjeta navega a esa sección con el mismo baile
+`pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de tarjeta **fijo** (sin slider).
+Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC nuevo. **Nota CSS:** el reset global
+`button { border: none }` deja `border-style: none`, así que las tarjetas usan `border-solid` explícito para
+que el borde se vea (la utilidad `border` de Tailwind solo fija el ancho).
+
+### Previsualización de sección (hover + cerebro)
+Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
+en memoria en `notesStore`):
+- **Hover** (`SectionPreview/HoverPreviewProvider.tsx`, montado en `App.tsx`): un **único** popover en
+  portal a `document.body`. El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
+  aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
+  que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
+  `SectionTabsRow` (sidebar + group overview), pestañas del editor (omite la activa), `RelatedView`/`ChatView`.
+  `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
+  `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
+  y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
+  pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
+  suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
+  `opacity:0`, se mide en `useLayoutEffect` y se revela.
+- **Cerebro** (`Brain/BrainNodePreview.tsx`): NO es hover. Click en un nodo nota/sección llama
+  `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de navegar) → `BrainView` fija una tarjeta
+  **clicable** junto al click; pulsarla navega (`openNote`), click fuera o `Esc` la cierra. Sustituyó al
+  antiguo "fly-in" de cámara (eliminado).
 
 ### Grupos archivados
 `NoteGroup.archived?` (en `groups.json`, vía `toggleGroupArchived` en `groupsStore`). Cuando
@@ -500,8 +570,9 @@ backdoor.
 Subsistema de IA **100% local/offline** que indexa cada **sección** de cada nota como un
 **embedding** (vector). El índice es un **artefacto derivado y reconstruible** desde los `.md` (si
 se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Related notes", hecha)
-→ **Fase 2 (vista cerebro/grafo, hecha)** → Fase 3 (chat RAG) → Fase 4 (nube/monetización).
-**Principio: un índice, tres consumidores** (related ✅, grafo ✅, chat). Plan de Fase 2:
+→ **Fase 2 (vista cerebro/grafo, hecha)** → **Fase 3 (panel IA: chat RAG + segundo cerebro, hecha;
+falta verificar en app real)** → Fase 4 (nube/monetización). **Principio: un índice, tres
+consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
 `C:\Users\yagoi\.claude\plans\vamos-a-planificar-la-peaceful-manatee.md`.
 
 - **3 procesos:** renderer (`aiStore` + `RelatedNotesPanel`) → main (`aiIndex`, lifecycle +
@@ -568,6 +639,56 @@ se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Rela
   `asarUnpack` y la descarga del modelo funcionan en el instalado (NO verificado aún). Fase 2:
   **detalle progresivo** (expandir secciones como sub-nodos al seleccionar/zoom) está **diferido**
   (los labels de notas ya aparecen al hacer zoom).
+
+### LLM / chat / segundo cerebro — Fase 3 (`electron/ai/llm/`, `src/components/AiPanel/`)
+Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos interruptores:**
+(1) `settings.ai.enabled` (embeddings) habilita RAG + aristas de contenido; (2) `settings.aiLlm`
+(proveedor configurado) habilita chat/generación. El chat funciona sin (1) pero **sin contexto**.
+
+- **El LLM corre en el proceso main**, NO en el `aiWorker` (que sigue solo embeddings+SQLite). La
+  API key se cifra por proveedor con `safeStorage` y **nunca llega al renderer** (solo `hasKey`).
+- **Proveedores (presets, `electron/ai/llm/presets.ts`):** dos implementaciones —
+  `anthropic` (SDK oficial `@anthropic-ai/sdk`, `messages.stream`) y `openai` (fetch SSE a
+  `/chat/completions`). Presets: Anthropic, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter,
+  Ollama (local), Custom. **Cada preset guarda su propia key/modelo/baseUrl** (`aiLlm.byPreset`)
+  → cambiar de proveedor no mezcla credenciales. `baseUrl` editable salvo Anthropic.
+- **RAG (`ai:chat` en main):** embebe la pregunta vía `aiIndex.search` (híbrido) → expande vecinos
+  con `aiIndex.graph` → lee secciones de disco (`noteFormat.parseNoteDir`) → monta system prompt con
+  contexto → stream. Emite `ai:chat-sources` (notas usadas) antes de los deltas. **Privacidad:** solo
+  salen pregunta + chunks recuperados; las cifradas ya están fuera del índice.
+- **Chat agéntico (tool-calling):** el chat **NO usa el CLI** — actúa con **function calling nativo**
+  ejecutado en el main. Piezas: `electron/ai/llm/types.ts` (`ToolSchema`/`ToolCall`/`ToolResult`/
+  `AgentMessage` + método `LlmProvider.streamTurn` que streamea texto y devuelve `toolCalls`),
+  `anthropic.ts` (mapea a content blocks `tool_use`/`tool_result`; el `tool_use` llega completo tras
+  el stream) y `openaiCompatible.ts` (añade `tools`+`tool_choice:auto` al payload y **acumula
+  `delta.tool_calls` por índice** en el SSE). El **catálogo + ejecutor** vive en
+  `electron/ai/llm/tools.ts` (`TOOLS`, `DESTRUCTIVE_TOOLS`, `executeTool(name,input,ctx)`),
+  **desacoplado de main por DI** (`ToolContext`): lee/parsea con `noteFormat` y escribe reusando los
+  primitivos factorizados del main `applyNoteWrite` / `applyNoteDelete` / `applyGroupsSet` /
+  `applyFoldersSet` (heredan broadcast `notes-updated` + `schedulePush` + `scheduleIndex`; **sin
+  senderId** → la propia ventana del chat también refresca). Tools v1: `list_notes`, `get_note`,
+  `list_groups`, `search_notes`, `create_note`, `update_note`, `add_section`, `update_section`,
+  `rename_section`, `create_group`, `create_folder`, `rename_group`, `rename_folder`, `delete_*`.
+  Las **notas cifradas** se listan pero no se leen/editan. El **bucle** en `ai:chat` itera
+  `streamTurn`→ejecutar tools→realimentar `role:'tool'` hasta que no haya `toolCalls` (máx. 12 pasos,
+  `MAX_AGENT_STEPS`). **Tools siempre activas** (el modelo decide); **solo las destructivas piden
+  confirmación**: el main emite `ai:chat-confirm-request` y `await`ea `chatConfirms` (resuelto por
+  `ai:chat-confirm`); si se cancela, devuelve un `ToolResult` "user declined" sin abortar el turno.
+- **Iluminación de fuentes:** las notas citadas se "encienden" en el cerebro — pulso/halo aditivo
+  brillante en 3D (`litGroup` en `BrainScene`, parpadeo por `sin`) y glow + anillo en 2D
+  (`BrainCanvas`). NO se fuerzan etiquetas (eso metía ruido). Prop `highlightedNoteIds`.
+- **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
+  (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
+  (cambia el modelo del preset activo). UI del panel **en inglés**.
+- **Segundo cerebro:** al entrar al cerebro la 1ª vez (si hay proveedor y `!aiProfile.completedAt`)
+  sale `ProfileFlow` con preguntas fijas → `ai:profile-generate` → nota de perfil creada por el
+  `notesStore` en el idioma del usuario.
+- **Dep nueva:** `@anthropic-ai/sdk` (JS puro, sin binario nativo → no toca `asarUnpack`/postinstall).
+- **Smoke:** `scripts/ai-chat-smoke.cjs` (servidor mock OpenAI-compatible; corre con `node`, sin
+  Electron): listar modelos, streaming, abort, **tool-calling** (acumulación de `tool_calls`
+  fragmentados por índice + turno de seguimiento con `role:'tool'`). El mock usa `res.on('close')`
+  para limpiar el `setInterval` (con `req.on('close')` Node moderno lo mataba al consumir el body).
+- **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4).
 
 ### CLI companion (`cli/noteflow.js`)
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:

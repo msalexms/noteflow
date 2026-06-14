@@ -8,6 +8,9 @@ description: Funcionalidades, diseño de UI y experiencia de usuario de NoteFlow
 > **Mantenimiento:** al implementar una feature importante, actualizar esta skill **y**
 > `noteflow-context` (arquitectura/IPC/release). Si toca el CLI, también `cli/noteflow-cli/SKILL.md`.
 > La fuente de verdad de los atajos es `src/components/KeyboardShortcutsModal.tsx`.
+>
+> **Idioma de la UI:** todo el texto visible de la app va **en inglés** (labels, botones, placeholders,
+> tooltips, errores de UI). El contenido del usuario y las respuestas del LLM van en el idioma del usuario.
 
 ## ¿Qué es NoteFlow?
 
@@ -234,6 +237,33 @@ navegar directamente a esa sección.
 
 ---
 
+## Previsualización de sección al hover
+
+Cualquier elemento que **navega a una sección concreta** muestra, al pasar el ratón, una
+**tarjeta flotante con una previsualización** de esa sección — la misma mini-representación del
+editor que usa la [vista de nota](#vista-de-nota-note-overview) (etiqueta de sección + título +
+fecha + unas líneas del contenido renderizado, recortadas con fade). Permite ojear el contenido
+sin navegar.
+
+**Dónde aparece:**
+- **Sidebar** → tags de sección de cada nota.
+- **Vista de grupo** → tags de sección en las tarjetas.
+- **Editor** → pestañas de sección (excepto la sección activa, que ya estás viendo).
+- **Paneles de IA** (Related / Chat) → resultados que apuntan a una sección.
+
+**Comportamiento:**
+- Aparece tras un breve retardo (~380 ms) para no parpadear al barrer varias pestañas.
+- **Posición:** en sidebar/grupos/editor cuelga con su esquina superior izquierda **junto al
+  cursor** (hacia abajo-derecha), para no tapar el contenido a la derecha del ratón; en los
+  paneles de IA sale al lado del elemento. Se voltea/recoloca si no cabe en pantalla.
+- Se cierra al **quitar el ratón** o con **cualquier click**.
+- Secciones **vacías** muestran "Empty section"; secciones de notas **cifradas y bloqueadas** no
+  se previsualizan (no hay contenido en memoria).
+
+> En la **vista cerebro** la interacción es distinta (click en vez de hover): ver esa sección.
+
+---
+
 ## Editor de contenido
 
 ### Dos modos de edición (por sección)
@@ -332,17 +362,18 @@ derivado reconstruible desde los `.md`.
   resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
 - **Reindexar:** botón "Reindex all notes" en el mismo menú (muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
-- Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y alimentará el **chat RAG**
-  (Fase 3). Un índice, tres consumidores. Detalle técnico en la skill `noteflow-context`.
+- Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
+  "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en la skill `noteflow-context`.
 
 ---
 
 ## La Vista Cerebro (Fase 2 de "El Cerebro")
 
-Modo visual conmutable: el **botón "Cerebro"** (icono de cerebro) en el TitleBar abre un **grafo a
-pantalla completa** que sustituye el editor (sidebar y TitleBar siguen visibles; volver = botón
-Cerebro otra vez, tecla de cierre, o click en cualquier nota). Es **aditivo** — la lista de siempre
-sigue siendo el modo principal.
+Modo visual conmutable: el **botón "Cerebro"** (icono de cerebro) en el TitleBar abre la vista. Desde
+la Fase 3 la ventana se **parte en dos mitades redimensionables**: a la izquierda el **panel de IA**
+(sustituye al sidebar, que se oculta) y a la derecha el **grafo** del cerebro; el divisor central se
+arrastra y su posición se recuerda. Volver = botón Cerebro otra vez, tecla de cierre, o click en
+cualquier nota. Es **aditivo** — la lista de siempre sigue siendo el modo principal.
 
 - **Nodos:** grupos, carpetas y notas. Cada grupo es una región con **su color**; carpetas y notas
   heredan el color de su grupo (las notas sueltas son neutras). No aparecen notas archivadas,
@@ -353,11 +384,49 @@ sigue siendo el modo principal.
     grupos distintos. Salen del índice semántico (necesita la IA activada).
 - **Interacción:** navegación libre estilo Obsidian — arrastrar el lienzo (pan), **rueda para zoom**,
   arrastrar un nodo para recolocarlo. **Hover/seleccionar** una nota **resalta sus conexiones de
-  contenido** y atenúa el resto. **Click en una nota** la abre en el editor (en su primera sección).
-  Los nombres de las notas aparecen al acercar el zoom.
+  contenido** y atenúa el resto. **Click en un nodo de nota/sección** ancla junto a él una
+  **ventanita de previsualización clicable** (misma tarjeta que el resto de la app); al **pulsar
+  dentro de la ventanita** se navega a esa sección en el editor. Se cierra con click fuera o `Esc`.
+  Click en un grupo abre su group overview. Los nombres de las notas aparecen al acercar el zoom.
 - **Toggle "Contenido":** botón en la barra superior para mostrar/ocultar la capa de contenido y
   dejar solo la estructura.
 - **Sin IA:** el cerebro funciona igualmente mostrando solo la estructura + el CTA de activación.
+- **Iluminación por chat:** cuando el chat responde, las notas que usó **se encienden** en el grafo
+  (halo brillante que parpadea en 3D / glow en 2D) — no se llenan de etiquetas, solo brillan.
+
+---
+
+## Panel de IA — chat + segundo cerebro (Fase 3 de "El Cerebro")
+
+La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañas:
+
+- **Chat:** conversación con un LLM que responde **usando tus notas como contexto** (RAG). Streaming
+  token a token, botón de **parar**, y **citas** clicables debajo de la respuesta (abren la nota en su
+  sección) que además **iluminan** esas notas en el cerebro. Arriba: **historial** de chats (crear,
+  abrir, borrar — se guardan localmente), botón **nuevo chat**, y un **selector de modelo** para elegir
+  con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
+  - **Modo agente (acciones):** además de responder, el chat puede **actuar sobre la app**: crear,
+    editar, organizar (mover a grupo/carpeta, renombrar, fijar/archivar) y borrar notas, secciones,
+    grupos y carpetas. No hay interruptor — **las acciones están siempre disponibles** y el modelo
+    decide actuar solo cuando se lo pides; si solo preguntas, solo responde. Cada acción se muestra
+    **inline** en la respuesta (⟳ en curso → ✓ hecho / ✗ error) con un resumen ("Created note…",
+    "Moved to group…"), y los cambios aparecen al instante en el sidebar/editor sin recargar. Las
+    **acciones destructivas** (borrar nota/sección/grupo/carpeta) **piden confirmación**: aparece una
+    tarjeta **Confirm / Cancel** y nada se borra hasta que confirmas. Las notas **cifradas** se pueden
+    listar pero el agente no lee ni edita su contenido. (Implementación: tool-calling nativo, no el CLI.)
+- **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
+  cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
+- **Profile:** cuestionario inicial del **segundo cerebro** — aparece automáticamente la primera vez
+  que entras al cerebro (si hay proveedor y no se completó). Respondes unas preguntas fijas y la IA
+  **genera una nota de perfil** en markdown, en tu idioma, editable como cualquier nota.
+- **⚙ Settings (proveedor):** elige proveedor (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot,
+  OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API key** (BYO; gratis y privado),
+  ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia key/modelo** —
+  cambiar de proveedor no las mezcla. Las claves se guardan cifradas y nunca salen de tu máquina.
+
+> **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
+> contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
+> sin la IA local, pero entonces responde **sin contexto de tus notas**.
 
 ---
 
