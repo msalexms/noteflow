@@ -19,6 +19,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@huggingface/transformers": "^4.2.0",
     "@tiptap/core": "^2.27.2",
     "@tiptap/extension-bold": "^2.27.2",

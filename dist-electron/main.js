@@ -45,6 +45,8 @@ const child_process_1 = require("child_process");
 const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
 const aiIndex = __importStar(require("./ai/aiIndex"));
+const llm = __importStar(require("./ai/llm"));
+const agentTools = __importStar(require("./ai/llm/tools"));
 const noteFormat = __importStar(require("./noteFormat"));
 const migration_1 = require("./migration");
 function getIconPath() {
@@ -738,55 +740,78 @@ electron_1.ipcMain.handle('fs:read-note-dir', (_event, dir) => {
         return null;
     }
 });
+// Core note write — shared by the IPC handler and the agentic chat tools.
+// `senderId` (the originating window) is excluded from the broadcast filter; pass undefined
+// (e.g. for tool-driven writes) so every window — including the chat's — refreshes.
+function applyNoteWrite(payload, senderId) {
+    const dir = ensureSafeDirname(payload.dir);
+    const dirPath = path_1.default.join(NOTES_DIR, dir);
+    // Validate everything before touching disk
+    const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
+        if (typeof content !== 'string')
+            throw new Error('Invalid note file content');
+        return [ensureSafeNoteFile(f), content];
+    });
+    const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f));
+    if (writes.length === 0)
+        throw new Error('Empty note write');
+    fs_1.default.mkdirSync(dirPath, { recursive: true });
+    markInternalWrite(dir);
+    for (const [f] of writes)
+        markInternalWrite(`${dir}/${f}`);
+    for (const f of deletes)
+        markInternalWrite(`${dir}/${f}`);
+    // note.md first so a crash mid-write always leaves a consistent anchor
+    writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0));
+    for (const [f, content] of writes) {
+        fs_1.default.writeFileSync(path_1.default.join(dirPath, f), content, 'utf-8');
+    }
+    for (const f of deletes) {
+        try {
+            fs_1.default.unlinkSync(path_1.default.join(dirPath, f));
+        }
+        catch { /* already gone */ }
+    }
+    // Single broadcast per note write — the renderer re-reads the whole dir
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('notes-updated', dirPath, senderId);
+    });
+    const connected = githubSync.getSyncStatus().connected;
+    for (const [f, content] of writes) {
+        const relPath = `${dir}/${f}`;
+        if (connected) {
+            githubSync.schedulePush(relPath, content, () => { pendingPushFiles.add(relPath); notifyPushState(); }, () => { pendingPushFiles.delete(relPath); notifyPushState(); });
+        }
+        else {
+            githubSync.schedulePush(relPath, content);
+        }
+    }
+    for (const f of deletes)
+        githubSync.scheduleDelete(`${dir}/${f}`);
+    // Keep the semantic index up to date (debounced; no-op when AI is disabled).
+    if (aiIndex.isEnabled())
+        aiIndex.scheduleIndex(dirPath);
+}
+// Core note deletion — shared by the IPC handler and the agentic chat tools.
+function applyNoteDelete(dirOrPath) {
+    const dir = ensureSafeDirname(dirOrPath);
+    const dirPath = path_1.default.join(NOTES_DIR, dir);
+    markInternalWrite(dir);
+    try {
+        for (const f of fs_1.default.readdirSync(dirPath))
+            markInternalWrite(`${dir}/${f}`);
+    }
+    catch { /* ignore */ }
+    fs_1.default.rmSync(dirPath, { recursive: true, force: true });
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('notes-updated');
+    });
+    githubSync.scheduleDeleteDir(dir);
+    aiIndex.removeFromIndex(dirPath);
+}
 electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
     try {
-        const dir = ensureSafeDirname(payload.dir);
-        const dirPath = path_1.default.join(NOTES_DIR, dir);
-        // Validate everything before touching disk
-        const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
-            if (typeof content !== 'string')
-                throw new Error('Invalid note file content');
-            return [ensureSafeNoteFile(f), content];
-        });
-        const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f));
-        if (writes.length === 0)
-            throw new Error('Empty note write');
-        fs_1.default.mkdirSync(dirPath, { recursive: true });
-        markInternalWrite(dir);
-        for (const [f] of writes)
-            markInternalWrite(`${dir}/${f}`);
-        for (const f of deletes)
-            markInternalWrite(`${dir}/${f}`);
-        // note.md first so a crash mid-write always leaves a consistent anchor
-        writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0));
-        for (const [f, content] of writes) {
-            fs_1.default.writeFileSync(path_1.default.join(dirPath, f), content, 'utf-8');
-        }
-        for (const f of deletes) {
-            try {
-                fs_1.default.unlinkSync(path_1.default.join(dirPath, f));
-            }
-            catch { /* already gone */ }
-        }
-        // Single broadcast per note write — the renderer re-reads the whole dir
-        electron_1.BrowserWindow.getAllWindows().forEach((win) => {
-            win.webContents.send('notes-updated', dirPath, event.sender.id);
-        });
-        const connected = githubSync.getSyncStatus().connected;
-        for (const [f, content] of writes) {
-            const relPath = `${dir}/${f}`;
-            if (connected) {
-                githubSync.schedulePush(relPath, content, () => { pendingPushFiles.add(relPath); notifyPushState(); }, () => { pendingPushFiles.delete(relPath); notifyPushState(); });
-            }
-            else {
-                githubSync.schedulePush(relPath, content);
-            }
-        }
-        for (const f of deletes)
-            githubSync.scheduleDelete(`${dir}/${f}`);
-        // Keep the semantic index up to date (debounced; no-op when AI is disabled).
-        if (aiIndex.isEnabled())
-            aiIndex.scheduleIndex(dirPath);
+        applyNoteWrite(payload, event.sender.id);
         return { ok: true };
     }
     catch (err) {
@@ -795,20 +820,7 @@ electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
 });
 electron_1.ipcMain.handle('fs:delete-note', (_event, dirOrPath) => {
     try {
-        const dir = ensureSafeDirname(dirOrPath);
-        const dirPath = path_1.default.join(NOTES_DIR, dir);
-        markInternalWrite(dir);
-        try {
-            for (const f of fs_1.default.readdirSync(dirPath))
-                markInternalWrite(`${dir}/${f}`);
-        }
-        catch { /* ignore */ }
-        fs_1.default.rmSync(dirPath, { recursive: true, force: true });
-        electron_1.BrowserWindow.getAllWindows().forEach((win) => {
-            win.webContents.send('notes-updated');
-        });
-        githubSync.scheduleDeleteDir(dir);
-        aiIndex.removeFromIndex(dirPath);
+        applyNoteDelete(dirOrPath);
         return { ok: true };
     }
     catch (err) {
@@ -1291,6 +1303,311 @@ electron_1.ipcMain.handle('ai:related', (_event, noteId, sectionId, k) => aiInde
 electron_1.ipcMain.handle('ai:search', (_event, query, k) => aiIndex.search(query, k));
 electron_1.ipcMain.handle('ai:graph', () => aiIndex.graph());
 electron_1.ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll());
+// ── LLM provider (chat / second brain) ─────────────────────────────────────────
+// The provider runs here in main; the API key lives encrypted in settings.aiLlm and never
+// reaches the renderer. RAG retrieval reuses the local index (aiIndex.search/graph).
+function readLlmSettings() {
+    const raw = (readSettings().aiLlm ?? {});
+    return { ...llm.DEFAULT_LLM_CONFIG, ...raw };
+}
+function writeLlmSettings(next) {
+    const settings = readSettings();
+    settings.aiLlm = next;
+    writeSettings(settings);
+}
+electron_1.ipcMain.handle('ai:llm-get-config', () => llm.toPublic(readLlmSettings()));
+electron_1.ipcMain.handle('ai:llm-presets', () => llm.PRESETS);
+electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
+    const cfg = readLlmSettings();
+    cfg.byPreset = { ...cfg.byPreset };
+    if (patch.active !== undefined)
+        cfg.active = patch.active;
+    // All field edits apply to the ACTIVE preset, so each provider keeps its own key/model/baseUrl.
+    const id = cfg.active;
+    const ps = { ...(cfg.byPreset[id] ?? {}) };
+    if (patch.model !== undefined)
+        ps.model = patch.model;
+    if (patch.baseUrl !== undefined)
+        ps.baseUrl = patch.baseUrl;
+    if (patch.clearKey)
+        ps.encryptedApiKey = undefined;
+    else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0)
+        ps.encryptedApiKey = llm.encryptSecret(patch.apiKey);
+    cfg.byPreset[id] = ps;
+    writeLlmSettings(cfg);
+    return llm.toPublic(cfg);
+});
+electron_1.ipcMain.handle('ai:llm-list-models', async () => {
+    try {
+        const models = await llm.getProvider(llm.resolveConfig(readLlmSettings())).listModels();
+        return { ok: true, models };
+    }
+    catch (err) {
+        return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) };
+    }
+});
+electron_1.ipcMain.handle('ai:llm-test', () => llm.getProvider(llm.resolveConfig(readLlmSettings())).test());
+// ── Chat (streaming over IPC events) ───────────────────────────────────────────
+const CHAT_SYSTEM_BASE = "You are NoteFlow's assistant — a second brain over the user's personal notes. " +
+    "Answer directly and concisely, in the same language the user writes in. " +
+    'When context from the notes is provided, ground your answer in it and avoid inventing facts; ' +
+    "if the notes don't contain the answer, say so plainly.\n\n" +
+    'You can also ACT on the notes through the provided tools (create/edit/organize/delete notes, ' +
+    'sections, groups and folders). Only act when the user clearly asks you to; otherwise just answer. ' +
+    'Never invent ids — call list_notes / list_groups (or search_notes) first to discover the real ids ' +
+    'you need. After acting, briefly tell the user what you did. Deletions require user confirmation, ' +
+    'which the app handles automatically.';
+const chatAborts = new Map();
+function stripBase64(text) {
+    return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
+}
+function findNoteDirPath(noteId, dirs) {
+    const match = dirs.find((d) => d.endsWith('-' + noteId));
+    return match ? path_1.default.join(NOTES_DIR, match) : null;
+}
+/** Build the RAG context for a question. Returns the augmented system prompt + the source notes
+ *  (for citation + brain illumination). Empty context when Local AI is off or nothing matches. */
+async function buildChatContext(query) {
+    if (!query.trim() || !aiIndex.isEnabled())
+        return { system: CHAT_SYSTEM_BASE, sources: [] };
+    let hits = [];
+    try {
+        hits = await aiIndex.search(query, 6);
+    }
+    catch {
+        hits = [];
+    }
+    if (hits.length === 0)
+        return { system: CHAT_SYSTEM_BASE, sources: [] };
+    // Expand with up to a few content-edge neighbours of the matched notes.
+    const hitNoteIds = new Set(hits.map((h) => h.noteId));
+    const neighbours = new Set();
+    try {
+        for (const e of await aiIndex.graph()) {
+            if (hitNoteIds.has(e.a) && !hitNoteIds.has(e.b))
+                neighbours.add(e.b);
+            if (hitNoteIds.has(e.b) && !hitNoteIds.has(e.a))
+                neighbours.add(e.a);
+        }
+    }
+    catch { /* edges are best-effort */ }
+    const dirs = noteFormat.listNoteDirs(NOTES_DIR);
+    const sources = [];
+    const blocks = [];
+    const seen = new Set(); // noteId:sectionId
+    const pushSection = (noteId, preferredSectionId) => {
+        const dirPath = findNoteDirPath(noteId, dirs);
+        if (!dirPath)
+            return;
+        const note = noteFormat.parseNoteDir(dirPath);
+        if (!note || note.encryption || note.sections.length === 0)
+            return;
+        const section = note.sections.find((s) => s.id === preferredSectionId) ?? note.sections[0];
+        const key = `${noteId}:${section.id}`;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        const text = stripBase64(section.content).trim().slice(0, 1500);
+        if (!text)
+            return;
+        blocks.push(`### ${note.title || 'Untitled'} › ${section.name}\n${text}`);
+        sources.push({ noteId, sectionId: section.id, title: note.title || 'Untitled' });
+    };
+    for (const h of hits)
+        pushSection(h.noteId, h.sectionId);
+    for (const id of [...neighbours].slice(0, 3))
+        pushSection(id);
+    if (blocks.length === 0)
+        return { system: CHAT_SYSTEM_BASE, sources: [] };
+    const system = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`;
+    return { system, sources };
+}
+// Pending destructive-tool confirmations, keyed by toolCallId — resolved by `ai:chat-confirm`.
+const chatConfirms = new Map();
+function readJsonArray(file) {
+    try {
+        const data = JSON.parse(fs_1.default.readFileSync(file, 'utf-8'));
+        return Array.isArray(data) ? data : [];
+    }
+    catch {
+        return [];
+    }
+}
+/** Wire the agentic tool executor to main's write primitives. Tool writes pass no senderId,
+ *  so every window (including the chat's) refreshes from the broadcast. */
+function buildToolContext() {
+    return {
+        notesDir: NOTES_DIR,
+        writeNote: (payload) => applyNoteWrite(payload),
+        deleteNoteDir: (dir) => applyNoteDelete(dir),
+        readGroups: () => readJsonArray(GROUPS_FILE),
+        writeGroups: (groups) => applyGroupsSet(groups),
+        readFolders: () => readJsonArray(FOLDERS_FILE),
+        writeFolders: (folders) => applyFoldersSet(folders),
+        search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
+    };
+}
+const MAX_AGENT_STEPS = 12;
+electron_1.ipcMain.handle('ai:chat', async (event, req) => {
+    const { requestId, messages } = req;
+    const sender = event.sender;
+    const send = (channel, payload) => { if (!sender.isDestroyed())
+        sender.send(channel, payload); };
+    const stored = readLlmSettings();
+    if (!llm.toPublic(stored).configured) {
+        send('ai:chat-error', { requestId, error: 'No LLM provider configured' });
+        return;
+    }
+    const controller = new AbortController();
+    chatAborts.set(requestId, controller);
+    const myConfirmIds = new Set();
+    try {
+        const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+        const { system, sources } = await buildChatContext(lastUser);
+        if (sources.length > 0)
+            send('ai:chat-sources', { requestId, sources });
+        const provider = llm.getProvider(llm.resolveConfig(stored));
+        const ctx = buildToolContext();
+        // Seed the agentic conversation from the renderer's text messages.
+        const convo = messages
+            .filter((m) => m.role !== 'system')
+            .map((m) => ({ role: m.role, content: m.content }));
+        for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+            const { text, toolCalls } = await provider.streamTurn({ system, messages: convo, tools: agentTools.TOOLS, signal: controller.signal }, (delta) => send('ai:chat-delta', { requestId, delta }));
+            if (toolCalls.length === 0) {
+                send('ai:chat-done', { requestId });
+                return;
+            }
+            convo.push({ role: 'assistant', content: text, toolCalls });
+            const results = [];
+            for (const call of toolCalls) {
+                send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input });
+                if (agentTools.DESTRUCTIVE_TOOLS.has(call.name)) {
+                    send('ai:chat-confirm-request', { requestId, toolCallId: call.id, name: call.name, input: call.input });
+                    myConfirmIds.add(call.id);
+                    const approved = await new Promise((resolve) => {
+                        if (controller.signal.aborted)
+                            return resolve(false);
+                        chatConfirms.set(call.id, resolve);
+                        controller.signal.addEventListener('abort', () => resolve(false), { once: true });
+                    });
+                    chatConfirms.delete(call.id);
+                    if (!approved) {
+                        send('ai:chat-tool-result', { requestId, toolCallId: call.id, status: 'cancelled', summary: 'Cancelled' });
+                        results.push({ toolCallId: call.id, content: 'The user declined this action. Do not retry it.' });
+                        continue;
+                    }
+                }
+                const result = await agentTools.executeTool(call.name, call.input, ctx);
+                send('ai:chat-tool-result', {
+                    requestId, toolCallId: call.id, status: result.isError ? 'error' : 'done', summary: result.summary,
+                });
+                results.push({ toolCallId: call.id, content: result.content, isError: result.isError });
+            }
+            convo.push({ role: 'tool', results });
+        }
+        // Step budget exhausted — stop gracefully.
+        send('ai:chat-done', { requestId });
+    }
+    catch (err) {
+        if (controller.signal.aborted)
+            send('ai:chat-done', { requestId, aborted: true });
+        else
+            send('ai:chat-error', { requestId, error: err instanceof Error ? err.message : String(err) });
+    }
+    finally {
+        for (const id of myConfirmIds)
+            chatConfirms.delete(id);
+        chatAborts.delete(requestId);
+    }
+});
+electron_1.ipcMain.on('ai:chat-cancel', (_event, requestId) => {
+    chatAborts.get(requestId)?.abort();
+});
+electron_1.ipcMain.on('ai:chat-confirm', (_event, payload) => {
+    const resolve = chatConfirms.get(payload?.toolCallId);
+    if (resolve) {
+        chatConfirms.delete(payload.toolCallId);
+        resolve(!!payload.approved);
+    }
+});
+// ── Chat history (userData/ai-chats.json — local, not synced to GitHub) ─────────
+function aiChatsPath() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'ai-chats.json');
+}
+electron_1.ipcMain.handle('ai:chats-load', () => {
+    try {
+        const data = JSON.parse(fs_1.default.readFileSync(aiChatsPath(), 'utf-8'));
+        return Array.isArray(data) ? data : [];
+    }
+    catch {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('ai:chats-save', (_event, sessions) => {
+    try {
+        fs_1.default.writeFileSync(aiChatsPath(), JSON.stringify(Array.isArray(sessions) ? sessions : []), 'utf-8');
+        return { ok: true };
+    }
+    catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+});
+// ── Second-brain profile ───────────────────────────────────────────────────────
+function extractJson(text) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start < 0 || end <= start)
+        return null;
+    try {
+        const obj = JSON.parse(text.slice(start, end + 1));
+        if (typeof obj.title !== 'string' || !Array.isArray(obj.sections))
+            return null;
+        const sections = obj.sections
+            .filter((s) => !!s && typeof s.name === 'string' && typeof s.content === 'string');
+        if (sections.length === 0)
+            return null;
+        return { title: obj.title, sections };
+    }
+    catch {
+        return null;
+    }
+}
+electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
+    const stored = readLlmSettings();
+    if (!llm.toPublic(stored).configured)
+        return { ok: false, error: 'No LLM provider configured' };
+    const provider = llm.getProvider(llm.resolveConfig(stored));
+    const locale = req.locale?.trim() || "the language the user answered in";
+    const qa = req.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n');
+    const system = 'You build a personal profile note for a "second brain" notes app from the user\'s answers. ' +
+        `Write the profile in ${locale}. ` +
+        'Return ONLY a JSON object with this exact shape: ' +
+        '{"title": string, "sections": [{"name": string, "content": string}]}. ' +
+        'No text outside the JSON. "content" is Markdown. Organize the profile into a few clear sections ' +
+        '(e.g. About, Work, Interests, Goals). Stay faithful to the answers — do not invent facts.';
+    try {
+        let text = '';
+        await provider.chat({ system, messages: [{ role: 'user', content: qa }], maxTokens: 2048 }, (d) => { text += d; });
+        const parsed = extractJson(text);
+        if (!parsed)
+            return { ok: false, error: 'Could not parse the model output' };
+        return { ok: true, ...parsed };
+    }
+    catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+});
+electron_1.ipcMain.handle('ai:profile-get-status', () => {
+    const profile = (readSettings().aiProfile ?? {});
+    return { completedAt: profile.completedAt ?? null };
+});
+electron_1.ipcMain.handle('ai:profile-set-completed', () => {
+    const settings = readSettings();
+    settings.aiProfile = { completedAt: new Date().toISOString() };
+    writeSettings(settings);
+    return { ok: true };
+});
 electron_1.ipcMain.on('settings:get-theme', (event) => {
     event.returnValue = readSettings().theme ?? null;
 });
@@ -1382,16 +1699,19 @@ electron_1.ipcMain.handle('groups:get', () => {
         return [];
     }
 });
-electron_1.ipcMain.handle('groups:set', (event, groups) => {
+function applyGroupsSet(groups, senderId) {
     const content = JSON.stringify(groups, null, 2);
     fs_1.default.writeFileSync(GROUPS_FILE, content, 'utf-8');
     // Broadcast to other windows so their groups reload immediately
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
-        if (win.webContents.id !== event.sender.id) {
+        if (win.webContents.id !== senderId) {
             win.webContents.send('notes-updated');
         }
     });
     githubSync.schedulePush('groups.json', content);
+}
+electron_1.ipcMain.handle('groups:set', (event, groups) => {
+    applyGroupsSet(groups, event.sender.id);
 });
 electron_1.ipcMain.handle('folders:get', () => {
     try {
@@ -1401,16 +1721,19 @@ electron_1.ipcMain.handle('folders:get', () => {
         return [];
     }
 });
-electron_1.ipcMain.handle('folders:set', (event, folders) => {
+function applyFoldersSet(folders, senderId) {
     const content = JSON.stringify(folders, null, 2);
     fs_1.default.writeFileSync(FOLDERS_FILE, content, 'utf-8');
     // Broadcast to other windows so their folders reload immediately
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
-        if (win.webContents.id !== event.sender.id) {
+        if (win.webContents.id !== senderId) {
             win.webContents.send('notes-updated');
         }
     });
     githubSync.schedulePush('folders.json', content);
+}
+electron_1.ipcMain.handle('folders:set', (event, folders) => {
+    applyFoldersSet(folders, event.sender.id);
 });
 electron_1.ipcMain.handle('section-colors:get', () => {
     try {

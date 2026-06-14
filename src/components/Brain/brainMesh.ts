@@ -121,6 +121,10 @@ export interface BrainMesh {
   verticesByRegion: Record<Region, number[]>
   interiorVertices: number[]   // indices of the random interior-fill points (for routing through the volume)
   pathBetween: (a: number, b: number) => number[] | null
+  // Same lattice routing as pathBetween, but penalises edges near the outer shell so the path dives
+  // through the interior fill and crosses the core. Used for content edges (synapses) so relations
+  // visibly pass through the middle of the brain instead of skimming the surface.
+  pathThroughInterior: (a: number, b: number) => number[] | null
 }
 
 // ── deterministic value noise (no deps) ─────────────────────────────────────────
@@ -515,60 +519,87 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
   for (let i = 0; i < vCount; i++) { sx += posArr[i * 3]; sy += posArr[i * 3 + 1]; sz += posArr[i * 3 + 2] }
   const centroid: Vec3 = [sx / vCount, sy / vCount, sz / vCount]
 
-  // Shortest path weighted by EUCLIDEAN edge length (Dijkstra), not hop count. This lets a relation
-  // dive straight through the interior fill when that's geometrically shorter than skimming the
-  // densely-triangulated surface — far-apart notes cross the volume, near ones hug the surface.
-  // (A hop-count BFS always preferred the surface, since it has many more short edges.) Cached by
-  // the unordered {a,b} pair; the returned path is reversed by callers when they need a fixed start.
-  const pathCache = new Map<number, number[] | null>()
-  const pathBetween = (a: number, b: number): number[] | null => {
-    if (a === b) return [a]
-    const key = Math.min(a, b) * vCount + Math.max(a, b)
-    const cached = pathCache.get(key)
-    if (cached !== undefined) return cached
-    const dist = new Float64Array(vCount).fill(Infinity)
-    const prev = new Int32Array(vCount).fill(-1)
-    const done = new Uint8Array(vCount)
-    dist[a] = 0
-    // Binary min-heap of vertex ids keyed by dist[] (lazy deletion via the done[] guard).
-    const heap: number[] = [a]
-    const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
-    const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
-    const siftDown = (i: number) => {
-      const n = heap.length
-      for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
+  // Per-vertex radial fraction: distance from the shape center (0, cy, 0) normalised by the max, so
+  // ~1 on the outer shell and →0 toward the core. The interior-biased router uses this to make
+  // surface travel expensive (see below).
+  const radialFrac = new Float64Array(vCount)
+  {
+    let rMax = 0
+    for (let i = 0; i < vCount; i++) {
+      const r = Math.hypot(posArr[i * 3], posArr[i * 3 + 1] - cy, posArr[i * 3 + 2])
+      radialFrac[i] = r
+      if (r > rMax) rMax = r
     }
-    let found = false
-    while (heap.length) {
-      const cur = heap[0]
-      const last = heap.pop()!
-      if (heap.length) { heap[0] = last; siftDown(0) }
-      if (done[cur]) continue
-      done[cur] = 1
-      if (cur === b) { found = true; break }
-      const dcur = dist[cur]
-      for (const nb of adjacency[cur]) {
-        if (done[nb]) continue
-        const nd = dcur + Math.sqrt(dist2(cur, nb))
-        if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
-      }
-    }
-    let path: number[] | null = null
-    if (found) {
-      path = []
-      for (let cur = b; cur !== -1; cur = prev[cur]) path.push(cur)
-      path.reverse()
-    }
-    pathCache.set(key, path)
-    return path
+    if (rMax > 0) for (let i = 0; i < vCount; i++) radialFrac[i] /= rMax
   }
+
+  // Shortest path over the lattice via Dijkstra with a pluggable edge weight (lazy-deleting binary
+  // min-heap). Each pather has its own cache, keyed by the unordered {a,b} pair; the returned path
+  // is reversed by callers when they need a fixed start.
+  const makePather = (weight: (u: number, v: number) => number) => {
+    const cache = new Map<number, number[] | null>()
+    return (a: number, b: number): number[] | null => {
+      if (a === b) return [a]
+      const key = Math.min(a, b) * vCount + Math.max(a, b)
+      const cached = cache.get(key)
+      if (cached !== undefined) return cached
+      const dist = new Float64Array(vCount).fill(Infinity)
+      const prev = new Int32Array(vCount).fill(-1)
+      const done = new Uint8Array(vCount)
+      dist[a] = 0
+      const heap: number[] = [a]
+      const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
+      const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
+      const siftDown = (i: number) => {
+        const n = heap.length
+        for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
+      }
+      let found = false
+      while (heap.length) {
+        const cur = heap[0]
+        const last = heap.pop()!
+        if (heap.length) { heap[0] = last; siftDown(0) }
+        if (done[cur]) continue
+        done[cur] = 1
+        if (cur === b) { found = true; break }
+        const dcur = dist[cur]
+        for (const nb of adjacency[cur]) {
+          if (done[nb]) continue
+          const nd = dcur + weight(cur, nb)
+          if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
+        }
+      }
+      let path: number[] | null = null
+      if (found) {
+        path = []
+        for (let cur = b; cur !== -1; cur = prev[cur]) path.push(cur)
+        path.reverse()
+      }
+      cache.set(key, path)
+      return path
+    }
+  }
+
+  // Structure routes (group→folder→note) follow the scaffold by raw EUCLIDEAN edge length: a relation
+  // dives through the interior only when that's literally shorter, otherwise it hugs the surface.
+  const pathBetween = makePather((u, v) => Math.sqrt(dist2(u, v)))
+
+  // Content edges (synapses) instead penalise edges near the outer shell by their radial fraction,
+  // so the cheapest route bends inward through the interior fill and crosses the core before
+  // surfacing at the far note — relations visibly pass through the middle of the brain rather than
+  // skimming the exterior. INTERIOR_BIAS controls how hard the path is pulled inward (0 = same as
+  // pathBetween; higher = deeper dives even between nearby notes).
+  const INTERIOR_BIAS = 1.8
+  const pathThroughInterior = makePather(
+    (u, v) => Math.sqrt(dist2(u, v)) * (1 + INTERIOR_BIAS * 0.5 * (radialFrac[u] + radialFrac[v])),
+  )
 
   const edges = new Uint32Array(edgePairs.length * 2)
   for (let i = 0; i < edgePairs.length; i++) { edges[i * 2] = edgePairs[i][0]; edges[i * 2 + 1] = edgePairs[i][1] }
 
   return {
     positions: posArr, edges, faces: new Uint32Array(surfaceFaces), regionOf: new Int8Array(regionOf),
-    adjacency, centroid, vertexCount: vCount, verticesByRegion, interiorVertices, pathBetween,
+    adjacency, centroid, vertexCount: vCount, verticesByRegion, interiorVertices, pathBetween, pathThroughInterior,
   }
 }
 

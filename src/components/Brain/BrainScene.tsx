@@ -17,6 +17,11 @@ interface Props {
   showContentEdges: boolean
   onOpenNote: (noteId: string, sectionId?: string) => void
   onOpenGroup: (groupId: string) => void
+  highlightedNoteIds?: Set<string>   // notes cited by the latest chat answer — kept "lit" (labels shown)
+  thinking?: boolean                 // chat is streaming a reply — auto-sweep content relations
+  // Clicking a note/section node reports it (with the click position) so a pinned
+  // preview card can open next to it.
+  onNodeActivate: (noteId: string, sectionId: string | undefined, clientX: number, clientY: number) => void
 }
 
 // Theme CSS vars are sRGB triples; tell three so it converts to its linear working space (else
@@ -75,7 +80,7 @@ const SHOW_TUNER = false
  * only ships in this chunk. Phase A: the glowing empty scaffold (wireframe + fat vertex dots +
  * fog + bloom + pulse + orbit/zoom). A dev-only slider panel (BrainTuner) sculpts the shape live.
  */
-export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }: Props) {
+export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, highlightedNoteIds, thinking, onNodeActivate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const activeThemeId = useThemeStore((s) => s.activeThemeId)
@@ -95,8 +100,8 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
   const [sculpt, setSculpt] = useState<SculptSettings>(() => ({ ...DEFAULT_SCULPT }))
 
   // Mutable inputs the rAF loop / handlers read without tearing down the scene.
-  const renderRef = useRef({ model, showContentEdges, palette, onOpenNote, onOpenGroup, shape, look, sculpt })
-  renderRef.current = { model, showContentEdges, palette, onOpenNote, onOpenGroup, shape, look, sculpt }
+  const renderRef = useRef({ model, showContentEdges, palette, onOpenNote, onOpenGroup, shape, look, sculpt, highlightedNoteIds, thinking, onNodeActivate })
+  renderRef.current = { model, showContentEdges, palette, onOpenNote, onOpenGroup, shape, look, sculpt, highlightedNoteIds, thinking, onNodeActivate }
   const apiRef = useRef<SceneApi | null>(null)
   const assignmentRef = useRef<Map<string, number>>(new Map())
 
@@ -237,11 +242,13 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     const dataGroup = new THREE.Group()
     brainGroup.add(dataGroup)
     const structureGroup = new THREE.Group() // routes group→folder→note along the scaffold
-    const synapseGroup = new THREE.Group()   // content arcs note↔note (interior bezier)
+    const synapseGroup = new THREE.Group()   // content edges note↔note (routed through the interior)
     const dendriteGroup = new THREE.Group()  // note→section
     const nodeGroup = new THREE.Group()      // orbs + rings
     const hoverGroup = new THREE.Group() // bright incident synapses + marker for the hovered node
-    dataGroup.add(structureGroup, synapseGroup, dendriteGroup, nodeGroup, hoverGroup)
+    const thinkGroup = new THREE.Group() // several concurrent relation-sweeps while the chat thinks
+    const litGroup = new THREE.Group()   // pulsing halos over notes cited by the latest chat answer
+    dataGroup.add(structureGroup, synapseGroup, dendriteGroup, nodeGroup, hoverGroup, thinkGroup, litGroup)
 
     // Pick + label bookkeeping, refreshed on each rebuildData.
     interface PlacedInfo {
@@ -250,6 +257,9 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     }
     const placedNodes = new Map<string, PlacedInfo>()
     let pickPoints: { points: THREE.Points; ids: string[] }[] = []
+    // Note node-ids (`n:<id>`) that have at least one content edge — the pool the "thinking" auto-
+    // sweep cycles through. Refreshed on each rebuildData.
+    let connectedNoteNodeIds: string[] = []
 
     const ringTex = makeRingTexture()
     const colorCache = new Map<string, THREE.Color>()
@@ -258,15 +268,16 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       if (!c) { c = rgbTo(pal.color(cssVar)); colorCache.set(cssVar, c) }
       return c
     }
-    const clearGroup = (g: THREE.Group) => {
-      for (const child of [...g.children]) {
-        g.remove(child)
-        const obj = child as THREE.Mesh
-        obj.geometry?.dispose()
-        const mat = obj.material as THREE.Material | THREE.Material[] | undefined
-        if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose()); else mat?.dispose()
-      }
+    const disposeObj = (obj: THREE.Object3D) => {
+      const o = obj as THREE.Mesh
+      o.geometry?.dispose()
+      const mat = o.material as THREE.Material | THREE.Material[] | undefined
+      if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose()); else mat?.dispose()
     }
+    const clearGroup = (g: THREE.Group) => {
+      for (const child of [...g.children]) { g.remove(child); disposeObj(child) }
+    }
+    const removeObj = (g: THREE.Group, obj: THREE.Object3D) => { g.remove(obj); disposeObj(obj) }
     const disposeData = () => [structureGroup, synapseGroup, dendriteGroup, nodeGroup].forEach(clearGroup)
 
     const lineGeo = (lp: number[], lc: number[]) => {
@@ -276,13 +287,13 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       return g
     }
 
-    // Route a content edge (note↔note) along the mesh lattice via the geometric shortest path
-    // (pathBetween is now Euclidean-weighted Dijkstra), so it naturally crosses the interior fill
-    // when that's shorter than skimming the surface, and hugs the surface when notes are close. We
-    // orient the returned path to start at `a` (the cache is keyed on the unordered pair, so it may
-    // come back reversed); callers reverse again as needed.
+    // Route a content edge (note↔note) along the mesh lattice via pathThroughInterior — Dijkstra
+    // weighted to penalise the outer shell, so the route bends inward through the interior fill and
+    // crosses the core instead of skimming the surface. We orient the returned path to start at `a`
+    // (the cache is keyed on the unordered pair, so it may come back reversed); callers reverse
+    // again as needed.
     const routeContent = (a: number, b: number): number[] => {
-      const p = mesh.pathBetween(a, b)
+      const p = mesh.pathThroughInterior(a, b)
       if (!p || p.length < 2) return [a, b]
       return p[0] === a ? p : p.slice().reverse()
     }
@@ -398,9 +409,9 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
         }
       }
 
-      // ── Synapses: content edges note↔note routed ALONG the scaffold via pathBetween (faint),
-      // hopping vertex-to-vertex through the lattice like the structure routes — no free-floating
-      // cords through the interior. Shared segments stack → frequently-travelled edges glow more. ──
+      // ── Synapses: content edges note↔note routed via pathThroughInterior (faint), hopping
+      // vertex-to-vertex through the interior lattice so the trace dips through the core — no
+      // free-floating cords. Shared segments stack → frequently-travelled edges glow more. ──
       {
         const syn = colorOf('--text')
         const lp: number[] = [], lc: number[] = []
@@ -420,6 +431,15 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
           })))
         }
       }
+
+      // Pool of placed notes that take part in at least one content edge — what the thinking sweep
+      // visits (so it only ever lights nodes that actually have relations to reveal).
+      const conn = new Set<string>()
+      for (const e of m.contentEdges) {
+        if (placedNodes.has(e.source)) conn.add(e.source)
+        if (placedNodes.has(e.target)) conn.add(e.target)
+      }
+      connectedNoteNodeIds = [...conn]
     }
     rebuildData(renderRef.current.model)
 
@@ -473,6 +493,32 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     interface HoverLine { colorAttr: THREE.BufferAttribute; arc: Float32Array; n: number; r: number; g: number; b: number }
     let hoverLines: HoverLine[] = []
     let hoverStartT = 0
+
+    // ── Lit source notes (chat answer): a bright, additive halo over each cited note that the
+    // animate loop pulses (blinks). Rebuilt only when the cited-note set changes. ──
+    let litMat: THREE.PointsMaterial | null = null
+    let lastLitKey = ''
+    const rebuildLit = (noteIds: Set<string>) => {
+      clearGroup(litGroup)
+      litMat = null
+      if (noteIds.size === 0) return
+      const pos: number[] = [], col: number[] = []
+      for (const info of placedNodes.values()) {
+        if (info.kind !== 'note' || !info.noteId || !noteIds.has(info.noteId)) continue
+        pos.push(info.pos.x, info.pos.y, info.pos.z)
+        const c = colorOf(info.colorVar).clone().multiplyScalar(2.4) // HDR → strong bloom
+        col.push(c.r, c.g, c.b)
+      }
+      if (pos.length === 0) return
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+      litMat = new THREE.PointsMaterial({
+        map: ringTex, vertexColors: true, size: RING_SIZE.note * 1.9, transparent: true,
+        opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
+      })
+      litGroup.add(new THREE.Points(g, litMat))
+    }
 
     // Ambient sparks — a small fixed pool, only a few alive at once, drawn via drawRange.
     const AMBIENT_MAX = 6
@@ -539,12 +585,27 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
     let hoverId: string | null = null
     let selectedId: string | null = null
     let lastHoverBuilt: string | null = null
-    const fly = {
-      active: false, t: 0, noteId: '', sectionId: undefined as string | undefined,
-      fromPos: new THREE.Vector3(), toPos: new THREE.Vector3(),
-      fromTarget: new THREE.Vector3(), toTarget: new THREE.Vector3(),
+    // "Thinking" auto-sweeps: while the chat streams, spawn SEVERAL concurrent relation-sweeps that
+    // blink in and fade out — many notes' content relations lit at once, not one at a time. Each
+    // sweep is one note's incident-edge lines (+ marker) with its own start/lifetime, pooled and
+    // capped. Prefers the cited notes when known, else any content-connected note.
+    interface ThinkSweep { lines: HoverLine[]; marker: THREE.Points | null; objects: THREE.Object3D[]; start: number; dur: number }
+    let thinkSweeps: ThinkSweep[] = []
+    const THINK_MAX = 6
+    let nextAutoSweepAt = 0
+    let thinkingCursor = 0
+    const pickThinkingNode = (): string | null => {
+      if (!connectedNoteNodeIds.length) return null
+      const lit = renderRef.current.highlightedNoteIds
+      if (lit && lit.size) {
+        const cited = connectedNoteNodeIds.filter((id) => {
+          const info = placedNodes.get(id)
+          return info?.noteId != null && lit.has(info.noteId)
+        })
+        if (cited.length) return cited[thinkingCursor++ % cited.length]
+      }
+      return connectedNoteNodeIds[(Math.random() * connectedNoteNodeIds.length) | 0]
     }
-
     // HTML label overlay (crisp themed text projected from 3D).
     const labelLayer = document.createElement('div')
     labelLayer.style.cssText = 'position:absolute;inset:0;overflow:hidden;pointer-events:none;'
@@ -609,25 +670,27 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       return info ? { id: bestId!, info } : null
     }
 
-    // Bright incident synapses + a marker when hovering a note/section.
-    const rebuildHover = (id: string | null) => {
-      clearGroup(hoverGroup)
-      hoverLines = []
-      if (!id) return
+    // Build the bright incident-synapse polylines (+ a node marker) for one note into `group`,
+    // oriented OUTWARD from the node and starting fully dark — the animate loop fills each with
+    // colour from the node end to the far end. Returns the per-line sweep state, the marker (so it
+    // can fade) and every object created (so a transient sweep can remove just its own). Shared by
+    // the manual hover (one at a time) and the thinking auto-sweeps (several concurrent).
+    interface BuiltSweep { lines: HoverLine[]; marker: THREE.Points | null; objects: THREE.Object3D[] }
+    const buildSweepLines = (id: string, group: THREE.Group): BuiltSweep => {
+      const lines: HoverLine[] = []
+      const objects: THREE.Object3D[] = []
       const info = placedNodes.get(id)
-      if (!info) return
+      if (!info) return { lines, marker: null, objects }
       // marker at the node
       const mg = new THREE.BufferGeometry()
       mg.setAttribute('position', new THREE.Float32BufferAttribute([info.pos.x, info.pos.y, info.pos.z], 3))
-      hoverGroup.add(new THREE.Points(mg, new THREE.PointsMaterial({
+      const marker = new THREE.Points(mg, new THREE.PointsMaterial({
         map: ringTex, color: colorOf(info.colorVar).clone().multiplyScalar(1.8), size: 0.07,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
-      })))
-      // Incident content edges as polylines, routed along the scaffold (same as the faint synapses),
-      // but oriented OUTWARD from the hovered node and starting fully dark — the animate loop fills
-      // each one with colour from the node end to the far end.
+      }))
+      group.add(marker); objects.push(marker)
       const noteId = info.noteId
-      if (!noteId) return
+      if (!noteId) return { lines, marker, objects }
       const m = renderRef.current.model
       const assignment = assignmentRef.current
       const pos = mesh.positions
@@ -639,7 +702,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
         const a = assignment.get(e.source), b = assignment.get(e.target)
         if (a == null || b == null) continue
         let seq = routeContent(a, b)
-        if (!isSrc) seq = seq.slice().reverse() // always start at the hovered node
+        if (!isSrc) seq = seq.slice().reverse() // always start at the node
         const n = seq.length
         if (n < 2) continue
         const posArr = new Float32Array(n * 3)
@@ -660,54 +723,82 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
         const colorAttr = new THREE.BufferAttribute(new Float32Array(n * 3), 3) // starts black = off
         g.setAttribute('color', colorAttr)
         // THREE.Line interpolates colour between consecutive vertices → smooth lit/unlit boundary.
-        hoverGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+        const line = new THREE.Line(g, new THREE.LineBasicMaterial({
           vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
-        })))
-        hoverLines.push({ colorAttr, arc, n, r: col.r, g: col.g, b: col.b })
+        }))
+        group.add(line); objects.push(line)
+        lines.push({ colorAttr, arc, n, r: col.r, g: col.g, b: col.b })
       }
+      return { lines, marker, objects }
     }
 
-    const ease = (x: number) => x * x * (3 - 2 * x)
-    const startFlyIn = (info: PlacedInfo) => {
-      fly.active = true; fly.t = 0
-      fly.fromPos.copy(camera.position); fly.fromTarget.copy(controls.target)
-      fly.toTarget.copy(info.pos)
-      fly.toPos.copy(camera.position).sub(info.pos).normalize().multiplyScalar(0.85).add(info.pos)
-      fly.noteId = info.noteId || ''; fly.sectionId = info.sectionId
-      controls.enabled = false
+    // Manual hover: one note's relations revealed at a time (persists while hovering).
+    const rebuildHover = (id: string | null) => {
+      clearGroup(hoverGroup)
+      hoverLines = id ? buildSweepLines(id, hoverGroup).lines : []
     }
 
     // ── render loop ──
     const clock = new THREE.Clock()
-    let raf = 0, prevT = 0
+    let raf = 0
     const animate = () => {
       const t = clock.getElapsedTime()
-      const dt = Math.min(0.05, t - prevT); prevT = t
       const l = renderRef.current.look
-      if (fly.active) {
-        fly.t = Math.min(1, fly.t + dt / 0.6)
-        const e = ease(fly.t)
-        camera.position.lerpVectors(fly.fromPos, fly.toPos, e)
-        controls.target.lerpVectors(fly.fromTarget, fly.toTarget, e)
-        if (fly.t >= 1) {
-          fly.active = false; controls.enabled = true
-          if (fly.noteId) renderRef.current.onOpenNote(fly.noteId, fly.sectionId)
-        }
-      }
       controls.update()
       synapseGroup.visible = renderRef.current.showContentEdges
       if (hoverId !== lastHoverBuilt) { rebuildHover(hoverId); lastHoverBuilt = hoverId; hoverStartT = t }
       updateLabels()
 
+      // Thinking auto-sweeps: while streaming and not manually hovering, keep spawning concurrent
+      // relation-sweeps (capped) so several notes light up at once; clear the pool otherwise.
+      if (!hoverId && renderRef.current.thinking && connectedNoteNodeIds.length) {
+        if (t >= nextAutoSweepAt && thinkSweeps.length < THINK_MAX) {
+          const id = pickThinkingNode()
+          const built = id ? buildSweepLines(id, thinkGroup) : null
+          if (built && built.lines.length) thinkSweeps.push({ ...built, start: t, dur: 0.6 + Math.random() * 0.3 })
+          else if (built) built.objects.forEach((o) => removeObj(thinkGroup, o)) // node had no drawable edges
+          nextAutoSweepAt = t + 0.16 + Math.random() * 0.12
+        }
+      } else if (thinkSweeps.length) {
+        clearGroup(thinkGroup)
+        thinkSweeps = []
+      }
+
+      // ── Lit source notes: rebuild on change, then blink the halo. ──
+      const litSet = renderRef.current.highlightedNoteIds
+      const litKey = litSet && litSet.size ? [...litSet].sort().join(',') : ''
+      if (litKey !== lastLitKey) { rebuildLit(litSet ?? new Set()); lastLitKey = litKey }
+      if (litMat) litMat.opacity = 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(t * 4.5))
+
       // ── Hover sweep: the related edge starts dark and lights up ONCE from the hovered node to the
       // far end (a fast colour fill, not a dot moving over an already-lit line); then stays lit. ──
+      const EDGE = 0.06 // soft leading edge width, in normalised arc units
       if (hoverLines.length) {
         const h = Math.min(2, (t - hoverStartT) / 0.22) // sweep position (>1 = fully lit, resting)
-        const EDGE = 0.06 // soft leading edge width, in normalised arc units
         for (const hl of hoverLines) {
           const ca = hl.colorAttr
           for (let i = 0; i < hl.n; i++) {
             const f = Math.max(0, Math.min(1, (h - hl.arc[i]) / EDGE)) // 1 behind the sweep, 0 ahead
+            ca.setXYZ(i, hl.r * f, hl.g * f, hl.b * f)
+          }
+          ca.needsUpdate = true
+        }
+      }
+
+      // ── Thinking sweeps: each pooled sweep fills fast (a quick blink) from its note outward, holds,
+      // then fades out over the tail of its life; expired ones are removed. Several overlap at once. ──
+      for (let s = thinkSweeps.length - 1; s >= 0; s--) {
+        const sw = thinkSweeps[s]
+        const age = t - sw.start
+        if (age >= sw.dur) { for (const o of sw.objects) removeObj(thinkGroup, o); thinkSweeps.splice(s, 1); continue }
+        const h = age / 0.1 // snappy fill
+        const life = age / sw.dur
+        const env = life < 0.6 ? 1 : 1 - (life - 0.6) / 0.4 // hold, then fade over the last 40%
+        if (sw.marker) (sw.marker.material as THREE.PointsMaterial).opacity = env
+        for (const hl of sw.lines) {
+          const ca = hl.colorAttr
+          for (let i = 0; i < hl.n; i++) {
+            const f = Math.max(0, Math.min(1, (h - hl.arc[i]) / EDGE)) * env
             ca.setXYZ(i, hl.r * f, hl.g * f, hl.b * f)
           }
           ca.needsUpdate = true
@@ -785,11 +876,12 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
         setShape(next)
         return
       }
-      // node click: notes/sections fly in & open; groups open their overview; folders toggle selection
+      // node click: notes/sections pin a preview card; groups open their overview; folders toggle selection
       const hit = pickAt(e.clientX, e.clientY)
       if (!hit) { selectedId = null; return }
-      if (hit.info.kind === 'note' || hit.info.kind === 'section') startFlyIn(hit.info)
-      else if (hit.info.kind === 'group') renderRef.current.onOpenGroup(hit.info.refId)
+      if ((hit.info.kind === 'note' || hit.info.kind === 'section') && hit.info.noteId) {
+        renderRef.current.onNodeActivate(hit.info.noteId, hit.info.sectionId, e.clientX, e.clientY)
+      } else if (hit.info.kind === 'group') renderRef.current.onOpenGroup(hit.info.refId)
       else selectedId = selectedId === hit.id ? null : hit.id
     }
     const onLeave = () => { hoverId = null }
@@ -815,7 +907,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup }:
       dots.geometry.dispose(); dotMat.dispose(); dotTex.dispose()
       solid.geometry.dispose(); (solid.material as THREE.Material).dispose()
       markers.geometry.dispose(); markerMat.dispose(); markerTex.dispose()
-      disposeData(); clearGroup(hoverGroup); ringTex.dispose()
+      disposeData(); clearGroup(hoverGroup); clearGroup(thinkGroup); clearGroup(litGroup); ringTex.dispose()
       ambientGeo.dispose(); ambientMat.dispose()
       composer.dispose()
       renderer.dispose()

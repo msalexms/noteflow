@@ -21,6 +21,8 @@ import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as aiIndex from './ai/aiIndex'
+import * as llm from './ai/llm'
+import * as agentTools from './ai/llm/tools'
 import * as noteFormat from './noteFormat'
 import { migrateNotesDirToV2 } from './migration'
 
@@ -739,54 +741,77 @@ interface NoteWritePayload {
   deleteFiles?: string[]
 }
 
+// Core note write — shared by the IPC handler and the agentic chat tools.
+// `senderId` (the originating window) is excluded from the broadcast filter; pass undefined
+// (e.g. for tool-driven writes) so every window — including the chat's — refreshes.
+function applyNoteWrite(payload: NoteWritePayload, senderId?: number): void {
+  const dir = ensureSafeDirname(payload.dir)
+  const dirPath = path.join(NOTES_DIR, dir)
+
+  // Validate everything before touching disk
+  const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
+    if (typeof content !== 'string') throw new Error('Invalid note file content')
+    return [ensureSafeNoteFile(f), content] as const
+  })
+  const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f))
+  if (writes.length === 0) throw new Error('Empty note write')
+
+  fs.mkdirSync(dirPath, { recursive: true })
+  markInternalWrite(dir)
+  for (const [f] of writes) markInternalWrite(`${dir}/${f}`)
+  for (const f of deletes) markInternalWrite(`${dir}/${f}`)
+
+  // note.md first so a crash mid-write always leaves a consistent anchor
+  writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0))
+  for (const [f, content] of writes) {
+    fs.writeFileSync(path.join(dirPath, f), content, 'utf-8')
+  }
+  for (const f of deletes) {
+    try { fs.unlinkSync(path.join(dirPath, f)) } catch { /* already gone */ }
+  }
+
+  // Single broadcast per note write — the renderer re-reads the whole dir
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send('notes-updated', dirPath, senderId)
+  })
+
+  const connected = githubSync.getSyncStatus().connected
+  for (const [f, content] of writes) {
+    const relPath = `${dir}/${f}`
+    if (connected) {
+      githubSync.schedulePush(relPath, content,
+        () => { pendingPushFiles.add(relPath); notifyPushState() },
+        () => { pendingPushFiles.delete(relPath); notifyPushState() }
+      )
+    } else {
+      githubSync.schedulePush(relPath, content)
+    }
+  }
+  for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
+
+  // Keep the semantic index up to date (debounced; no-op when AI is disabled).
+  if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
+}
+
+// Core note deletion — shared by the IPC handler and the agentic chat tools.
+function applyNoteDelete(dirOrPath: string): void {
+  const dir = ensureSafeDirname(dirOrPath)
+  const dirPath = path.join(NOTES_DIR, dir)
+  markInternalWrite(dir)
+  try {
+    for (const f of fs.readdirSync(dirPath)) markInternalWrite(`${dir}/${f}`)
+  } catch { /* ignore */ }
+  fs.rmSync(dirPath, { recursive: true, force: true })
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send('notes-updated')
+  })
+  githubSync.scheduleDeleteDir(dir)
+  aiIndex.removeFromIndex(dirPath)
+}
+
 ipcMain.handle('fs:write-note', (event, payload: NoteWritePayload) => {
   try {
-    const dir = ensureSafeDirname(payload.dir)
-    const dirPath = path.join(NOTES_DIR, dir)
-
-    // Validate everything before touching disk
-    const writes = Object.entries(payload.files ?? {}).map(([f, content]) => {
-      if (typeof content !== 'string') throw new Error('Invalid note file content')
-      return [ensureSafeNoteFile(f), content] as const
-    })
-    const deletes = (payload.deleteFiles ?? []).map((f) => ensureSafeNoteFile(f))
-    if (writes.length === 0) throw new Error('Empty note write')
-
-    fs.mkdirSync(dirPath, { recursive: true })
-    markInternalWrite(dir)
-    for (const [f] of writes) markInternalWrite(`${dir}/${f}`)
-    for (const f of deletes) markInternalWrite(`${dir}/${f}`)
-
-    // note.md first so a crash mid-write always leaves a consistent anchor
-    writes.sort(([a], [b]) => (a === noteFormat.NOTE_MD ? -1 : b === noteFormat.NOTE_MD ? 1 : 0))
-    for (const [f, content] of writes) {
-      fs.writeFileSync(path.join(dirPath, f), content, 'utf-8')
-    }
-    for (const f of deletes) {
-      try { fs.unlinkSync(path.join(dirPath, f)) } catch { /* already gone */ }
-    }
-
-    // Single broadcast per note write — the renderer re-reads the whole dir
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('notes-updated', dirPath, event.sender.id)
-    })
-
-    const connected = githubSync.getSyncStatus().connected
-    for (const [f, content] of writes) {
-      const relPath = `${dir}/${f}`
-      if (connected) {
-        githubSync.schedulePush(relPath, content,
-          () => { pendingPushFiles.add(relPath); notifyPushState() },
-          () => { pendingPushFiles.delete(relPath); notifyPushState() }
-        )
-      } else {
-        githubSync.schedulePush(relPath, content)
-      }
-    }
-    for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
-
-    // Keep the semantic index up to date (debounced; no-op when AI is disabled).
-    if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
+    applyNoteWrite(payload, event.sender.id)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -795,18 +820,7 @@ ipcMain.handle('fs:write-note', (event, payload: NoteWritePayload) => {
 
 ipcMain.handle('fs:delete-note', (_event, dirOrPath: string) => {
   try {
-    const dir = ensureSafeDirname(dirOrPath)
-    const dirPath = path.join(NOTES_DIR, dir)
-    markInternalWrite(dir)
-    try {
-      for (const f of fs.readdirSync(dirPath)) markInternalWrite(`${dir}/${f}`)
-    } catch { /* ignore */ }
-    fs.rmSync(dirPath, { recursive: true, force: true })
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('notes-updated')
-    })
-    githubSync.scheduleDeleteDir(dir)
-    aiIndex.removeFromIndex(dirPath)
+    applyNoteDelete(dirOrPath)
     return { ok: true }
   } catch (err: unknown) {
     return { ok: false, error: String(err) }
@@ -1315,6 +1329,315 @@ ipcMain.handle('ai:search', (_event, query: string, k?: number) => aiIndex.searc
 ipcMain.handle('ai:graph', () => aiIndex.graph())
 ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll())
 
+// ── LLM provider (chat / second brain) ─────────────────────────────────────────
+// The provider runs here in main; the API key lives encrypted in settings.aiLlm and never
+// reaches the renderer. RAG retrieval reuses the local index (aiIndex.search/graph).
+
+function readLlmSettings(): llm.LlmConfigStored {
+  const raw = (readSettings().aiLlm ?? {}) as Partial<llm.LlmConfigStored>
+  return { ...llm.DEFAULT_LLM_CONFIG, ...raw }
+}
+
+function writeLlmSettings(next: llm.LlmConfigStored): void {
+  const settings = readSettings()
+  settings.aiLlm = next
+  writeSettings(settings)
+}
+
+ipcMain.handle('ai:llm-get-config', () => llm.toPublic(readLlmSettings()))
+
+ipcMain.handle('ai:llm-presets', () => llm.PRESETS)
+
+ipcMain.handle('ai:llm-set-config', (_event, patch: {
+  active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean
+}) => {
+  const cfg = readLlmSettings()
+  cfg.byPreset = { ...cfg.byPreset }
+  if (patch.active !== undefined) cfg.active = patch.active
+  // All field edits apply to the ACTIVE preset, so each provider keeps its own key/model/baseUrl.
+  const id = cfg.active
+  const ps = { ...(cfg.byPreset[id] ?? {}) }
+  if (patch.model !== undefined) ps.model = patch.model
+  if (patch.baseUrl !== undefined) ps.baseUrl = patch.baseUrl
+  if (patch.clearKey) ps.encryptedApiKey = undefined
+  else if (typeof patch.apiKey === 'string' && patch.apiKey.length > 0) ps.encryptedApiKey = llm.encryptSecret(patch.apiKey)
+  cfg.byPreset[id] = ps
+  writeLlmSettings(cfg)
+  return llm.toPublic(cfg)
+})
+
+ipcMain.handle('ai:llm-list-models', async () => {
+  try {
+    const models = await llm.getProvider(llm.resolveConfig(readLlmSettings())).listModels()
+    return { ok: true, models }
+  } catch (err) {
+    return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+ipcMain.handle('ai:llm-test', () => llm.getProvider(llm.resolveConfig(readLlmSettings())).test())
+
+// ── Chat (streaming over IPC events) ───────────────────────────────────────────
+
+const CHAT_SYSTEM_BASE =
+  "You are NoteFlow's assistant — a second brain over the user's personal notes. " +
+  "Answer directly and concisely, in the same language the user writes in. " +
+  'When context from the notes is provided, ground your answer in it and avoid inventing facts; ' +
+  "if the notes don't contain the answer, say so plainly.\n\n" +
+  'You can also ACT on the notes through the provided tools (create/edit/organize/delete notes, ' +
+  'sections, groups and folders). Only act when the user clearly asks you to; otherwise just answer. ' +
+  'Never invent ids — call list_notes / list_groups (or search_notes) first to discover the real ids ' +
+  'you need. After acting, briefly tell the user what you did. Deletions require user confirmation, ' +
+  'which the app handles automatically.'
+
+const chatAborts = new Map<string, AbortController>()
+
+function stripBase64(text: string): string {
+  return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]')
+}
+
+function findNoteDirPath(noteId: string, dirs: string[]): string | null {
+  const match = dirs.find((d) => d.endsWith('-' + noteId))
+  return match ? path.join(NOTES_DIR, match) : null
+}
+
+interface ChatSource { noteId: string; sectionId: string; title: string }
+
+/** Build the RAG context for a question. Returns the augmented system prompt + the source notes
+ *  (for citation + brain illumination). Empty context when Local AI is off or nothing matches. */
+async function buildChatContext(query: string): Promise<{ system: string; sources: ChatSource[] }> {
+  if (!query.trim() || !aiIndex.isEnabled()) return { system: CHAT_SYSTEM_BASE, sources: [] }
+
+  let hits: Awaited<ReturnType<typeof aiIndex.search>> = []
+  try { hits = await aiIndex.search(query, 6) } catch { hits = [] }
+  if (hits.length === 0) return { system: CHAT_SYSTEM_BASE, sources: [] }
+
+  // Expand with up to a few content-edge neighbours of the matched notes.
+  const hitNoteIds = new Set(hits.map((h) => h.noteId))
+  const neighbours = new Set<string>()
+  try {
+    for (const e of await aiIndex.graph()) {
+      if (hitNoteIds.has(e.a) && !hitNoteIds.has(e.b)) neighbours.add(e.b)
+      if (hitNoteIds.has(e.b) && !hitNoteIds.has(e.a)) neighbours.add(e.a)
+    }
+  } catch { /* edges are best-effort */ }
+
+  const dirs = noteFormat.listNoteDirs(NOTES_DIR)
+  const sources: ChatSource[] = []
+  const blocks: string[] = []
+  const seen = new Set<string>() // noteId:sectionId
+
+  const pushSection = (noteId: string, preferredSectionId?: string) => {
+    const dirPath = findNoteDirPath(noteId, dirs)
+    if (!dirPath) return
+    const note = noteFormat.parseNoteDir(dirPath)
+    if (!note || note.encryption || note.sections.length === 0) return
+    const section = note.sections.find((s) => s.id === preferredSectionId) ?? note.sections[0]
+    const key = `${noteId}:${section.id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    const text = stripBase64(section.content).trim().slice(0, 1500)
+    if (!text) return
+    blocks.push(`### ${note.title || 'Untitled'} › ${section.name}\n${text}`)
+    sources.push({ noteId, sectionId: section.id, title: note.title || 'Untitled' })
+  }
+
+  for (const h of hits) pushSection(h.noteId, h.sectionId)
+  for (const id of [...neighbours].slice(0, 3)) pushSection(id)
+
+  if (blocks.length === 0) return { system: CHAT_SYSTEM_BASE, sources: [] }
+  const system = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`
+  return { system, sources }
+}
+
+// Pending destructive-tool confirmations, keyed by toolCallId — resolved by `ai:chat-confirm`.
+const chatConfirms = new Map<string, (approved: boolean) => void>()
+
+function readJsonArray(file: string): unknown[] {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    return Array.isArray(data) ? data : []
+  } catch { return [] }
+}
+
+/** Wire the agentic tool executor to main's write primitives. Tool writes pass no senderId,
+ *  so every window (including the chat's) refreshes from the broadcast. */
+function buildToolContext(): agentTools.ToolContext {
+  return {
+    notesDir: NOTES_DIR,
+    writeNote: (payload) => applyNoteWrite(payload),
+    deleteNoteDir: (dir) => applyNoteDelete(dir),
+    readGroups: () => readJsonArray(GROUPS_FILE) as ReturnType<agentTools.ToolContext['readGroups']>,
+    writeGroups: (groups) => applyGroupsSet(groups),
+    readFolders: () => readJsonArray(FOLDERS_FILE) as ReturnType<agentTools.ToolContext['readFolders']>,
+    writeFolders: (folders) => applyFoldersSet(folders),
+    search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
+  }
+}
+
+const MAX_AGENT_STEPS = 12
+
+ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: llm.ChatMessage[] }) => {
+  const { requestId, messages } = req
+  const sender = event.sender
+  const send = (channel: string, payload: unknown) => { if (!sender.isDestroyed()) sender.send(channel, payload) }
+
+  const stored = readLlmSettings()
+  if (!llm.toPublic(stored).configured) {
+    send('ai:chat-error', { requestId, error: 'No LLM provider configured' })
+    return
+  }
+
+  const controller = new AbortController()
+  chatAborts.set(requestId, controller)
+  const myConfirmIds = new Set<string>()
+  try {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+    const { system, sources } = await buildChatContext(lastUser)
+    if (sources.length > 0) send('ai:chat-sources', { requestId, sources })
+
+    const provider = llm.getProvider(llm.resolveConfig(stored))
+    const ctx = buildToolContext()
+
+    // Seed the agentic conversation from the renderer's text messages.
+    const convo: llm.AgentMessage[] = messages
+      .filter((m) => m.role !== 'system')
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+    for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+      const { text, toolCalls } = await provider.streamTurn(
+        { system, messages: convo, tools: agentTools.TOOLS, signal: controller.signal },
+        (delta) => send('ai:chat-delta', { requestId, delta }),
+      )
+      if (toolCalls.length === 0) { send('ai:chat-done', { requestId }); return }
+
+      convo.push({ role: 'assistant', content: text, toolCalls })
+      const results: llm.ToolResult[] = []
+      for (const call of toolCalls) {
+        send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input })
+
+        if (agentTools.DESTRUCTIVE_TOOLS.has(call.name)) {
+          send('ai:chat-confirm-request', { requestId, toolCallId: call.id, name: call.name, input: call.input })
+          myConfirmIds.add(call.id)
+          const approved = await new Promise<boolean>((resolve) => {
+            if (controller.signal.aborted) return resolve(false)
+            chatConfirms.set(call.id, resolve)
+            controller.signal.addEventListener('abort', () => resolve(false), { once: true })
+          })
+          chatConfirms.delete(call.id)
+          if (!approved) {
+            send('ai:chat-tool-result', { requestId, toolCallId: call.id, status: 'cancelled', summary: 'Cancelled' })
+            results.push({ toolCallId: call.id, content: 'The user declined this action. Do not retry it.' })
+            continue
+          }
+        }
+
+        const result = await agentTools.executeTool(call.name, call.input, ctx)
+        send('ai:chat-tool-result', {
+          requestId, toolCallId: call.id, status: result.isError ? 'error' : 'done', summary: result.summary,
+        })
+        results.push({ toolCallId: call.id, content: result.content, isError: result.isError })
+      }
+      convo.push({ role: 'tool', results })
+    }
+    // Step budget exhausted — stop gracefully.
+    send('ai:chat-done', { requestId })
+  } catch (err) {
+    if (controller.signal.aborted) send('ai:chat-done', { requestId, aborted: true })
+    else send('ai:chat-error', { requestId, error: err instanceof Error ? err.message : String(err) })
+  } finally {
+    for (const id of myConfirmIds) chatConfirms.delete(id)
+    chatAborts.delete(requestId)
+  }
+})
+
+ipcMain.on('ai:chat-cancel', (_event, requestId: string) => {
+  chatAborts.get(requestId)?.abort()
+})
+
+ipcMain.on('ai:chat-confirm', (_event, payload: { toolCallId: string; approved: boolean }) => {
+  const resolve = chatConfirms.get(payload?.toolCallId)
+  if (resolve) { chatConfirms.delete(payload.toolCallId); resolve(!!payload.approved) }
+})
+
+// ── Chat history (userData/ai-chats.json — local, not synced to GitHub) ─────────
+function aiChatsPath(): string {
+  return path.join(app.getPath('userData'), 'ai-chats.json')
+}
+
+ipcMain.handle('ai:chats-load', () => {
+  try {
+    const data = JSON.parse(fs.readFileSync(aiChatsPath(), 'utf-8'))
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+})
+
+ipcMain.handle('ai:chats-save', (_event, sessions: unknown) => {
+  try {
+    fs.writeFileSync(aiChatsPath(), JSON.stringify(Array.isArray(sessions) ? sessions : []), 'utf-8')
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+// ── Second-brain profile ───────────────────────────────────────────────────────
+
+function extractJson(text: string): { title: string; sections: Array<{ name: string; content: string }> } | null {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1)) as { title?: unknown; sections?: unknown }
+    if (typeof obj.title !== 'string' || !Array.isArray(obj.sections)) return null
+    const sections = obj.sections
+      .filter((s): s is { name: string; content: string } =>
+        !!s && typeof (s as { name?: unknown }).name === 'string' && typeof (s as { content?: unknown }).content === 'string')
+    if (sections.length === 0) return null
+    return { title: obj.title, sections }
+  } catch {
+    return null
+  }
+}
+
+ipcMain.handle('ai:profile-generate', async (_event, req: { answers: Array<{ question: string; answer: string }>; locale?: string }) => {
+  const stored = readLlmSettings()
+  if (!llm.toPublic(stored).configured) return { ok: false, error: 'No LLM provider configured' }
+  const provider = llm.getProvider(llm.resolveConfig(stored))
+  const locale = req.locale?.trim() || "the language the user answered in"
+  const qa = req.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')
+  const system =
+    'You build a personal profile note for a "second brain" notes app from the user\'s answers. ' +
+    `Write the profile in ${locale}. ` +
+    'Return ONLY a JSON object with this exact shape: ' +
+    '{"title": string, "sections": [{"name": string, "content": string}]}. ' +
+    'No text outside the JSON. "content" is Markdown. Organize the profile into a few clear sections ' +
+    '(e.g. About, Work, Interests, Goals). Stay faithful to the answers — do not invent facts.'
+  try {
+    let text = ''
+    await provider.chat({ system, messages: [{ role: 'user', content: qa }], maxTokens: 2048 }, (d) => { text += d })
+    const parsed = extractJson(text)
+    if (!parsed) return { ok: false, error: 'Could not parse the model output' }
+    return { ok: true, ...parsed }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+ipcMain.handle('ai:profile-get-status', () => {
+  const profile = (readSettings().aiProfile ?? {}) as { completedAt?: string }
+  return { completedAt: profile.completedAt ?? null }
+})
+
+ipcMain.handle('ai:profile-set-completed', () => {
+  const settings = readSettings()
+  settings.aiProfile = { completedAt: new Date().toISOString() }
+  writeSettings(settings)
+  return { ok: true }
+})
+
 ipcMain.on('settings:get-theme', (event) => {
   event.returnValue = readSettings().theme ?? null
 })
@@ -1407,16 +1730,20 @@ ipcMain.handle('groups:get', () => {
   } catch { return [] }
 })
 
-ipcMain.handle('groups:set', (event, groups: unknown[]) => {
+function applyGroupsSet(groups: unknown[], senderId?: number): void {
   const content = JSON.stringify(groups, null, 2)
   fs.writeFileSync(GROUPS_FILE, content, 'utf-8')
   // Broadcast to other windows so their groups reload immediately
   BrowserWindow.getAllWindows().forEach((win) => {
-    if (win.webContents.id !== event.sender.id) {
+    if (win.webContents.id !== senderId) {
       win.webContents.send('notes-updated')
     }
   })
   githubSync.schedulePush('groups.json', content)
+}
+
+ipcMain.handle('groups:set', (event, groups: unknown[]) => {
+  applyGroupsSet(groups, event.sender.id)
 })
 
 ipcMain.handle('folders:get', () => {
@@ -1425,16 +1752,20 @@ ipcMain.handle('folders:get', () => {
   } catch { return [] }
 })
 
-ipcMain.handle('folders:set', (event, folders: unknown[]) => {
+function applyFoldersSet(folders: unknown[], senderId?: number): void {
   const content = JSON.stringify(folders, null, 2)
   fs.writeFileSync(FOLDERS_FILE, content, 'utf-8')
   // Broadcast to other windows so their folders reload immediately
   BrowserWindow.getAllWindows().forEach((win) => {
-    if (win.webContents.id !== event.sender.id) {
+    if (win.webContents.id !== senderId) {
       win.webContents.send('notes-updated')
     }
   })
   githubSync.schedulePush('folders.json', content)
+}
+
+ipcMain.handle('folders:set', (event, folders: unknown[]) => {
+  applyFoldersSet(folders, event.sender.id)
 })
 
 ipcMain.handle('section-colors:get', () => {

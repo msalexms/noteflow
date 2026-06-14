@@ -9,6 +9,10 @@ interface Props {
   showContentEdges: boolean
   onOpenNote: (noteId: string, sectionId?: string) => void
   onOpenGroup: (groupId: string) => void
+  highlightedNoteIds?: Set<string>   // notes cited by the latest chat answer — kept "lit"
+  // Clicking a note/section node reports it (with the click position) so a pinned
+  // preview card can open next to it.
+  onNodeActivate: (noteId: string, sectionId: string | undefined, clientX: number, clientY: number) => void
 }
 
 const MIN_K = 0.15
@@ -17,7 +21,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 interface Transform { x: number; y: number; k: number }
 
-export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }: Props) {
+export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup, highlightedNoteIds, onNodeActivate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -33,8 +37,8 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }
   // never reads canvas.clientWidth/Height itself — reading layout every frame forces a synchronous
   // reflow that preempts the browser's transition-generation step, breaking CSS animations
   // elsewhere (e.g. the sidebar calendar's expand). ResizeObserver already tracks the size for us.
-  const renderRef = useRef({ model, showContentEdges, palette, onOpenNote, onOpenGroup, size })
-  renderRef.current = { model, showContentEdges, palette, onOpenNote, onOpenGroup, size }
+  const renderRef = useRef({ model, showContentEdges, palette, onOpenNote, onOpenGroup, size, highlightedNoteIds, onNodeActivate })
+  renderRef.current = { model, showContentEdges, palette, onOpenNote, onOpenGroup, size, highlightedNoteIds, onNodeActivate }
 
   // Interaction state (refs so the draw loop and listeners share without re-renders).
   const tRef = useRef<Transform>({ x: 0, y: 0, k: 1 })
@@ -99,7 +103,7 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }
     }
 
     const draw = () => {
-      const { model: m, showContentEdges: showContent, palette: pal, size: sz } = renderRef.current
+      const { model: m, showContentEdges: showContent, palette: pal, size: sz, highlightedNoteIds: litNotes } = renderRef.current
       const { width, height } = sz
       if (width === 0 || height === 0) return
       if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
@@ -151,24 +155,32 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }
         const r = Math.max(n.radius * k, 2.5)
         const isFocus = n.id === focusId
         const isNeighbor = !!neighbors?.has(n.id)
-        const dim = !!focusId && !isFocus && !isNeighbor
+        const lit = !!n.noteId && !!litNotes && litNotes.has(n.noteId)
+        const dim = !!focusId && !isFocus && !isNeighbor && !lit
         const rgb = pal.color(n.colorVar)
 
+        if (lit) {
+          // Soft glow halo under the node so the cited note reads as "lit up".
+          ctx.beginPath(); ctx.arc(px, py, r + 6, 0, Math.PI * 2)
+          ctx.fillStyle = rgba(rgb, 0.22)
+          ctx.fill()
+        }
         ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2)
-        ctx.fillStyle = rgba(rgb, dim ? 0.18 : n.kind === 'note' ? 0.85 : 0.95)
+        ctx.fillStyle = rgba(rgb, lit ? 1 : dim ? 0.18 : n.kind === 'note' ? 0.85 : 0.95)
         ctx.fill()
         if (n.kind !== 'note') {
           ctx.lineWidth = 1.5
           ctx.strokeStyle = rgba(pal.bg, dim ? 0.2 : 0.8)
           ctx.stroke()
         }
-        if (isFocus || selectedRef.current === n.id) {
+        if (isFocus || selectedRef.current === n.id || lit) {
           ctx.lineWidth = 2
-          ctx.strokeStyle = rgba(pal.text, 0.9)
+          ctx.strokeStyle = rgba(pal.text, lit && !isFocus ? 0.7 : 0.9)
           ctx.beginPath(); ctx.arc(px, py, r + 3, 0, Math.PI * 2); ctx.stroke()
         }
 
         // Labels: groups/folders always; notes/sections when zoomed in or focused/neighbor.
+        // (Lit nodes brighten via colour + ring, not by forcing a label — avoids name noise.)
         const showLabel = n.kind === 'group' || n.kind === 'folder' || k > 1.3 || isFocus || isNeighbor
         if (showLabel && !dim) {
           const fontPx = clamp((n.kind === 'group' ? 13 : n.kind === 'folder' ? 12 : 11), 10, 16)
@@ -235,8 +247,10 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }
         node.fx = null; node.fy = null
         if (!movedRef.current) {
           // a click, not a drag
-          if (node.kind === 'note' && node.noteId) {
-            renderRef.current.onOpenNote(node.noteId, node.sectionId)
+          if ((node.kind === 'note' || node.kind === 'section') && node.noteId) {
+            // Pin a preview card at the click position rather than navigating.
+            const cr = canvas.getBoundingClientRect()
+            renderRef.current.onNodeActivate(node.noteId, node.sectionId, cr.left + sx, cr.top + sy)
           } else if (node.kind === 'group') {
             renderRef.current.onOpenGroup(node.refId)
           } else {
@@ -246,7 +260,6 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup }
       } else if (panRef.current && !movedRef.current) {
         selectedRef.current = null // click on empty clears selection
       }
-      void sx; void sy
       dragRef.current = null
       panRef.current = null
     }

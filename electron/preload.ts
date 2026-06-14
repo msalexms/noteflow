@@ -149,6 +149,60 @@ const api = {
     return () => ipcRenderer.removeListener('ai:index-state', wrapper)
   },
 
+  // AI / LLM provider (chat + second brain)
+  aiLlmGetConfig: () => ipcRenderer.invoke('ai:llm-get-config'),
+  aiLlmPresets: () => ipcRenderer.invoke('ai:llm-presets'),
+  aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) =>
+    ipcRenderer.invoke('ai:llm-set-config', patch),
+  aiLlmListModels: () => ipcRenderer.invoke('ai:llm-list-models'),
+  aiLlmTest: () => ipcRenderer.invoke('ai:llm-test'),
+  aiChatsLoad: () => ipcRenderer.invoke('ai:chats-load'),
+  aiChatsSave: (sessions: unknown) => ipcRenderer.invoke('ai:chats-save', sessions),
+  aiChat: (requestId: string, messages: Array<{ role: string; content: string }>) =>
+    ipcRenderer.invoke('ai:chat', { requestId, messages }),
+  aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
+  aiChatConfirm: (toolCallId: string, approved: boolean) =>
+    ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
+  onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown }) => cb(p)
+    ipcRenderer.on('ai:chat-tool-call', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-tool-call', wrapper)
+  },
+  onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: string; summary: string }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; status: string; summary: string }) => cb(p)
+    ipcRenderer.on('ai:chat-tool-result', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-tool-result', wrapper)
+  },
+  onAiChatConfirmRequest: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown }) => cb(p)
+    ipcRenderer.on('ai:chat-confirm-request', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-confirm-request', wrapper)
+  },
+  onAiChatDelta: (cb: (p: { requestId: string; delta: string }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; delta: string }) => cb(p)
+    ipcRenderer.on('ai:chat-delta', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-delta', wrapper)
+  },
+  onAiChatSources: (cb: (p: { requestId: string; sources: Array<{ noteId: string; sectionId: string; title: string }> }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; sources: Array<{ noteId: string; sectionId: string; title: string }> }) => cb(p)
+    ipcRenderer.on('ai:chat-sources', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-sources', wrapper)
+  },
+  onAiChatDone: (cb: (p: { requestId: string; aborted?: boolean }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; aborted?: boolean }) => cb(p)
+    ipcRenderer.on('ai:chat-done', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-done', wrapper)
+  },
+  onAiChatError: (cb: (p: { requestId: string; error: string }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; error: string }) => cb(p)
+    ipcRenderer.on('ai:chat-error', wrapper)
+    return () => ipcRenderer.removeListener('ai:chat-error', wrapper)
+  },
+  aiProfileGenerate: (answers: Array<{ question: string; answer: string }>, locale?: string) =>
+    ipcRenderer.invoke('ai:profile-generate', { answers, locale }),
+  aiProfileGetStatus: () => ipcRenderer.invoke('ai:profile-get-status'),
+  aiProfileSetCompleted: () => ipcRenderer.invoke('ai:profile-set-completed'),
+
   // Events from main → renderer
   onNewNote: (cb: () => void) => {
     ipcRenderer.on('new-note', cb)

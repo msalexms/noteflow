@@ -93,6 +93,55 @@ const api = {
         electron_1.ipcRenderer.on('ai:index-state', wrapper);
         return () => electron_1.ipcRenderer.removeListener('ai:index-state', wrapper);
     },
+    // AI / LLM provider (chat + second brain)
+    aiLlmGetConfig: () => electron_1.ipcRenderer.invoke('ai:llm-get-config'),
+    aiLlmPresets: () => electron_1.ipcRenderer.invoke('ai:llm-presets'),
+    aiLlmSetConfig: (patch) => electron_1.ipcRenderer.invoke('ai:llm-set-config', patch),
+    aiLlmListModels: () => electron_1.ipcRenderer.invoke('ai:llm-list-models'),
+    aiLlmTest: () => electron_1.ipcRenderer.invoke('ai:llm-test'),
+    aiChatsLoad: () => electron_1.ipcRenderer.invoke('ai:chats-load'),
+    aiChatsSave: (sessions) => electron_1.ipcRenderer.invoke('ai:chats-save', sessions),
+    aiChat: (requestId, messages) => electron_1.ipcRenderer.invoke('ai:chat', { requestId, messages }),
+    aiChatCancel: (requestId) => electron_1.ipcRenderer.send('ai:chat-cancel', requestId),
+    aiChatConfirm: (toolCallId, approved) => electron_1.ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
+    onAiChatToolCall: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-tool-call', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-tool-call', wrapper);
+    },
+    onAiChatToolResult: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-tool-result', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-tool-result', wrapper);
+    },
+    onAiChatConfirmRequest: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-confirm-request', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-confirm-request', wrapper);
+    },
+    onAiChatDelta: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-delta', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-delta', wrapper);
+    },
+    onAiChatSources: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-sources', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-sources', wrapper);
+    },
+    onAiChatDone: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-done', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-done', wrapper);
+    },
+    onAiChatError: (cb) => {
+        const wrapper = (_event, p) => cb(p);
+        electron_1.ipcRenderer.on('ai:chat-error', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:chat-error', wrapper);
+    },
+    aiProfileGenerate: (answers, locale) => electron_1.ipcRenderer.invoke('ai:profile-generate', { answers, locale }),
+    aiProfileGetStatus: () => electron_1.ipcRenderer.invoke('ai:profile-get-status'),
+    aiProfileSetCompleted: () => electron_1.ipcRenderer.invoke('ai:profile-set-completed'),
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

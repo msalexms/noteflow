@@ -1,0 +1,169 @@
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, Loader2 } from 'lucide-react'
+import { useAiStore } from '../../stores/aiStore'
+import { useNotesStore } from '../../stores/notesStore'
+import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+
+// "Related notes" for any note/section, picked right here. Reuses the existing AI index
+// (aiStore.fetchRelated). Lives as a tab in the AI panel; mirrors the old brain bottom strip.
+export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, sectionId: string) => void }) {
+  const { previewProps } = useSectionHoverPreview()
+  const enabled = useAiStore((s) => s.enabled)
+  const indexState = useAiStore((s) => s.indexState)
+  const fetchRelated = useAiStore((s) => s.fetchRelated)
+  const relatedByKey = useAiStore((s) => s.relatedByKey)
+
+  const notes = useNotesStore((s) => s.notes)
+  const activeNoteId = useNotesStore((s) => s.activeNoteId)
+
+  const selectableNotes = useMemo(
+    () => notes.filter((n) => !n.archived && !n.encryption && !n.expiresAt),
+    [notes],
+  )
+  const [sourceNoteId, setSourceNoteId] = useState<string | null>(null)
+  const [sourceSectionId, setSourceSectionId] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerFilter, setPickerFilter] = useState('')
+
+  const sourceNote = selectableNotes.find((n) => n.id === sourceNoteId) ?? null
+  const sourceSection = sourceNote?.sections.find((s) => s.id === sourceSectionId) ?? sourceNote?.sections[0] ?? null
+  const relKey = sourceNote && sourceSection ? `${sourceNote.id}::${sourceSection.id}` : null
+  const relatedResult = relKey ? relatedByKey[relKey] : undefined
+  const relatedLoading = relKey != null && relatedResult === undefined
+  const relatedItems = relatedResult ?? []
+
+  const filteredNotes = useMemo(() => {
+    const q = pickerFilter.trim().toLowerCase()
+    if (!q) return selectableNotes
+    return selectableNotes.filter((n) => (n.title || 'Untitled').toLowerCase().includes(q))
+  }, [selectableNotes, pickerFilter])
+
+  useEffect(() => {
+    if (!enabled) return
+    if (sourceNoteId && selectableNotes.some((n) => n.id === sourceNoteId)) return
+    const seed = (activeNoteId ? selectableNotes.find((n) => n.id === activeNoteId) : undefined) ?? selectableNotes[0] ?? null
+    setSourceNoteId(seed?.id ?? null)
+    setSourceSectionId(seed?.sections[0]?.id ?? null)
+  }, [enabled, selectableNotes, activeNoteId, sourceNoteId])
+
+  useEffect(() => {
+    if (!enabled || !sourceNote?.id || !sourceSection?.id) return
+    fetchRelated(sourceNote.id, sourceSection.id)
+  }, [enabled, sourceNote?.id, sourceSection?.id, fetchRelated]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pickNote = (id: string) => {
+    const n = selectableNotes.find((s) => s.id === id)
+    setSourceNoteId(id)
+    setSourceSectionId(n?.sections[0]?.id ?? null)
+    setPickerOpen(false)
+    setPickerFilter('')
+  }
+
+  if (!enabled) {
+    return (
+      <div className="flex items-center justify-center h-full px-6 text-center">
+        <p className="text-[11px] font-mono text-text-muted/70 leading-relaxed">
+          Enable local AI (in the brain) to see content-related notes.
+        </p>
+      </div>
+    )
+  }
+
+  const indexing = indexState !== 'idle'
+
+  return (
+    <div className="flex flex-col h-full min-h-0 p-3 text-[12px] font-mono">
+      {/* Source selector */}
+      <div className="relative flex items-center gap-1.5 mb-2">
+        <span className="text-[10px] uppercase tracking-wider text-text/30 flex-shrink-0">From</span>
+        <button
+          onClick={() => setPickerOpen((o) => !o)}
+          className="flex items-center gap-1 min-w-0 px-2 py-1 rounded border border-border bg-surface-1/60 hover:border-text/25 transition-colors"
+        >
+          <span className="truncate text-[11px] text-text/80 max-w-[180px]">{sourceNote?.title || 'Select a note'}</span>
+          <ChevronDown size={11} className="text-text/40 flex-shrink-0" />
+        </button>
+        {pickerOpen && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setPickerOpen(false)} />
+            <div className="absolute top-full left-0 mt-1 w-60 rounded-lg border border-border bg-surface-1 shadow-2xl overflow-hidden z-30">
+              <div className="p-1.5 border-b border-border">
+                <input
+                  autoFocus
+                  value={pickerFilter}
+                  onChange={(e) => setPickerFilter(e.target.value)}
+                  placeholder="Search notes…"
+                  className="w-full bg-surface-0 border border-border rounded px-2 py-1 text-[11px] text-text placeholder-text-muted/40 outline-none focus:border-text/30"
+                />
+              </div>
+              <ul className="max-h-56 overflow-y-auto py-1">
+                {filteredNotes.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      onClick={() => pickNote(n.id)}
+                      className={`w-full text-left px-2.5 py-1 text-[11px] truncate hover:bg-text/5 transition-colors ${
+                        n.id === sourceNoteId ? 'text-text' : 'text-text/70'
+                      }`}
+                    >
+                      {n.title || 'Untitled'}
+                    </button>
+                  </li>
+                ))}
+                {filteredNotes.length === 0 && <li className="px-2.5 py-2 text-[11px] text-text-muted/60">No notes</li>}
+              </ul>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Section chips */}
+      {sourceNote && sourceNote.sections.length > 0 && (
+        <div className="flex items-center gap-1 mb-2 flex-wrap">
+          {sourceNote.sections.map((sec) => (
+            <button
+              key={sec.id}
+              onClick={() => setSourceSectionId(sec.id)}
+              className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
+                sec.id === sourceSection?.id ? 'border-text/30 text-text bg-surface-2' : 'border-border text-text-muted hover:text-text'
+              }`}
+            >
+              {sec.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Results */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {relatedItems.length > 0 ? (
+          <ul className="flex flex-col gap-0.5">
+            {relatedItems.map((r) => {
+              const sameNote = r.noteId === sourceNote?.id
+              return (
+                <li key={`${r.noteId}:${r.sectionId}`}>
+                  <button
+                    {...previewProps(r.noteId, r.sectionId)}
+                    onClick={() => onOpenNote(r.noteId, r.sectionId)}
+                    className="w-full text-left px-2 py-1 rounded hover:bg-text/5 transition-colors group flex items-center gap-2"
+                  >
+                    <span className="truncate text-text/80 group-hover:text-text flex-1 min-w-0">{r.sectionName || 'Untitled section'}</span>
+                    <span className="flex-shrink-0 text-[9px] px-1 py-px rounded bg-text/8 text-text/50 max-w-[120px] truncate">
+                      {sameNote ? '↻ this note' : r.title || 'Untitled'}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : relatedLoading || indexing ? (
+          <p className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-text-muted/60">
+            <Loader2 size={11} className="animate-spin" />
+            {indexing ? 'Indexing…' : 'Finding related notes…'}
+          </p>
+        ) : (
+          <p className="px-2 py-1.5 text-[11px] text-text-muted/60">No related notes found.</p>
+        )}
+      </div>
+    </div>
+  )
+}
