@@ -1,6 +1,6 @@
 ---
 name: noteflow-context
-description: Contexto completo del proyecto NoteFlow — app de escritorio de notas rápidas para Windows/Linux. Úsala cuando el usuario quiera trabajar con este proyecto: añadir features, corregir bugs, hacer releases, entender la arquitectura, modificar el workflow de CI/CD o interactuar con el repositorio de GitHub.
+description: Contexto completo del proyecto NoteFlow — app de escritorio de notas rápidas para Windows/Linux/macOS. Úsala cuando el usuario quiera trabajar con este proyecto: añadir features, corregir bugs, hacer releases, entender la arquitectura, modificar el workflow de CI/CD o interactuar con el repositorio de GitHub.
 ---
 
 # NoteFlow — Guía del proyecto
@@ -124,8 +124,8 @@ noteflow/
 │   │   │   ├── ChatView.tsx             #   Chat streaming + selector de modelo + historial + citas
 │   │   │   ├── RelatedView.tsx          #   "Related notes" por sección (movido aquí del cerebro)
 │   │   │   ├── LlmConfigView.tsx        #   Config del proveedor (preset, baseUrl, key, modelo, test)
-│   │   │   ├── ProfileFlow.tsx          #   Cuestionario inicial → genera nota de perfil (segundo cerebro)
-│   │   │   └── profileQuestions.ts      #   Preguntas fijas (UI en inglés) + detectLocale()
+│   │   │   ├── ProfileFlow.tsx          #   Cuestionario por secciones (chips/tags/text/choice + archivos + enlaces) → genera nota de perfil
+│   │   │   └── profileQuestions.ts      #   Esquema data-driven (PROFILE_SECTIONS: Professional/Personal/Your style/AI; proxy + binarias Big Five) + PROFILE_FIELDS + detectLocale()
 │   │   ├── Brain/                       # Vista cerebro ("El Cerebro" Fase 2 — grafo de notas)
 │   │   │   ├── BrainView.tsx            #   Split AiPanel | canvas (Fase 3); divisor redimensionable;
 │   │   │   │                            #     ELIGE el render: 3D si hay WebGL, si no fallback 2D
@@ -142,15 +142,21 @@ noteflow/
 │   │   │   ├── brainColors.ts           #   Resuelve CSS vars del tema → RGB (lo usan 2D y 3D)
 │   │   │   └── BrainNodePreview.tsx     #   Ventanita clicable al pulsar un nodo nota/sección (click→navega)
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
-│   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless)
-│   │   ├── TitleBarMenu.tsx            # Menú desplegable del titlebar
+│   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
+│   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
+│   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
+│   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
+│   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/headings/escala + preview (era ThemeSettingsModal)
+│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho (eran controles inline del menú)
+│   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar (era StartupSettingsModal)
+│   │   │   ├── SyncPanel.tsx            #   Conectar/desconectar GitHub, status, pull (era GitHubSyncModal)
+│   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
+│   │   │   ├── ShortcutsPanel.tsx       #   Lista de atajos (era KeyboardShortcutsModal)
+│   │   │   └── AboutPanel.tsx           #   Versión (app:get-version) + check/instalar updates + repo
 │   │   ├── CommandPalette/             # Paleta de comandos
-│   │   ├── KeyboardShortcutsModal.tsx  # Modal con lista de atajos
-│   │   ├── StartupSettingsModal.tsx    # Modal: autostart + stickies al arrancar
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico
 │   │   ├── EncryptionModal.tsx         # Modal cifrar/descifrar notas
-│   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas
-│   │   ├── GitHubSyncModal.tsx         # UI conectar/desconectar GitHub, status, pull
+│   │   ├── ExportImportModal.tsx       # Modal exportar/importar notas (flujo, lanzado desde DataPanel)
 │   │   └── StickyApp.tsx               # Ventana sticky flotante (fold/unfold)
 │   ├── lib/
 │   │   ├── noteUtils.ts          # parseNoteFolder, serializeNoteFolder, buildNoteWritePayload,
@@ -161,7 +167,7 @@ noteflow/
 │   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 colores)
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
 │   │   │                         #   usado por el editor TipTap y SectionPreviewCard (previews)
-│   │   └── themes.ts             # Definición de los 12 temas (CSS vars)
+│   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   └── types/
 │       └── index.ts             # Tipos TS + declaración global window.noteflow
 ├── dist-electron/         # Output compilado de electron/ (COMMITEADO — incluir en commits)
@@ -170,7 +176,7 @@ noteflow/
 ├── release/               # Output de electron-builder (gitignored)
 ├── PKGBUILD               # Build manual/AUR del paquete Arch (electron del sistema, NOTEFLOW_NATIVE)
 └── .github/workflows/
-    └── release.yml        # CI/CD: build matrix (win+linux) + release al pushear un tag
+    └── release.yml        # CI/CD: build matrix (win+linux+mac) + release al pushear un tag
 ```
 
 ## Comandos de desarrollo
@@ -206,6 +212,7 @@ Renderer (React)
 | `app:open-notes-folder` | handle | Abre la carpeta en el explorador |
 | `app:choose-notes-dir` | handle | Diálogo para elegir carpeta |
 | `app:get-login-item` / `app:set-login-item` | handle | Autostart al login (gestiona `.desktop` propio en Linux) |
+| `app:get-version` | handle | Versión actual de la app (`app.getVersion()`) — la usa el panel About |
 | `app:check-update` | handle | Consulta la última release en la API de GitHub |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
@@ -218,6 +225,7 @@ Renderer (React)
 | `note-order:get` / `note-order:set` | handle | Orden manual de notas → `note-order.json` (en dir de notas, se sincroniza) |
 | `notes:export` | handle | Exporta a `.noteflow`/`.json`/`.md`/`.txt` (diálogo de guardado) |
 | `notes:parse-import-file` | handle | Abre y parsea un archivo de importación (incluye `.md`/`.txt`) |
+| `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): abre diálogo carpeta/`.zip`, parsea con `electron/importers/` y devuelve un intermedio normalizado `ExternalNote[]` (`{title,format,body,tags?,created?,archived?,favorited?,relPath[]}`); NO serializa ni crea grupos (eso es del renderer) |
 | `notes:write-imported` | handle | Escribe las notas importadas (filenames saneados) |
 | `alarms:schedule` | on | Registra el set de alarmas en el motor del main; dispara las vencidas |
 | `window:minimize` / `maximize` / `close` | on | Controles de ventana (frameless) |
@@ -238,11 +246,14 @@ Renderer (React)
 | `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage` |
 | `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`) |
 | `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales |
-| `ai:chat` | handle | Chat **agéntico** con streaming: monta contexto RAG (`ai:search`+`ai:graph`) y corre un **bucle de tool-calling** (`provider.streamTurn` + `agentTools.executeTool`, máx. `MAX_AGENT_STEPS=12`); emite por eventos; resuelve al terminar |
+| `ai:chat` | handle | Chat **agéntico** con streaming: monta contexto RAG (`ai:search`+`ai:graph`) y corre un **bucle de tool-calling** (`provider.streamTurn` + `agentTools.executeTool`, máx. `MAX_AGENT_STEPS=12`); emite por eventos; resuelve al terminar. Cada mensaje de usuario puede llevar `attachmentIds[]`: main los resuelve de `chatFiles` (txt/md inline en el texto, pdf/img como `Attachment` nativos, capados por `capabilities`) |
+| `ai:chat-pick-files` / `ai:chat-remove-file` | handle | Adjuntos del chat: mismo file picker que el perfil (`pickFilesIntoCache`) pero a la caché `chatFiles` (NO se consume al enviar → siguen disponibles para preguntas de seguimiento). Devuelve metadatos `{id,name,kind,sizeBytes}` + `errors[]`; bytes NUNCA cruzan al renderer |
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
 | `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
-| `ai:profile-generate` | handle | Segundo cerebro: respuestas del cuestionario → LLM → `{title, sections[]}` markdown |
+| `ai:profile-pick-files` | handle | Segundo cerebro: file picker capado por capacidades del proveedor (PDF/img/txt/md). Lee a una **caché en main** (bytes NUNCA cruzan al renderer); devuelve solo metadatos `{id,name,kind,sizeBytes}` + `errors[]` |
+| `ai:profile-remove-file` | handle | Elimina un archivo de la caché del perfil por `id` |
+| `ai:profile-generate` | handle | Segundo cerebro: `{fields[], fileIds[], urls[], locale?}` → monta prompt (campos + txt/md inline + texto scrapeado de urls vía `fetchReadableText`) + adjunta PDF/imágenes nativos → LLM → `{title, sections[]}`. System prompt **infiere/expande** (no solo reformatea). Limpia la caché al terminar |
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | Flag `settings.aiProfile.completedAt` (cuestionario mostrado una vez) |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
@@ -264,6 +275,7 @@ Renderer (React)
 |---|---|
 | Windows | `~/noteflow-notes/` |
 | Linux | `~/.local/share/noteflow-notes/` (XDG; migración automática desde `~/noteflow-notes` y `~/scratch-notes`) |
+| macOS | `~/noteflow-notes/` (mismo fallback que Windows — **deliberado**: mantiene paridad con el CLI y deja las notas visibles en el home) |
 
 Contenido del dir de notas:
 - `<slug>-<id>/` — **una carpeta por nota** (`note.md` + un `.md` por sección; ver "Formato").
@@ -279,6 +291,7 @@ Contenido del dir de notas:
 **Ajustes locales (NO se sincronizan)** en `settings.json`:
 - **Windows:** `%APPDATA%\noteflow\settings.json`
 - **Linux:** `~/.config/noteflow/settings.json`
+- **macOS:** `~/Library/Application Support/NoteFlow/settings.json`
 - (vía `app.getPath('userData')`)
 
 Estructura de `settings.json`:
@@ -352,6 +365,7 @@ sections:
     name: Note
     file: sec001.md
     isRawMode: true   # true = markdown/raw, false/ausente = rich text (TipTap HTML)
+    aiHidden: true    # opcional — la IA NUNCA ve esta sección (índice, chat RAG, tools)
   - id: sec002
     name: Tasks
     file: sec002.md
@@ -404,6 +418,38 @@ encryption:
 `loadNotes()` usa `fs:read-all-notes` (un solo IPC, con reintentos ante FS no listo en Windows
 al despertar/arrancar). Crítico para el tiempo de arranque con muchas notas.
 
+### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
+Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
+`.zip`) reutilizando el pipeline de import existente (preview → conflictos → `notes:write-imported`).
+Dep nueva: `adm-zip` (JS puro, sin binario nativo → no toca `asarUnpack`/postinstall).
+- **Reparto main/renderer (clave):** `htmlToMarkdown` (`src/lib/markdownHtml.ts`) usa `DOMParser` →
+  **solo corre en el renderer**. Por eso el **main** (`electron/importers/{index,markdownFolder,notion,
+  googleKeep}.ts`, vía IPC `notes:parse-external-import`) hace **solo IO**: unzip/recorrer carpetas y
+  emitir un intermedio `ExternalNote[]` (`{title, format:'html'|'md', body, tags?, created?, archived?,
+  favorited?, relPath[]}`). El **renderer** (`ExportImportModal.tsx`) convierte `html→md`
+  (`notionHtml.notionBodyToMarkdown`, normaliza markup Notion→TipTap antes de `htmlToMarkdown`),
+  resuelve `relPath → grupo/folder` (`makeStructureResolver`, fusiona por nombre con `groupsStore`),
+  y serializa al v2 con `serializeNoteFolder`.
+- **Notion HTML:** maneja **ZIP anidados** (`Export-…-Part-N.zip`), quita el sufijo hex-32 de
+  nombres/carpetas, descarta wrappers `Export-*` y la **raíz workspace única** (sus hijos → grupos),
+  extrae `.page-title`/`.page-body`, convierte to-do lists (estado del checkbox), preserva embeds
+  (links de `<figure>`) y **descarta imágenes y `.csv`** (v1).
+- **Google Keep:** Takeout trae **un `.json` por nota** pero la **carpeta de Keep está localizada**
+  (ES = "Conservar", etc.), así que NO se filtra por ruta `/Keep/` sino por **forma de la nota**
+  (`isKeepNote`: tiene `textContent`/`listContent`/`isTrashed`/`userEditedTimestampUsec`…). Mapea
+  `textContent`+`listContent`(→checkboxes), `labels`→tags, `isArchived`/`isPinned`, timestamps µs;
+  omite `isTrashed`. Sin `relPath` (Keep no tiene carpetas).
+- **Decisiones de UX:** contenido importado en **rich-text** (`isRawMode:false`); **notas sin
+  contenido se omiten** (filtradas en preview por `externalContent()`); los **grupos/folders se crean
+  solo al confirmar** (previsualizar y cancelar no deja rastro). Nesting >2 niveles se aplana a
+  grupo + folder (`'A / B'`). Tutorial in-app por fuente en el selector de origen.
+- **Sync:** `notes:write-imported` sube las notas con `pushPathsNow` (push durable awaited por lotes)
+  en vez de `schedulePush` por archivo, para que un pull de auto-sync no las borre a mitad del import
+  (ver "GitHub Sync" → Push).
+- **Smokes:** `scripts/import-notion-smoke.cjs` (node, lado main: hex/wrappers/relPath) y
+  `scripts/import-notion-verify.cjs` (e2e: corre la conversión REAL del renderer en una ventana
+  oculta de Electron + esbuild, escribe a un dir temporal; valida 0 pérdida de contenido).
+
 ### Vista de grupo (group overview)
 `notesStore` tiene `groupViewId: string | null` + `setGroupView(id)`. Cuando no es `null`,
 `App.tsx` renderiza `GroupOverview` en lugar del editor/paneles (sidebar y TitleBar siguen
@@ -413,6 +459,12 @@ para reorganizar por drag&drop. La navegación a una sección concreta usa `pend
 + un `noteflow:request-section` diferido con `setTimeout(0)` (el editor monta tras cerrar la vista;
 bajo StrictMode el efecto de montaje consume el `pending` dos veces, de ahí el re-aviso por evento).
 El ancho de tarjeta se guarda en `localStorage` (`noteflow:group-view-card-width`). Sin IPC nuevo.
+**Selección múltiple:** estado local `selectedIds: Set<string>` en `GroupOverview`; cada `NoteCard`
+recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hover o marcada). Las
+acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan los primitivos del
+store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
+iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
+pasa por `ConfirmModal`. `Esc` limpia la selección antes de cerrar la vista. Sin IPC nuevo.
 
 ### Vista de nota (note overview)
 `notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es la **tercera vista full-area
@@ -465,6 +517,20 @@ ignora. Sin IPC nuevo.
 oculta en lugar de cerrarse (`win.hide()`); la app vive en el system tray. Atajo global
 `Ctrl+Shift+Space` la muestra/oculta.
 
+### Ventana de Ajustes unificada (`src/components/Settings/`)
+El ⚙ del TitleBar abre `SettingsModal` (overlay in-app, NO un BrowserWindow): split **nav
+izquierda + panel derecho**, una sección por opción (Appearance, Editor, Startup, Sync, Data,
+Shortcuts, About; el usuario añadió además AI). Sustituye al antiguo dropdown del titlebar y al
+botón de paleta. Cada panel es el cuerpo extraído de los modales previos (`ThemeSettingsModal`,
+`StartupSettingsModal`, `GitHubSyncModal`, `KeyboardShortcutsModal` — **eliminados**, junto con
+`TitleBarMenu.tsx`); `ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback.
+Tamaño **fijo proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]` (no crece con el contenido;
+encoge si la ventana de la app es pequeña). Cada panel gestiona su propio estado/efectos — **sin
+store ni IPC nuevo** salvo `app:get-version` (panel About). El `CommandPalette` no cambió: sigue
+disparando los mismos eventos (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/
+-export/-import`) y el TitleBar los reinterpreta para abrir la ventana en la sección correcta
+(export/import siguen abriendo el flujo `ExportImportModal` directo).
+
 ### Single instance
 `app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente.
 
@@ -502,6 +568,13 @@ en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
   relativa** (dos archivos de la misma nota debouncen independientes); llamado desde
   `fs:write-note` (por cada archivo escrito), `groups:set`, `folders:set`, `section-colors:set`,
   `note-order:set`. Los callbacks alimentan `pendingPushFiles` → evento `sync:push-state`.
+  **Push durable por lotes:** `pushPathsNow(notesDir, relPaths)` sube un set de archivos **ya**
+  (awaited, sin debounce, leyendo de disco) y **NO bumpea `lastSync`**. Lo usa `notes:write-imported`:
+  cada `schedulePush` que completa adelanta `lastSync` a "ahora", así que durante un import grande un
+  pull de auto-sync vería las notas aún no subidas como `updated <= lastSync` y **las borraría**
+  (regla de borrado del pull); subirlas al remoto por adelantado las hace inmunes (el pull conserva
+  toda carpeta presente en remoto). No-op si el gate de push está cerrado (`initialPullStatus!=='ok'`)
+  — ahí `flushPendingLocalChanges` las sube tras el primer pull.
 - **Pull:** `pullNotes(notesDir)` — agrupa los blobs del árbol por carpeta de nota; la **carpeta
   es la unidad de conflicto**: compara `updated:` de `note.md` y si el remoto es más nuevo
   escribe la carpeta ENTERA (y borra secciones locales que ya no existan en remoto). Borrado de
@@ -514,6 +587,21 @@ en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
 - **Autosync:** pull cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado.
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
   árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas).
+- **⚠️ Serialización de mutaciones remotas (INVARIANTE — leer antes de tocar el sync):** la
+  Contents API de GitHub **commitea de una en una por rama** (cada PUT/DELETE mueve el HEAD), así
+  que dos escrituras/borrados **concurrentes** chocan con un `409/422` por SHA obsoleto. Por eso
+  **TODA** mutación remota pasa por una **única cola** (`enqueueMutation` en `githubSync.ts`):
+  `upsertRemoteFile`/`removeRemoteFile` son wrappers finos que encolan su trabajo real (`*Now`) y se
+  ejecutan **estrictamente secuencialmente**. **Cualquier write/delete remoto nuevo DEBE ir por
+  estos dos puntos** (nunca llamar a `githubRequest` con PUT/DELETE en paralelo ni saltarse la
+  cola). Ambos **reintentan una vez** ante conflicto (re-fetch del SHA) y tratan `404` como "ya no
+  está" (éxito); **nunca traguen un error de borrado en silencio** — si falla, registrar `syncError`
+  (un borrado remoto perdido hace que la nota **reaparezca** en el siguiente pull). Además el
+  auto-sync pull **se pospone** si `hasPendingRemoteMutations()` (no rehace una nota cuyo borrado
+  remoto aún está en cola). Histórico: un borrado/edición múltiple (p. ej. batch en la group
+  overview) disparaba N mutaciones concurrentes → 409s silenciosos → notas restauradas; de ahí la
+  cola. Mantener este patrón al añadir operaciones que toquen el remoto (notas, grupos, carpetas,
+  metadatos).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
   `flushPendingLocalChanges` re-encola la carpeta entera cuando `note.md updated > lastSync`.
@@ -533,9 +621,10 @@ el update — útil para probar el flujo bajando a una versión inferior a la pu
 elige el artefacto según la distro detectada: **Arch-based** (`/etc/arch-release`,
 `/etc/cachyos-release` o `/usr/bin/pacman`) → `.pkg.tar.zst`; **Debian-based**
 (`/etc/debian_version` o `/usr/bin/dpkg`) → `.deb`; resto → `.AppImage` (universal).
+En **macOS** elige `NoteFlow-${latest}-arm64.dmg` (solo Apple Silicon).
 `app:download-and-install` descarga el artefacto con una **allowlist estricta de hosts**
 (github.com + objects/release-assets de githubusercontent.com) y de extensiones (`.exe`, `.deb`,
-`.AppImage`, `.pkg.tar.zst`), emite `update:download-progress` durante la descarga y
+`.AppImage`, `.pkg.tar.zst`, `.dmg`), emite `update:download-progress` durante la descarga y
 `update:installing` al terminarla (la UI muestra un spinner "Installing…" en el botón del
 TitleBar), y luego instala **sin depender de popups del SO**:
 - **Windows:** `spawn(setup, ['--updated','--force-run'], {detached:true}).unref()` + `app.quit()`
@@ -553,13 +642,35 @@ TitleBar), y luego instala **sin depender de popups del SO**:
 - **AppImage:** reemplazo en sitio — copia al dir de `$APPIMAGE`, `chmod +x`, **rename atómico**
   sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) +
   `app.relaunch({execPath})` + `quit()`. Sin `$APPIMAGE` (dev/empaquetado raro) cae a `shell.openPath`.
+- **macOS:** la build **no está notarizada**, así que no se usa Squirrel.Mac. Se hace
+  `shell.openPath(dest)` para **abrir el `.dmg` en Finder** + una `Notification` "Drag NoteFlow to
+  Applications"; el usuario arrastra a Applications y relanza a mano (la app NO sale). Reemplazo
+  automático descartado por no poder probarse a ciegas.
 
-> **Pendiente de verificar** en build empaquetado real (Win silent + AppImage in-place): probado
-> de momento solo a nivel de compilación/typecheck.
+> **Pendiente de verificar** en build empaquetado real (Win silent + AppImage in-place + **macOS dmg
+> en Apple Silicon real**): probado de momento solo a nivel de compilación/typecheck. macOS, además,
+> no se ha podido probar en runtime (sin Mac) — ver el bloque de soporte macOS más abajo.
 
 `NOTEFLOW_NATIVE=1` (lo setea el wrapper
 del PKGBUILD) hace que la app trate la instalación nativa de Arch como `isPackaged` para rutas de
 iconos y modo no-dev.
+
+### Soporte macOS (Apple Silicon) — añadido sin Mac para probar
+Decisiones (tomadas por no disponer de Mac → mínima superficie de riesgo): **sin firmar/notarizar**
+(firma ad-hoc vía `CSC_IDENTITY_AUTO_DISCOVERY=false` en CI), **solo arm64** (un `.dmg`), **update =
+abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
+- **NO cambió:** `app.getPath('userData')` (Keychain/Application Support ya correctos), `safeStorage`
+  (Keychain con fallback), `fs.watch` recursivo (rama no-Linux), atajos globales/tray (`CommandOrControl`),
+  `app.on('activate')→showWindow` (ya existía → reabrir desde el Dock funciona), notes dir (se mantiene
+  `~/noteflow-notes` por **paridad con el CLI**), barra de título (`frame:false` → los semáforos nativos
+  quedan ocultos y se usan los controles propios de la derecha, sin solapamiento).
+- **Sí cambió:** bloque `mac` en electron-builder + `public/icon.icns`; ramas `darwin` en `app:check-update`
+  y `app:download-and-install` (`main.ts`); `.dmg` en la allowlist de update; matrix `macos-14` + globs en
+  el workflow; `preload.ts` expone `platform` y el renderer muestra `⌘`/`⌃` vía `src/lib/platform.ts`
+  (`modKey`/`controlKey`/`keyLabel`); fix `Editor.tsx` Ctrl+Shift+B → acepta `metaKey`.
+- **El único punto sin verificar es el runtime en un Mac real** (Gatekeeper + carga de módulos nativos
+  desde `app.asar.unpacked` dentro del `.app` + arranque del worker de IA). Recomendado: publicar primero
+  un tag prerelease (`-mac.1`) y que alguien lo pruebe antes del estable.
 
 ### Cifrado de notas (`src/lib/cryptoUtils.ts`)
 AES-256-GCM + PBKDF2 (310.000 iteraciones por defecto, SHA-256) vía WebCrypto. La nota cifrada
@@ -581,6 +692,17 @@ consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
   runtime `onnxruntime-node` nativo, cuantización q8→fp32 fallback) + índice **SQLite**
   (`better-sqlite3`) con vectores (`sqlite-vec`, tabla `vec0`) y texto (`FTS5`). **Las notas
   cifradas se omiten** (no entra texto plano al índice).
+- **Secciones ocultas a la IA (`NoteSection.aiHidden`):** flag por sección (frontmatter, como
+  `isRawMode`; persistido por los tres espejos de formato — `noteUtils.ts`, `noteFormat.ts`,
+  `cli/noteflow.js`). Cuando `aiHidden: true` la sección queda **fuera de TODAS las superficies de
+  IA**: no se indexa (`aiWorker` la filtra en `reindexNote`/`reindexAll`; al ocultar una ya indexada
+  el cleanup de `reindexNote` la borra del índice), no entra al RAG del chat (`buildChatContext` en
+  `main.ts` filtra `aiHidden` — defensa en profundidad ante el fallback de vecinos) y las tools no la
+  exponen (`get_note`/`list_notes` en `llm/tools.ts` la omiten). Como el modelo no ve su `section_id`,
+  tampoco puede editarla. UI: toggle "Hide from AI"/"Show to AI" en (1) el menú ⋯ del editor (sección
+  activa) y (2) el `NoteContextMenu` compartido (click derecho sobre un tag de sección en el sidebar,
+  en la group overview y sobre las tarjetas de la note overview). Indicador `EyeOff` en la pestaña del
+  editor, en los tags del sidebar y como badge en las tarjetas de la note overview.
 - **DB:** `userData/ai-index/index.db` (en dev `userData` = `.electron-dev/`). **Fuera del dir de
   notas** → NO se sincroniza a GitHub. Tablas: `notes`, `chunks`, `vec_chunks` (vec0),
   `fts_chunks` (FTS5), `meta` (modelId/dim/schemaVersion). Dimensión **dinámica** (detectada del
@@ -680,13 +802,59 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
 - **Historial de chats:** sesiones en `userData/ai-chats.json` (local), gestionadas por `aiChatStore`
   (crear/abrir/borrar; se persiste al terminar cada respuesta). Selector de modelo en el chat
   (cambia el modelo del preset activo). UI del panel **en inglés**.
-- **Segundo cerebro:** al entrar al cerebro la 1ª vez (si hay proveedor y `!aiProfile.completedAt`)
-  sale `ProfileFlow` con preguntas fijas → `ai:profile-generate` → nota de perfil creada por el
-  `notesStore` en el idioma del usuario.
+- **Enrutado del panel desde la paleta de comandos:** `aiChatStore` expone `panelTab`/`pendingPrompt`
+  + `openAiPanel(tab, prompt?)` (tipo `PanelTab = 'chat'|'related'|'profile'|'settings'`). La
+  `CommandPalette` abre la brain view (`setBrainView(true)`) y llama `openAiPanel` para que el
+  `AiPanel` cambie de pestaña reactivamente (un `useEffect` consume `panelTab` y gana sobre el
+  auto-routing de primera vez). El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
+  arranca un chat nuevo y deja `pendingPrompt`, que `ChatView` auto-envía en cuanto hay proveedor
+  configurado (si no, queda en cola). Sin IPC nuevo — es routing in-renderer vía store.
+- **Segundo cerebro (cuestionario de baja fricción):** al entrar al cerebro la 1ª vez (si hay
+  proveedor y `!aiProfile.completedAt`) sale `ProfileFlow`. La UI es **data-driven** desde
+  `profileQuestions.ts` (`PROFILE_SECTIONS` → secciones **Professional / Personal / Your style /
+  Working with the AI**; campos tipo `chips`/`tags`/`text`/**`choice`** — `PROFILE_FIELDS` los aplana).
+  **Diseño indirecto > directo:** la mayor señal viene de **preguntas-proxy de baja fricción**
+  (música/cine/libros favoritos, viaje soñado) y **binarias "esto o lo otro"** (`choice`,
+  single-select) pensadas para tap-ear el **Big Five (OCEAN)** — el modelo las interpreta como
+  **priors suaves** (correlaciones modestas, nunca veredictos). Se conservan algunos chips directos
+  de auto-descripción (enfoque **híbrido**). El usuario también puede **adjuntar archivos** y
+  **enlaces**. Al generar, `ai:profile-generate` recibe `{fields (con `section`), fileIds, urls,
+  locale}` (agrupa las respuestas por sección en el prompt) y el LLM **infiere/abstrae/organiza** en
+  una nota de perfil (creada por `notesStore` en el idioma del usuario). **Privacidad/abstracción:**
+  el cuerpo describe a la persona en **rasgos/valores abstractos** (lo que un favorito *representa*,
+  no el título); los favoritos literales van en una sección final **"Soft signals (raw — do not
+  cite)"** marcada como background-only. El `CHAT_SYSTEM_BASE` además prohíbe name-dropping de esas
+  preferencias en chats no relacionados (recomendar directo, sin "como te gusta X…").
+- **Adjuntos nativos (la app NUNCA procesa documentos):** la capa LLM admite `Attachment`
+  (`{kind:'pdf'|'image', mediaType, data:base64}`) vía `ChatOptions.attachments`; `anthropic.ts`
+  los mapea a bloques `document`/`image` y `openaiCompatible.ts` las imágenes a `image_url` parts.
+  Qué se ofrece lo decide `providerCapabilities(preset)` (en `llm/index.ts`, expuesto en
+  `LlmConfigPublic.capabilities`): **PDF solo Anthropic**; las **imágenes son por preset** porque el
+  soporte de visión es **dependiente del modelo** — cada preset declara un default `images?` en
+  `presets.ts` (false en los de solo-texto: **DeepSeek/MiniMax/Moonshot**, que rechazan `image_url`
+  con un 400; true en los vision-capaces/flexibles: OpenAI/OpenRouter/Ollama/Custom). `.txt/.md` se
+  incrustan como texto (universal). DOCX/OCR no se soportan (requerirían procesar). El picker capa las
+  extensiones y `ai:chat` filtra los adjuntos por `caps` (defensa en profundidad: si cambias a un
+  proveedor sin imágenes, los adjuntos de imagen no se envían). **Archivos de texto/código:** se admite
+  una lista amplia de extensiones de texto plano (`TEXT_EXTS` en `main.ts`: .txt/.md + código .py/.js/
+  .ts/.go/.rs/… + config .json/.yaml/.toml/… + .sql/.html/.css/…) — todo lo que **ya es texto**, sin
+  parsear; se incrustan verbatim (cap 20k chars/archivo). Formatos binarios/estructurados (docx, xlsx)
+  no. **Error amable:** si mandas una imagen a un modelo de solo-texto, `friendlyChatError` detecta el
+  fallo típico (HTTP 400 `unknown variant image_url`) y devuelve un mensaje claro en vez del JSON crudo.
+  Los **enlaces** se descargan con `net.fetch` + `fetchReadableText`
+  (https validado, timeout 8s, strip HTML→texto, cap 6000 chars) y van como contexto.
+  - **En el chat** (no solo el perfil): el composer de `ChatView` tiene un botón 📎 (`pickAttachments`
+    en `aiChatStore`) que abre `ai:chat-pick-files`; los adjuntos pendientes se muestran como chips
+    removibles y se cuelgan del turno de usuario al enviar (`ChatTurn.attachments`, metadatos solo).
+    `sendMessage` reenvía los `attachmentIds` de **cada** turno en el payload, así las preguntas de
+    seguimiento conservan la imagen/PDF en contexto (los bytes viven en `chatFiles` toda la sesión de
+    app; al reabrir un chat guardado en disco los bytes ya no están, solo se ven los chips). El picker
+    escala las extensiones por `capabilities` (mismo helper `pickFilesIntoCache` que el perfil).
 - **Dep nueva:** `@anthropic-ai/sdk` (JS puro, sin binario nativo → no toca `asarUnpack`/postinstall).
 - **Smoke:** `scripts/ai-chat-smoke.cjs` (servidor mock OpenAI-compatible; corre con `node`, sin
   Electron): listar modelos, streaming, abort, **tool-calling** (acumulación de `tool_calls`
-  fragmentados por índice + turno de seguimiento con `role:'tool'`). El mock usa `res.on('close')`
+  fragmentados por índice + turno de seguimiento con `role:'tool'`) y **adjuntos** (imagen →
+  `content` array con `image_url`). El mock usa `res.on('close')`
   para limpiar el `setInterval` (con `req.on('close')` Node moderno lo mataba al consumir el body).
 - **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4).
 
@@ -698,10 +866,16 @@ Detalle completo en `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
 
 ## Temas
 
-12 temas en `src/lib/themes.ts` (cada uno = set de CSS vars). Default: `carbon`.
+14 temas en `src/lib/themes.ts` (cada uno = set de CSS vars). Default: `noteflow-dark`.
+Los temas de marca **NoteFlow Dark** (default) y **NoteFlow Light** espejan los colores de la
+landing real ("The Brain" design system, `docs/src/styles/brain-site.css` — NO el `tokens.css`
+sin usar): superficies casi negras cálidas (`#0c0c11`) / pergamino (`#E7DFCC`), tinta blanco-cálida
+(`#ECEAE0`) y el acento ámbar firma `--detail` (`#f5a623`, hover/realces de la web) + teal/verde/
+púrpura/cyan/rosa/rojo de la web. Ambos usan la fuente Space Grotesk. Resto —
 Dark: Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, GruvBox Dark,
 Obsidian, Emerald Forest, Synthwave. Light: Arctic Day, Parchment. El tema se persiste en
-`settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`).
+`settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`); usuarios
+existentes conservan el suyo, los nuevos arrancan en `noteflow-dark`.
 
 ## Proceso de release
 
@@ -736,6 +910,8 @@ git push origin main
 git tag vX.Y.Z                    # 4. tag → dispara el workflow de release
 git push origin vX.Y.Z
 ```
+- Antes de hacer push a `main` revisar que las skills .claude\skills están actualizadas con los nuevos cambios que se suben (solamente en caso apropiado de ser un cambio a la altura de ser añadido a estas skills).
+- Los mensajes de commits deben estar escritos en inglés.
 
 > Al hacer push a `main` puede aparecer `Bypassed rule violations for refs/heads/main: Changes
 > must be made through a pull request`. Es una protección de rama bypasseable por el propietario;
@@ -745,16 +921,21 @@ git push origin vX.Y.Z
 
 Se dispara con tags `v*`. Dos jobs:
 
-1. **build** (matrix `windows-latest` + `ubuntu-latest`):
+1. **build** (matrix `windows-latest` + `ubuntu-latest` + `macos-14`):
    - checkout → setup Node 20 → `npm ci`
    - deriva y valida la versión del tag (`vX.Y.Z` → `APP_VERSION`)
    - sincroniza `package.json` (`npm pkg set version=...`) y verifica que coincida
-   - `npm run dist` (electron-builder)
-   - sube artefactos por plataforma (`release-win`, `release-linux`)
-2. **release** (ubuntu, tras build): descarga ambos artefactos y crea el GitHub Release con
+   - `npm run dist` (electron-builder) con `env CSC_IDENTITY_AUTO_DISCOVERY=false` (en macOS fuerza
+     firma **ad-hoc** sin Developer ID — necesario para arrancar en Apple Silicon; inofensivo en win/linux)
+   - sube artefactos por plataforma (`release-win`, `release-linux`, `release-mac`)
+2. **release** (ubuntu, tras build): descarga los tres artefactos y crea el GitHub Release con
    `generate_release_notes: true`, publicando:
    - Windows: `*.exe`, `*.exe.blockmap`, `latest.yml`
    - Linux: `*.deb`, `*.AppImage`, `*.pkg.tar.zst`, `latest-linux.yml`
+   - macOS: `*.dmg`, `*.dmg.blockmap`, `latest-mac.yml`
+   - `prerelease: contains(github.ref_name, '-')` → un tag con sufijo (p. ej. `vX.Y.Z-mac.1`) sale como
+     **prerelease** y el updater in-app (`/releases/latest`) lo ignora — útil para probar macOS sin
+     empujarlo a los usuarios actuales.
 
 > Los `.blockmap` / `latest*.yml` son metadatos de electron-builder (canal de updates); aunque
 > el auto-update in-app actual descarga el instalador a mano, conviene seguir publicándolos.
@@ -768,6 +949,12 @@ Se dispara con tags `v*`. Dos jobs:
   electron-builder). Hay además un `PKGBUILD` en la raíz para build manual/AUR (usa `electron` del
   sistema y `NOTEFLOW_NATIVE=1`); licencia `LicenseRef-FSL-1.1-Apache-2.0`.
 - **Linux (universal):** `NoteFlow-X.Y.Z-x86_64.AppImage` — funciona en cualquier distro.
+- **macOS (Apple Silicon):** `NoteFlow-X.Y.Z-arm64.dmg` — **sin firmar/notarizar** (firma ad-hoc).
+  Gatekeeper avisa en el primer arranque; el usuario hace right-click → Open o
+  `xattr -dr com.apple.quarantine /Applications/NoteFlow.app`. Solo arm64 (sin Intel). El CLI viaja en
+  `NoteFlow.app/Contents/Resources/cli/noteflow.js` pero **NO se enlaza al PATH automáticamente** (el
+  dmg no tiene hooks de instalación) — symlink manual documentado en el README. Icono: `public/icon.icns`
+  (generado por `scripts/gen-icons.cjs` con sharp; regenerar si cambia `public/icon.png`).
 - Salida: `release/`.
 
 ### Convención de versiones
@@ -783,6 +970,9 @@ Se dispara con tags `v*`. Dos jobs:
   "win":   { "target": "nsis", "icon": "public/icon.ico",
              "artifactName": "${productName}-${version}-Setup.${ext}" },
   "nsis":  { "include": "build/nsis-include.nsh" },
+  "mac":   { "target": [{ "target": "dmg", "arch": "arm64" }], "icon": "public/icon.icns",
+             "category": "public.app-category.productivity", "darkModeSupport": true,
+             "hardenedRuntime": false, "artifactName": "${productName}-${version}-${arch}.${ext}" },
   "linux": {
     "target": ["deb", "appimage", "pacman"], "category": "Utility", "icon": "public/icon.png",
     "desktop": { "entry": { "Name": "NoteFlow", "Comment": "Fast notes for software engineers",

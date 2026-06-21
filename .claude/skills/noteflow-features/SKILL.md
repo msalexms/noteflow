@@ -7,14 +7,19 @@ description: Funcionalidades, diseño de UI y experiencia de usuario de NoteFlow
 
 > **Mantenimiento:** al implementar una feature importante, actualizar esta skill **y**
 > `noteflow-context` (arquitectura/IPC/release). Si toca el CLI, también `cli/noteflow-cli/SKILL.md`.
-> La fuente de verdad de los atajos es `src/components/KeyboardShortcutsModal.tsx`.
+> La fuente de verdad de los atajos es `src/components/Settings/ShortcutsPanel.tsx`.
+>
+> **Teclas en macOS:** los atajos se documentan con `Ctrl` (Windows/Linux); en macOS `Ctrl` = **⌘
+> (Cmd)** — los handlers aceptan `ctrlKey||metaKey`. Excepción: navegar secciones usa el **Control
+> literal (⌃)** porque `Cmd+Tab` es el conmutador del sistema. El renderer resuelve las etiquetas con
+> `src/lib/platform.ts` (`modKey`/`controlKey`/`keyLabel`, leyendo `window.noteflow.platform`).
 >
 > **Idioma de la UI:** todo el texto visible de la app va **en inglés** (labels, botones, placeholders,
 > tooltips, errores de UI). El contenido del usuario y las respuestas del LLM van en el idioma del usuario.
 
 ## ¿Qué es NoteFlow?
 
-App de escritorio de notas rápidas para Windows/Linux, orientada a developers. Dark-first, sin
+App de escritorio de notas rápidas para Windows/Linux/macOS, orientada a developers. Dark-first, sin
 fricciones, accesible desde el system tray en cualquier momento con `Ctrl+Shift+Space`. Notas en
 archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion para headless/IA.
 
@@ -24,7 +29,7 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 
 ```
 ┌─ TitleBar (32px) ──────────────────────────────────────────────────┐
-│  NOTEFLOW    [⬇ update] [☁ sync]            [⚙ settings] [🎨] [─ □ ×] │
+│  NOTEFLOW  [🧠 brain] [⬇ update] [☁ sync]        [⚙ settings] [─ □ ×] │
 ├─ Sidebar (180–480px, redimensionable) ──┬─ Editor area ─────────────┤
 │  [🔍 Search...        ] [📅]            │  [Tabs sección] [⚙]        │
 │  [All] [Today] [Week] [Month]           │  Título de nota            │
@@ -53,9 +58,12 @@ Iconos del TitleBar:
 - **⬇ update**: aparece solo si hay una versión nueva; descarga e instala in-app (muestra el %
   de descarga y luego un spinner "Installing…").
 - **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
-- **⚙ settings**: menú (atajos, fuente del editor, GitHub Sync, export/import, startup, update,
-  elegir carpeta de notas).
-- **🎨 themes**: selector de tema (12 temas).
+- **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
+  + panel derecho. Secciones: **Appearance** (tema/fuente/acento/headings/escala), **Editor**
+  (fuente/tamaño/ancho), **Startup** (autostart + stickies), **Sync** (GitHub), **Data**
+  (export/import + carpeta de notas), **AI**, **Keyboard shortcuts** y **About** (versión +
+  updates + repo). Sustituye al antiguo menú desplegable y al botón de paleta (Appearance está
+  ahora dentro). Tamaño fijo proporcional a la ventana de la app.
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
 
 ---
@@ -71,6 +79,7 @@ Iconos del TitleBar:
 ### Organizar
 - **Favorites** → aparece en la sección "favorites" al top del sidebar (etiqueta pequeña + notas planas). La nota también sigue visible en su grupo si tiene uno. Toggle desde el menú contextual o el botón ⭐ en la toolbar del editor.
 - **Drag-to-reorder** → las notas se pueden arrastrar dentro de su contexto (favorites, grupo, carpeta o sin grupo) para fijar un orden manual. El orden persiste en `note-order.json` (sincronizado con GitHub). Una línea indicadora muestra dónde se insertará la nota al soltar.
+- **Drag-to-move (entre grupos/carpetas)** → arrastrar una nota y soltarla sobre **otro grupo** (cabecera o cuerpo) la reasigna a la raíz de ese grupo; soltarla sobre una **carpeta** la mueve a esa carpeta. El destino se resalta con un borde/tinte del color del grupo mientras se arrastra. Reordenar dentro del mismo contexto y mover a otro distinto conviven en el mismo gesto (la cabecera de un grupo colapsado también es zona de drop). Equivale a `updateNote({ group, folder })`; sin IPC nuevo.
 - **Archive** → se oculta de la lista principal (toggle "Show archived" en footer).
 - **Duplicate** → copia completa con todas sus secciones.
 - **Open alongside** → abre la nota en paralelo (vista dividida) junto a la actual.
@@ -169,6 +178,19 @@ Acento del color del grupo a la izquierda.
 - Solo se listan notas **no archivadas** en las bandas de carpetas/"No folder"; las archivadas van
   a su banda propia.
 
+**Selección múltiple (acciones por lotes):** marca varias notas a la vez para operar sobre todas.
+- **Marcar** → cada tarjeta muestra una **checkbox** (esquina sup-der) al pasar el ratón; click en
+  ella la selecciona/deselecciona. Con una selección activa, un **click normal en la tarjeta**
+  alterna su marca (en vez de abrir la nota); **Ctrl/Cmd+click** alterna siempre (e inicia la
+  selección). Las tarjetas seleccionadas se resaltan (anillo). Funciona en todas las bandas,
+  incluida "Archived".
+- **Barra de acciones** flotante (abajo, centrada, sticky al hacer scroll) cuando hay ≥1 marcada:
+  contador "N selected" + **Favorite/Unfavorite**, **Archive/Unarchive** (ambos como toggle: si
+  todas ya lo tienen, lo quitan; si no, lo ponen), **Move to group** (cualquier grupo o "No group"),
+  **Move to folder** (carpetas del grupo actual o "Group root"), **Delete** (con confirmación; "N
+  notes will be permanently deleted") y **✕** para limpiar la selección.
+- `Esc` limpia la selección si hay alguna; si no, cierra la group overview.
+
 ---
 
 ## Vista de nota (note overview)
@@ -220,7 +242,7 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 ```
 
 (`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar, sticky,
-archivar, cifrar, borrar nota)
+**ocultar a la IA**, archivar, cifrar, borrar nota)
 
 - **Agregar**: `Ctrl+T` o botón `+`.
 - **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
@@ -231,9 +253,23 @@ archivar, cifrar, borrar nota)
 - **Color de sección**: desde el menú contextual de la nota se puede asignar un color a una
   sección por su nombre (se aplica a los tags de sección en el sidebar; "Auto" vuelve al color
   por nombre). Se guarda en `section-colors.json` (sincronizado).
+- **Ocultar a la IA** (`Hide from AI`): marca una sección como invisible para la IA. Una sección
+  oculta **nunca** se indexa ni aparece en el chat, en "Related notes", en el grafo del cerebro ni en
+  las tools del agente — la IA actúa como si no existiera (el resto de la app la trata con normalidad).
+  Disponible en el **menú `⋯` del editor** (sección activa) y en el **click derecho sobre un tag de
+  sección** (sidebar, vista de grupo y tarjetas de la vista de nota). Las secciones ocultas muestran
+  un icono `EyeOff` (pestaña del editor, tags del sidebar, badge en la vista de nota); `Show to AI` lo
+  revierte (re-indexa la sección). Útil para datos sensibles o ruido que no quieres que el modelo use.
 
 Las secciones aparecen como pequeños tags en la tarjeta de la nota y son clickeables para
 navegar directamente a esa sección.
+
+> **Dos menús contextuales (mismo componente `NoteContextMenu`, distinto contenido según el
+> objetivo):** el click derecho **sobre la nota** (en zona sin sección) muestra las acciones de
+> nivel-nota (favorito, archivar, abrir en paralelo, duplicar, mover a grupo/carpeta, etc.); el click
+> derecho **sobre un tag de sección** muestra solo lo propio de la sección (color de sección, ocultar
+> a la IA, abrir como sticky) más unas pocas comunes (note overview, borrar nota). El componente
+> distingue por el campo `sectionId` del request (`null` = nota).
 
 ---
 
@@ -405,6 +441,13 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   sección) que además **iluminan** esas notas en el cerebro. Arriba: **historial** de chats (crear,
   abrir, borrar — se guardan localmente), botón **nuevo chat**, y un **selector de modelo** para elegir
   con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
+  - **Adjuntar archivos (📎):** junto al campo de escribir hay un botón de clip para mandar **imágenes,
+    PDFs y .txt/.md** con tu pregunta — lo que el **modelo activo** admita (Anthropic: PDF+imágenes+texto;
+    OpenAI-compatibles: imágenes+texto; .txt/.md siempre). Los archivos elegidos aparecen como **chips
+    removibles** sobre el campo y quedan pegados al mensaje al enviarlo; puedes mandar solo adjuntos sin
+    texto. La IA **lee los documentos directamente** (la app no extrae texto): el .txt/.md se incrusta en
+    el mensaje y el PDF/imagen va nativo al proveedor. Los adjuntos siguen disponibles para **preguntas de
+    seguimiento** en la misma conversación. (Privacidad: los bytes nunca salen del proceso principal.)
   - **Modo agente (acciones):** además de responder, el chat puede **actuar sobre la app**: crear,
     editar, organizar (mover a grupo/carpeta, renombrar, fijar/archivar) y borrar notas, secciones,
     grupos y carpetas. No hay interruptor — **las acciones están siempre disponibles** y el modelo
@@ -416,9 +459,27 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
     listar pero el agente no lee ni edita su contenido. (Implementación: tool-calling nativo, no el CLI.)
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
-- **Profile:** cuestionario inicial del **segundo cerebro** — aparece automáticamente la primera vez
-  que entras al cerebro (si hay proveedor y no se completó). Respondes unas preguntas fijas y la IA
-  **genera una nota de perfil** en markdown, en tu idioma, editable como cualquier nota.
+- **Profile:** cuestionario del **segundo cerebro** — aparece automáticamente la primera vez que
+  entras al cerebro (si hay proveedor y no se completó). Pensado para **cualquier persona** (no solo
+  perfiles técnicos) y para **mínimo esfuerzo**, organizado en **secciones**: *Professional* (a qué
+  te dedicas, herramientas, en qué te enfocas), *Personal*, *Your style* y *Working with the AI*
+  (**cómo quieres que te hable la IA** — el chip que más ajusta sus respuestas). **Filosofía:
+  preguntar de forma indirecta en vez de pedirte que te auto-analices** (escribir tu personalidad
+  cansa y sesga). Así, la mayor parte de la señal sale de **favoritos de baja fricción** (canciones/
+  artistas, películas/series, libros, un viaje soñado) y de **binarias tipo "esto o lo otro"**
+  (¿fin de semana planeado o improvisado?, ¿recargas a solas o con gente?…) diseñadas sobre el
+  **Big Five**: la IA deduce rasgos a partir de lo que esas preferencias *representan*, como
+  **pistas probabilísticas** (no verdades absolutas). Se mantienen también unos chips directos de
+  auto-descripción (enfoque híbrido). Además puedes **adjuntar archivos** (un CV en PDF, imágenes,
+  .txt/.md — lo que el proveedor activo sepa leer de forma nativa; Anthropic admite PDF e imágenes,
+  los OpenAI-compatibles solo imágenes) y **pegar enlaces** (LinkedIn, portfolio, GitHub, web…),
+  cuyo contenido la app descarga y resume. Al pulsar **Generate profile**, la IA no solo reformatea:
+  **infiere, abstrae y organiza** todo (respuestas + documentos + enlaces) en una nota de perfil en
+  markdown, en tu idioma, editable como cualquier nota. **Discreción:** el perfil describe quién
+  eres en **rasgos abstractos**, no por los títulos exactos que diste; los favoritos literales
+  quedan en una sección final de baja relevancia y la IA tiene **prohibido sacarlos a colación** en
+  conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
+  La app nunca procesa los documentos: se los pasa directamente al modelo.
 - **⚙ Settings (proveedor):** elige proveedor (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot,
   OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API key** (BYO; gratis y privado),
   ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia key/modelo** —
@@ -442,6 +503,14 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
 ### Command palette
 - `Ctrl+P` → abre la paleta de comandos: buscar notas y ejecutar acciones rápidas (nueva nota,
   abrir carpeta de notas, etc.). Navegación con ↑↓, Enter para seleccionar, Esc para cerrar.
+- **Comandos de IA / Cerebro:** la paleta incluye accesos directos a la vista cerebro y al panel
+  de IA: **Open Brain** (grafo 3D), **Chat with AI** (abre el cerebro en la pestaña Chat),
+  **Find related notes** (pestaña Related), **AI profile** (segundo cerebro) y **AI provider
+  settings** (configurar modelo/clave). Todos abren la brain view y enrutan el `AiPanel` a la
+  pestaña pedida.
+- **Ask AI a question…** es un sub-modo inline (como "Create group"): escribes la pregunta en la
+  propia paleta y Enter abre el cerebro + chat y la envía directamente (en un chat nuevo). Si no
+  hay proveedor LLM configurado, la pregunta queda en cola y se envía en cuanto configuras uno.
 
 ### Filtros por fecha
 ```
@@ -467,7 +536,7 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
 
 ## Temas visuales
 
-12 temas, accesibles desde el icono de paleta en el TitleBar. Default: **Carbon**.
+14 temas, accesibles desde **Settings → Appearance** (⚙ del TitleBar). Default: **NoteFlow Dark**.
 
 | Modo | Temas |
 |---|---|
@@ -619,11 +688,24 @@ Settings → Export / Import.
 - `.noteflow` (JSON con todas las notas).
 - También `.md` / `.txt` (una nota → archivo; varias → carpeta destino).
 
-**Importar**: `.noteflow` / `.json`, o `.md` / `.txt` sueltos. Muestra preview con resolución de
-conflictos:
+**Importar**: la pestaña Import abre primero un **selector de origen con tutorial in-app** (textos
+en inglés) — cada fuente explica dónde está su botón de exportar y en qué formato:
+- **NoteFlow file** → `.noteflow` / `.json`, o `.md` / `.txt` sueltos.
+- **Markdown folder** → elige una carpeta de `.md`/`.txt` (p.ej. un vault de Obsidian); las
+  **subcarpetas se mapean a grupos/folders**, y se conservan frontmatter YAML y `#tags`.
+- **Notion** → export **HTML** (`.zip`) con *Include subpages* + *Create folders for subpages*.
+- **Google Keep** → export de **Google Takeout** (`.zip`).
+
+Tras elegir, muestra la misma **preview** con resolución de conflictos (los imports externos llevan
+ids/dirs frescos → sin conflicto, y muestran el grupo/folder destino):
 - **Skip** → mantiene la versión existente.
 - **Overwrite** → reemplaza con la importada.
 - **Keep both** → renombra y guarda ambas.
+
+Detalles de los imports externos: el contenido entra en **rich-text** (no raw); las notas **sin
+contenido se omiten** (las filas de BD / páginas título-solo de Notion no ensucian); subcarpetas →
+grupos (1er nivel) + folders (anidados, aplanados a 2 niveles); imágenes y `.csv` de Notion no se
+importan (v1). Implementación en `noteflow-context` (importadores + IPC).
 
 ---
 
