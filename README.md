@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="docs/screenshots/app-main-carbon.png" alt="NoteFlow Screenshot" width="800">
+  <img src="docs/public/screenshots/demo-dark.gif" alt="NoteFlow in action — notes, sections and the AI brain" width="800">
 
   # NoteFlow
 
-  **Fast notes for Windows & Linux developers.**
+  **Fast notes for Windows, Linux & macOS developers.**
   *Local files, optional private GitHub sync. No telemetry. Just you and your thoughts.*
 
   [![GitHub Release](https://img.shields.io/github/v/release/yagoid/noteflow?style=flat-square&color=3de8c2)](https://github.com/yagoid/noteflow/releases/latest)
@@ -15,7 +15,7 @@
 
 ## What is NoteFlow?
 
-NoteFlow is a keyboard-first, lightweight note-taking application for **Windows and Linux** (including Arch-based distributions like CachyOS).
+NoteFlow is a keyboard-first, lightweight note-taking application for **Windows, Linux** (including Arch-based distributions like CachyOS) **and macOS** (Apple Silicon).
 
 Built specifically for software engineers and power users who need something faster than Notion and less clunky than the built-in OS alternatives. Scratch down a task list, jot code snippets, or capture a quick thought — and optionally access all of it from a terminal or headless server.
 
@@ -34,9 +34,35 @@ Built specifically for software engineers and power users who need something fas
 Get the latest release from the [Releases page](https://github.com/yagoid/noteflow/releases/latest).
 
 - **Windows**: `NoteFlow-X.Y.Z-Setup.exe`
+- **macOS (Apple Silicon)**: `NoteFlow-X.Y.Z-arm64.dmg`
 - **Debian/Ubuntu/Mint**: `noteflow_X.Y.Z_amd64.deb`
 - **Arch/CachyOS/Manjaro**: `noteflow-X.Y.Z-x86_64.pkg.tar.zst`
 - **Universal Linux**: `NoteFlow-X.Y.Z-x86_64.AppImage` (works on any distro)
+
+### macOS Installation
+
+Open `NoteFlow-X.Y.Z-arm64.dmg` and drag **NoteFlow** to your Applications folder.
+
+This build is **not signed with an Apple Developer ID** (NoteFlow is a free, source-available project), so on first launch macOS Gatekeeper will say the app "cannot be opened because Apple cannot check it for malicious software." This is expected — to open it once:
+
+- **Right-click** (or Control-click) the NoteFlow app → **Open** → **Open** in the dialog.
+
+If that doesn't work, clear the quarantine flag from a terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/NoteFlow.app
+```
+
+> Apple Silicon only (M1 and newer). Intel Macs are not currently supported.
+
+#### CLI on macOS (optional)
+
+The companion `noteflow` CLI ships inside the app bundle. To put it on your `PATH`:
+
+```bash
+ln -sf /Applications/NoteFlow.app/Contents/Resources/cli/noteflow.js /usr/local/bin/noteflow
+chmod +x /Applications/NoteFlow.app/Contents/Resources/cli/noteflow.js
+```
 
 ### Arch/CachyOS Installation
 
@@ -105,6 +131,8 @@ npm run dist
 #   - noteflow_X.Y.Z_amd64.deb (Debian/Ubuntu/Mint)
 #   - NoteFlow-X.Y.Z-x86_64.AppImage (Universal Linux)
 #   - noteflow-X.Y.Z-x86_64.pkg.tar.zst (Arch/CachyOS)
+# Generates for macOS (only when run on an Apple Silicon Mac):
+#   - NoteFlow-X.Y.Z-arm64.dmg
 ```
 
 ## License
