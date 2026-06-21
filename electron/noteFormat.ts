@@ -25,6 +25,7 @@ export interface DiskSection {
   name: string
   content: string
   isRawMode?: boolean
+  aiHidden?: boolean  // when true, the AI never sees this section (index, chat, tools)
 }
 
 export interface DiskNote {
@@ -180,6 +181,7 @@ export function parseNoteDir(dirPath: string): DiskNote | null {
       } catch { /* missing section file → empty */ }
       const section: DiskSection = { id, name: String(s.name ?? 'Section'), content }
       if (s.isRawMode) section.isRawMode = true
+      if (s.aiHidden) section.aiHidden = true
       sections.push(section)
     }
   }
@@ -203,6 +205,7 @@ export function parseLegacyNoteRaw(raw: string): DiskNote {
         content: String(s.content ?? ''),
       }
       if (s.isRawMode) section.isRawMode = true
+      if (s.aiHidden) section.aiHidden = true
       return section
     })
   } else if (
@@ -252,6 +255,7 @@ export function serializeNoteFolder(
       name: s.name,
       file: `${s.id}.md`,
       ...(s.isRawMode && { isRawMode: true }),
+      ...(s.aiHidden && { aiHidden: true }),
     }))
   }
 

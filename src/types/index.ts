@@ -4,6 +4,7 @@ export interface NoteSection {
   name: string     // display label, user-editable
   content: string  // markdown body
   isRawMode?: boolean
+  aiHidden?: boolean  // when true, the AI never sees this section (index, chat, tools)
 }
 
 // Legacy fixed type kept only for default section creation
@@ -106,6 +107,22 @@ export interface ImportPreviewEntry {
   parsedId: string
   conflict: 'none' | 'id' | 'dir'
   strategy: ImportConflictStrategy
+  relPath?: string[]   // source folder segments (external imports) → group/folder
+}
+
+// Importing from other note apps. The main process emits this normalized
+// intermediate; the renderer converts it to v2 bundles (see ExportImportModal).
+export type ImportSource = 'md-folder' | 'notion' | 'keep'
+
+export interface ExternalNote {
+  title: string
+  format: 'html' | 'md'
+  body: string
+  tags?: string[]
+  created?: string
+  archived?: boolean
+  favorited?: boolean
+  relPath: string[]
 }
 
 // ── AI / Semantic index ───────────────────────────────────────────────────────
@@ -161,6 +178,13 @@ export interface LlmPreset {
   needsKey: boolean
   editableBaseUrl: boolean
   suggestedModels: string[]
+  images?: boolean // per-preset default for native image (vision) support; see providerCapabilities
+}
+
+// What attachments the active provider can ingest natively (no local processing)
+export interface ProviderCapabilities {
+  images: boolean
+  pdf: boolean
 }
 
 // Renderer-safe view of the ACTIVE preset's config — never carries the API key
@@ -170,11 +194,21 @@ export interface LlmConfigPublic {
   baseUrl: string
   hasKey: boolean
   configured: boolean
+  capabilities: ProviderCapabilities
 }
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  attachmentIds?: string[]
+}
+
+// A file attached to a chat message — metadata only; the bytes stay in the main process
+export interface ChatAttachment {
+  id: string
+  name: string
+  kind: 'pdf' | 'image' | 'text'
+  sizeBytes: number
 }
 
 // A tool action the agent performed (or requested) during a chat turn
@@ -191,6 +225,8 @@ export interface ChatPendingConfirm {
   toolCallId: string
   name: string
   input: unknown
+  /** Human-readable description of the affected target (e.g. note title), resolved in main. */
+  target?: string
 }
 
 // A saved chat session (persisted locally in userData/ai-chats.json)
@@ -199,7 +235,7 @@ export interface ChatSession {
   title: string
   createdAt: string
   updatedAt: string
-  messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; error?: boolean; actions?: ChatToolActivity[] }>
+  messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; error?: boolean; actions?: ChatToolActivity[]; attachments?: ChatAttachment[] }>
 }
 
 // A note cited as a source for a chat answer (powers citations + brain illumination)
@@ -219,6 +255,7 @@ export interface GeneratedProfile {
 declare global {
   interface Window {
     noteflow: {
+      platform: string
       readAllNotes: () => Promise<NoteDirRecord[]>
       readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
       writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string }>
@@ -253,13 +290,15 @@ declare global {
       setSectionTagColors: (colors: Record<string, GroupColor>) => Promise<void>
       getNoteOrder: () => Promise<Record<string, string[]>>
       setNoteOrder: (order: Record<string, string[]>) => Promise<void>
+      getAppVersion: () => Promise<string>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>
       downloadAndInstall: (url: string) => Promise<{ success: boolean; error?: string }>
-      onUpdateProgress: (callback: (percent: number) => void) => void
-      onUpdateInstalling: (callback: () => void) => void
+      onUpdateProgress: (callback: (percent: number) => void) => () => void
+      onUpdateInstalling: (callback: () => void) => () => void
       exportNotes: (entries: NoteflowExportEntry[] | PlainExportEntry[], format: string, hint?: string) => Promise<{ ok: boolean; filePath?: string; error?: string; canceled?: boolean }>
       parseImportFile: () => Promise<{ ok: boolean; file?: NoteflowExportFile; error?: string; canceled?: boolean }>
+      parseExternalImport: (source: ImportSource) => Promise<{ ok: boolean; source?: ImportSource; notes?: ExternalNote[]; error?: string; canceled?: boolean }>
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
       getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed' }>
@@ -296,6 +335,8 @@ declare global {
       aiChatsLoad: () => Promise<ChatSession[]>
       aiChatsSave: (sessions: ChatSession[]) => Promise<{ ok: boolean; error?: string }>
       aiChat: (requestId: string, messages: ChatMessage[]) => Promise<void>
+      aiChatPickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: ChatAttachment[]; errors?: string[] }>
+      aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiChatCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void
       onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => () => void
@@ -305,7 +346,9 @@ declare global {
       onAiChatSources: (cb: (p: { requestId: string; sources: ChatSource[] }) => void) => () => void
       onAiChatDone: (cb: (p: { requestId: string; aborted?: boolean }) => void) => () => void
       onAiChatError: (cb: (p: { requestId: string; error: string }) => void) => () => void
-      aiProfileGenerate: (answers: Array<{ question: string; answer: string }>, locale?: string) => Promise<{ ok: boolean; error?: string } & Partial<GeneratedProfile>>
+      aiProfilePickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: Array<{ id: string; name: string; kind: 'pdf' | 'image' | 'text'; sizeBytes: number }>; errors?: string[] }>
+      aiProfileRemoveFile: (id: string) => Promise<{ ok: boolean }>
+      aiProfileGenerate: (req: { fields: Array<{ label: string; value: string; section?: string }>; fileIds: string[]; urls: string[]; locale?: string }) => Promise<{ ok: boolean; error?: string } & Partial<GeneratedProfile>>
       aiProfileGetStatus: () => Promise<{ completedAt: string | null }>
       aiProfileSetCompleted: () => Promise<{ ok: boolean }>
     }

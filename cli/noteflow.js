@@ -147,6 +147,7 @@ function parseNoteYaml(yamlStr) {
           if (sec) note.sections.push(sec)
           sec = {}
           if (itemMatch[1] === 'isRawMode') sec.isRawMode = itemMatch[2].trim() === 'true'
+          else if (itemMatch[1] === 'aiHidden') sec.aiHidden = itemMatch[2].trim() === 'true'
           else sec[itemMatch[1]] = unquote(itemMatch[2])
           i++; continue
         }
@@ -167,6 +168,7 @@ function parseNoteYaml(yamlStr) {
             sec[propMatch[1]] = content; continue
           }
           if (propMatch[1] === 'isRawMode') sec.isRawMode = pval === 'true'
+          else if (propMatch[1] === 'aiHidden') sec.aiHidden = pval === 'true'
           else sec[propMatch[1]] = unquote(pval)
           i++; continue
         }
@@ -203,6 +205,7 @@ function serializeNoteMd(note, opts = {}) {
     y += `    name: ${q(s.name)}\n`
     y += `    file: ${q(s.id + '.md')}\n`
     if (s.isRawMode) y += '    isRawMode: true\n'
+    if (s.aiHidden) y += '    aiHidden: true\n'
   }
   if (note.archived)   y += 'archived: true\n'
   if (note.favorited)  y += 'favorited: true\n'
@@ -687,7 +690,7 @@ function cmdSections(titleQuery) {
   out(`\n  Sections of "${note.title}":`)
   for (const s of note.sections || []) {
     const lines = (s.content || '').split('\n').filter(Boolean).length
-    out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', raw/markdown' : ', rich'})`)
+    out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', raw/markdown' : ', rich'}${s.aiHidden ? ', hidden from AI' : ''})`)
   }
   out('')
 }

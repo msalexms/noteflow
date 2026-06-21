@@ -174,6 +174,8 @@ function parseNoteDir(dirPath) {
             const section = { id, name: String(s.name ?? 'Section'), content };
             if (s.isRawMode)
                 section.isRawMode = true;
+            if (s.aiHidden)
+                section.aiHidden = true;
             sections.push(section);
         }
     }
@@ -195,6 +197,8 @@ function parseLegacyNoteRaw(raw) {
             };
             if (s.isRawMode)
                 section.isRawMode = true;
+            if (s.aiHidden)
+                section.aiHidden = true;
             return section;
         });
     }
@@ -237,6 +241,7 @@ function serializeNoteFolder(note, opts) {
             name: s.name,
             file: `${s.id}.md`,
             ...(s.isRawMode && { isRawMode: true }),
+            ...(s.aiHidden && { aiHidden: true }),
         }));
     }
     if (note.archived)

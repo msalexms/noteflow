@@ -4,6 +4,8 @@ const electron_1 = require("electron");
 const api = {
     // Identification
     windowId: () => electron_1.ipcRenderer.sendSync('window:get-id'),
+    // Platform — lets the renderer adapt shortcut labels (⌘ vs Ctrl), etc.
+    platform: process.platform,
     // File system (folder-per-note: one dir per note, one .md per section)
     readAllNotes: () => electron_1.ipcRenderer.invoke('fs:read-all-notes'),
     readNoteDir: (dir) => electron_1.ipcRenderer.invoke('fs:read-note-dir', dir),
@@ -39,19 +41,25 @@ const api = {
     foldToCorner: (w, h) => electron_1.ipcRenderer.send('window:fold-to-corner', w, h),
     unfold: () => electron_1.ipcRenderer.send('window:unfold'),
     // Updates
+    getAppVersion: () => electron_1.ipcRenderer.invoke('app:get-version'),
     checkUpdate: () => electron_1.ipcRenderer.invoke('app:check-update'),
     openUrl: (url) => electron_1.ipcRenderer.invoke('app:open-url', url),
     downloadAndInstall: (url) => electron_1.ipcRenderer.invoke('app:download-and-install', url),
     onUpdateProgress: (callback) => {
-        electron_1.ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent));
+        const wrapper = (_event, percent) => callback(percent);
+        electron_1.ipcRenderer.on('update:download-progress', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('update:download-progress', wrapper);
     },
     onUpdateInstalling: (callback) => {
-        electron_1.ipcRenderer.on('update:installing', () => callback());
+        const wrapper = () => callback();
+        electron_1.ipcRenderer.on('update:installing', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('update:installing', wrapper);
     },
     // Export / Import — .noteflow entries are v2 folder bundles { dir, files };
     // .md/.txt exports remain plain { filename, content } files.
     exportNotes: (entries, format, hint) => electron_1.ipcRenderer.invoke('notes:export', entries, format, hint),
     parseImportFile: () => electron_1.ipcRenderer.invoke('notes:parse-import-file'),
+    parseExternalImport: (source) => electron_1.ipcRenderer.invoke('notes:parse-external-import', source),
     writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),
     // GitHub Sync
     getSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-status'),
@@ -102,6 +110,8 @@ const api = {
     aiChatsLoad: () => electron_1.ipcRenderer.invoke('ai:chats-load'),
     aiChatsSave: (sessions) => electron_1.ipcRenderer.invoke('ai:chats-save', sessions),
     aiChat: (requestId, messages) => electron_1.ipcRenderer.invoke('ai:chat', { requestId, messages }),
+    aiChatPickFiles: () => electron_1.ipcRenderer.invoke('ai:chat-pick-files'),
+    aiChatRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:chat-remove-file', id),
     aiChatCancel: (requestId) => electron_1.ipcRenderer.send('ai:chat-cancel', requestId),
     aiChatConfirm: (toolCallId, approved) => electron_1.ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
     onAiChatToolCall: (cb) => {
@@ -139,7 +149,9 @@ const api = {
         electron_1.ipcRenderer.on('ai:chat-error', wrapper);
         return () => electron_1.ipcRenderer.removeListener('ai:chat-error', wrapper);
     },
-    aiProfileGenerate: (answers, locale) => electron_1.ipcRenderer.invoke('ai:profile-generate', { answers, locale }),
+    aiProfilePickFiles: () => electron_1.ipcRenderer.invoke('ai:profile-pick-files'),
+    aiProfileRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:profile-remove-file', id),
+    aiProfileGenerate: (req) => electron_1.ipcRenderer.invoke('ai:profile-generate', req),
     aiProfileGetStatus: () => electron_1.ipcRenderer.invoke('ai:profile-get-status'),
     aiProfileSetCompleted: () => electron_1.ipcRenderer.invoke('ai:profile-set-completed'),
     // Events from main → renderer

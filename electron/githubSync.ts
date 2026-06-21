@@ -316,7 +316,25 @@ async function getRemoteFile(
   }
 }
 
-async function upsertRemoteFile(
+// Serialized entry points — every push/delete goes through one of these two, so
+// wrapping them here serializes the whole module's remote writes (see enqueueMutation).
+function upsertRemoteFile(token: string, owner: string, repo: string, relPath: string, content: string): Promise<void> {
+  return enqueueMutation(() => upsertRemoteFileNow(token, owner, repo, relPath, content))
+}
+
+function removeRemoteFile(token: string, owner: string, repo: string, relPath: string): Promise<void> {
+  return enqueueMutation(() => removeRemoteFileNow(token, owner, repo, relPath))
+}
+
+function isConflictError(msg: string): boolean {
+  return msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409')
+}
+
+function isNotFoundError(msg: string): boolean {
+  return msg.includes('Not Found') || msg.includes('404')
+}
+
+async function upsertRemoteFileNow(
   token: string,
   owner: string,
   repo: string,
@@ -354,34 +372,52 @@ async function upsertRemoteFile(
     // SHA conflict: another push updated the file between our GET and PUT.
     // Re-fetch the current SHA and retry once.
     const msg = err instanceof Error ? err.message : String(err)
-    if (!_retrying && (msg.includes('is at') || msg.includes('conflict') || msg.includes('422') || msg.includes('409'))) {
-      await upsertRemoteFile(token, owner, repo, relPath, content, true)
+    if (!_retrying && isConflictError(msg)) {
+      await upsertRemoteFileNow(token, owner, repo, relPath, content, true)
       return
     }
     throw err
   }
 }
 
-async function removeRemoteFile(
+async function removeRemoteFileNow(
   token: string,
   owner: string,
   repo: string,
-  relPath: string
+  relPath: string,
+  _retrying = false
 ): Promise<void> {
+  let sha: string
   try {
     const existing = (await githubRequest(
       token,
       'GET',
       `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`
     )) as { sha: string }
+    sha = existing.sha
+  } catch (err: unknown) {
+    // GET failed: a real 404 means it's already gone (success); anything else is a
+    // transient error we must surface so the delete isn't silently dropped.
+    const msg = err instanceof Error ? err.message : String(err)
+    if (isNotFoundError(msg)) return
+    throw err
+  }
+  try {
     await githubRequest(
       token,
       'DELETE',
       `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`,
-      { message: `delete: ${relPath}`, sha: existing.sha }
+      { message: `delete: ${relPath}`, sha }
     )
-  } catch {
-    // File doesn't exist remotely — nothing to do
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // SHA moved under us (another commit landed first) — re-fetch and retry once.
+    if (!_retrying && isConflictError(msg)) {
+      await removeRemoteFileNow(token, owner, repo, relPath, true)
+      return
+    }
+    if (isNotFoundError(msg)) return // already deleted — fine
+    throw err
   }
 }
 
@@ -396,6 +432,34 @@ let statusListener: (() => void) | null = null
 
 // Pending push timers per filename (debounce)
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// ── Remote-mutation serialization ──────────────────────────────────────────────
+// The GitHub Contents API commits one change at a time per branch: every PUT/DELETE
+// moves the branch HEAD, so a concurrent write holding a now-stale file SHA gets a
+// 409/422 conflict. Firing many writes at once (e.g. a batch delete, or saving a
+// multi-section note) used to race and silently drop some — the next pull then
+// "restored" the lost remote change locally. We funnel ALL remote mutations through
+// this single promise chain so they run strictly one-at-a-time. `pendingMutations`
+// also lets the auto-sync pull stand down while writes are still draining, closing
+// the window where a pull could re-add a note whose remote delete hasn't landed yet.
+let mutationChain: Promise<unknown> = Promise.resolve()
+let pendingMutations = 0
+
+function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
+  pendingMutations++
+  const run = mutationChain.then(task, task)
+  // Keep the chain alive regardless of individual task outcomes.
+  mutationChain = run.then(
+    () => { pendingMutations-- },
+    () => { pendingMutations-- },
+  )
+  return run
+}
+
+/** True while remote writes/deletes are queued or in flight (auto-sync defers). */
+export function hasPendingRemoteMutations(): boolean {
+  return pendingMutations > 0
+}
 
 // In-progress Device Flow
 interface DeviceFlowState {
@@ -788,6 +852,51 @@ export async function pushAllNotes(notesDir: string): Promise<{ pushed: number; 
 }
 
 /**
+ * Pushes a specific set of notes-dir-relative files NOW (awaited, no debounce),
+ * reading their current content from disk. Used by bulk imports: the per-file
+ * `schedulePush` path bumps `lastSync` to "now" on each completion, so while a
+ * large batch drains, a racing auto-sync pull sees the not-yet-pushed notes as
+ * `updated <= lastSync` and DELETES them. Landing them on the remote up front
+ * makes them immune to that deletion (the pull keeps any dir present remotely).
+ * Does NOT bump `lastSync` (the freshly-imported notes are newer than it, and
+ * leaving it untouched avoids exposing OTHER pending local notes to deletion).
+ * No-op while the push gate is closed — `flushPendingLocalChanges` will push
+ * them after the first successful pull.
+ */
+export async function pushPathsNow(notesDir: string, relPaths: string[]): Promise<{ pushed: number; errors: string[] }> {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo) return { pushed: 0, errors: [] }
+  if (initialPullStatus !== 'ok') return { pushed: 0, errors: [] }
+
+  let token: string
+  try {
+    token = decryptToken(s.encryptedToken)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    syncError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`
+    return { pushed: 0, errors: [syncError] }
+  }
+
+  let pushed = 0
+  const errors: string[] = []
+  for (const relPath of relPaths) {
+    // Supersede any debounced timer for this path — we're pushing it now.
+    const existing = pushTimers.get(relPath)
+    if (existing) { clearTimeout(existing); pushTimers.delete(relPath) }
+    try {
+      const content = fs.readFileSync(path.join(notesDir, relPath), 'utf-8')
+      await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content)
+      pushed++
+    } catch (err) {
+      errors.push(relPath)
+      console.error(`[GitHubSync] pushPathsNow failed for ${relPath}:`, String(err))
+    }
+  }
+  if (pushed > 0) syncError = undefined
+  return { pushed, errors }
+}
+
+/**
  * Debounced single-file push. `relPath` is the notes-dir-relative remote path
  * ('<dir>/<file>.md' for note files, '<name>.json' for root metadata) and is
  * also the debounce key — two files of the same note debounce independently.
@@ -908,12 +1017,22 @@ export async function scheduleDeleteDir(dir: string): Promise<void> {
   try {
     const token = decryptToken(s.encryptedToken)
     const blobs = await listRemoteTree(token, s.owner, s.repo)
-    for (const b of blobs) {
-      if (b.path.startsWith(`${dir}/`)) {
+    const targets = blobs.filter((b) => b.path.startsWith(`${dir}/`))
+    // Delete every blob; one failure must not abort the rest (a half-deleted dir
+    // would be re-pulled on the next sync). Surface failures via syncError so the
+    // delete isn't silently dropped — the cause of notes "coming back".
+    let failures = 0
+    for (const b of targets) {
+      try {
         await removeRemoteFile(token, s.owner, s.repo, b.path)
+      } catch (err: unknown) {
+        failures++
+        console.error(`[GitHubSync] delete dir blob failed for ${b.path}:`, String(err))
       }
     }
+    if (failures > 0) syncError = `Failed to delete ${failures} remote file(s) in ${dir}`
   } catch (err: unknown) {
+    syncError = `delete dir ${dir} failed: ${String(err)}`
     console.error('[GitHubSync] delete dir failed:', String(err))
   }
 }

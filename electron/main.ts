@@ -24,6 +24,7 @@ import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
 import * as noteFormat from './noteFormat'
+import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 
 
@@ -171,6 +172,13 @@ function startAutoSync(): void {
   if (autoSyncTimer) return
   autoSyncTimer = setInterval(async () => {
     if (!githubSync.getSyncStatus().connected) return
+    // Stand down while local writes/deletes are still draining to the remote: pulling
+    // now could re-add a note whose remote delete hasn't landed yet (the next tick,
+    // 5 min later, runs with the queue drained). Manual pulls are unaffected.
+    if (githubSync.hasPendingRemoteMutations()) {
+      console.log('[AutoSync] skipping pull — remote mutations pending')
+      return
+    }
     try {
       const result = await githubSync.pullNotes(NOTES_DIR)
       broadcastPullResult(result)
@@ -305,7 +313,7 @@ function isAllowedInitialUpdateUrl(url: URL): boolean {
   if (!ALLOWED_UPDATE_HOSTS.has(url.hostname)) return false
   const pathname = url.pathname.toLowerCase()
   if (!pathname.includes('/yagoid/noteflow/releases/')) return false
-  return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst')
+  return pathname.endsWith('.exe') || pathname.endsWith('.deb') || pathname.endsWith('.AppImage') || pathname.endsWith('.pkg.tar.zst') || pathname.endsWith('.dmg')
 }
 
 function isAllowedRedirectUpdateUrl(url: URL): boolean {
@@ -744,7 +752,9 @@ interface NoteWritePayload {
 // Core note write — shared by the IPC handler and the agentic chat tools.
 // `senderId` (the originating window) is excluded from the broadcast filter; pass undefined
 // (e.g. for tool-driven writes) so every window — including the chat's — refreshes.
-function applyNoteWrite(payload: NoteWritePayload, senderId?: number): void {
+// `durablePush` lands the files on the remote NOW (awaited) instead of via the per-file
+// debounced path — see the comment at the push step for why the chat tools need it.
+function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { durablePush?: boolean }): void | Promise<void> {
   const dir = ensureSafeDirname(payload.dir)
   const dirPath = path.join(NOTES_DIR, dir)
 
@@ -776,6 +786,33 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number): void {
   })
 
   const connected = githubSync.getSyncStatus().connected
+  for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
+
+  // Keep the semantic index up to date (debounced; no-op when AI is disabled).
+  if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
+
+  // Durable push (agentic chat tools): land the written files on the remote NOW
+  // instead of via the per-file debounced path. The debounced path bumps
+  // `lastSync` on each completion, so a freshly AI-created note that hasn't been
+  // pushed yet would be seen as `updated <= lastSync` by a racing auto-sync pull
+  // and DELETED from disk — the same failure the bulk-import path guards against
+  // with pushPathsNow. (No-op while the push gate is closed; flushPendingLocalChanges
+  // re-pushes after the first successful pull.)
+  if (opts?.durablePush) {
+    if (!connected) return Promise.resolve()
+    const relPaths = writes.map(([f]) => `${dir}/${f}`)
+    relPaths.forEach((p) => pendingPushFiles.add(p))
+    notifyPushState()
+    return githubSync
+      .pushPathsNow(NOTES_DIR, relPaths)
+      .then(() => undefined)
+      .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
+      .finally(() => {
+        relPaths.forEach((p) => pendingPushFiles.delete(p))
+        notifyPushState()
+      })
+  }
+
   for (const [f, content] of writes) {
     const relPath = `${dir}/${f}`
     if (connected) {
@@ -787,10 +824,6 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number): void {
       githubSync.schedulePush(relPath, content)
     }
   }
-  for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
-
-  // Keep the semantic index up to date (debounced; no-op when AI is disabled).
-  if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
 }
 
 // Core note deletion — shared by the IPC handler and the agentic chat tools.
@@ -850,6 +883,8 @@ ipcMain.handle('app:open-notes-folder', () =>
   shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err))
 )
 
+ipcMain.handle('app:get-version', () => app.getVersion())
+
 ipcMain.handle('app:check-update', () => {
   // if (!app.isPackaged) return { hasUpdate: false }
   return new Promise((resolve) => {
@@ -882,6 +917,9 @@ ipcMain.handle('app:check-update', () => {
                 // Use AppImage as universal Linux format (works on all distros)
                 downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-x86_64.AppImage`
               }
+            } else if (process.platform === 'darwin') {
+              // macOS ships a single Apple Silicon (arm64) DMG.
+              downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-arm64.dmg`
             } else {
               downloadUrl = `https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-${latest}-Setup.exe`
             }
@@ -1022,6 +1060,18 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
           // Not running from an AppImage (dev / unusual packaging) — just open it.
           await shell.openPath(dest)
         }
+      }
+    } else if (process.platform === 'darwin') {
+      // macOS: the build is not notarized, so we can't use Squirrel.Mac for a
+      // seamless in-place update. Open the downloaded DMG in Finder and let the
+      // user drag NoteFlow to Applications, replacing the old copy. We keep the
+      // app running so the user can read the instructions; they relaunch manually.
+      await shell.openPath(dest)
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Update downloaded',
+          body: 'Drag NoteFlow to your Applications folder to finish updating, then reopen it.',
+        }).show()
       }
     } else {
       // Windows: run the NSIS installer with --updated (NOT /S). This keeps the
@@ -1187,9 +1237,39 @@ ipcMain.handle('notes:parse-import-file', async () => {
   }
 })
 
+// Import from other note apps. Main does IO only (unzip / walk dirs) and returns
+// a normalized intermediate; the renderer converts HTML→md, resolves groups and
+// serializes to the v2 folder format (see electron/importers/).
+ipcMain.handle('notes:parse-external-import', async (_event, source: importers.ImportSource) => {
+  try {
+    let srcPath: string
+    if (source === 'md-folder') {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: 'Choose a folder of Markdown notes',
+        properties: ['openDirectory'],
+      })
+      if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+      srcPath = result.filePaths[0]
+    } else {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: source === 'notion' ? 'Import Notion export' : 'Import Google Keep export',
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+        properties: ['openFile'],
+      })
+      if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+      srcPath = result.filePaths[0]
+    }
+    const parsed = importers.parseExternalSource(source, srcPath)
+    return { ok: true, source: parsed.source, notes: parsed.notes }
+  } catch (err: unknown) {
+    return { ok: false, error: String(err) }
+  }
+})
+
 ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: string; files: Record<string, string> }>) => {
   const written: string[] = []
   const errors: string[] = []
+  const writtenPaths: string[] = []
   const connected = githubSync.getSyncStatus().connected
   for (const entry of entries) {
     try {
@@ -1205,7 +1285,7 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: stri
       for (const [f, content] of writes) {
         markInternalWrite(`${dir}/${f}`)
         fs.writeFileSync(path.join(dirPath, f), content, 'utf-8')
-        if (connected) githubSync.schedulePush(`${dir}/${f}`, content)
+        writtenPaths.push(`${dir}/${f}`)
       }
       written.push(dir)
     } catch (err) {
@@ -1215,6 +1295,19 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: stri
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send('notes-updated')
   })
+  // Durably push the imported files NOW (awaited, batched) instead of relying on
+  // per-file debounced pushes. The debounced path bumps lastSync on each
+  // completion, so while a large import drains a racing auto-sync pull would see
+  // the not-yet-pushed notes as stale and delete them. Landing them on the remote
+  // up front prevents that.
+  if (connected && writtenPaths.length > 0) {
+    try {
+      const res = await githubSync.pushPathsNow(NOTES_DIR, writtenPaths)
+      if (res.errors.length > 0) errors.push(...res.errors.map((p) => `push failed: ${p}`))
+    } catch (err) {
+      errors.push(`push failed: ${String(err)}`)
+    }
+  }
   return { written, errors }
 })
 
@@ -1387,8 +1480,22 @@ const CHAT_SYSTEM_BASE =
   'You can also ACT on the notes through the provided tools (create/edit/organize/delete notes, ' +
   'sections, groups and folders). Only act when the user clearly asks you to; otherwise just answer. ' +
   'Never invent ids — call list_notes / list_groups (or search_notes) first to discover the real ids ' +
-  'you need. After acting, briefly tell the user what you did. Deletions require user confirmation, ' +
-  'which the app handles automatically.'
+  'you need. Ids are stable and never change, so if a tool reports a note/section as not found, the id ' +
+  'is stale or mistyped: do not retry it verbatim — re-run list_notes and use the freshly returned id. ' +
+  'When acting on several notes, fetch their ids right before you act on them (especially after creating, ' +
+  'moving or renaming anything) and copy each id exactly. After acting, briefly tell the user what you did. ' +
+  'Deletions require user confirmation, which the app handles automatically.\n\n' +
+  "When the context includes the user's profile or personality notes (including any \"soft signals\" / " +
+  'raw favourites), use them only as BACKGROUND to tailor your tone and suggestions. Never cite where ' +
+  'a preference comes from or name-drop the user\'s favourite song/film/book in an unrelated answer ' +
+  '(do not say "since you like X…"). Make recommendations directly.\n\n' +
+  'NEXT-ACTION SUGGESTIONS. At the very end of your FINAL answer (never in an intermediate turn that ' +
+  'still calls tools), if there are genuinely useful follow-ups, append the literal marker ' +
+  '"<!--SUGGESTIONS-->" on its own line, then 1 or 2 short, actionable next things the user might want ' +
+  'to ask, one per line prefixed with "- ". Phrase each as an imperative from the USER\'s point of view, ' +
+  'in the same language as your answer (e.g. "- Reorganize the note into sections"). Keep them concrete ' +
+  'and grounded in this conversation. If nothing useful applies, omit the marker entirely. Never mention ' +
+  'the marker or these suggestions in the visible part of your answer.'
 
 const chatAborts = new Map<string, AbortController>()
 
@@ -1432,7 +1539,11 @@ async function buildChatContext(query: string): Promise<{ system: string; source
     if (!dirPath) return
     const note = noteFormat.parseNoteDir(dirPath)
     if (!note || note.encryption || note.sections.length === 0) return
-    const section = note.sections.find((s) => s.id === preferredSectionId) ?? note.sections[0]
+    // Sections hidden from the AI never feed the chat context (defence in depth: hidden
+    // sections are already kept out of the index, but a neighbour fallback could reach one).
+    const visible = note.sections.filter((s) => !s.aiHidden)
+    if (visible.length === 0) return
+    const section = visible.find((s) => s.id === preferredSectionId) ?? visible[0]
     const key = `${noteId}:${section.id}`
     if (seen.has(key)) return
     seen.add(key)
@@ -1465,32 +1576,37 @@ function readJsonArray(file: string): unknown[] {
 function buildToolContext(): agentTools.ToolContext {
   return {
     notesDir: NOTES_DIR,
-    writeNote: (payload) => applyNoteWrite(payload),
+    writeNote: (payload) => applyNoteWrite(payload, undefined, { durablePush: true }),
     deleteNoteDir: (dir) => applyNoteDelete(dir),
     readGroups: () => readJsonArray(GROUPS_FILE) as ReturnType<agentTools.ToolContext['readGroups']>,
-    writeGroups: (groups) => applyGroupsSet(groups),
+    writeGroups: (groups) => applyGroupsSet(groups, undefined, { durablePush: true }),
     readFolders: () => readJsonArray(FOLDERS_FILE) as ReturnType<agentTools.ToolContext['readFolders']>,
-    writeFolders: (folders) => applyFoldersSet(folders),
+    writeFolders: (folders) => applyFoldersSet(folders, undefined, { durablePush: true }),
     search: aiIndex.isEnabled() ? (q, k) => aiIndex.search(q, k) : undefined,
   }
 }
 
 const MAX_AGENT_STEPS = 12
 
-ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: llm.ChatMessage[] }) => {
+type ChatWireMessage = { role: 'system' | 'user' | 'assistant'; content: string; attachmentIds?: string[] }
+
+ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: ChatWireMessage[] }) => {
   const { requestId, messages } = req
   const sender = event.sender
   const send = (channel: string, payload: unknown) => { if (!sender.isDestroyed()) sender.send(channel, payload) }
 
   const stored = readLlmSettings()
-  if (!llm.toPublic(stored).configured) {
+  const pub = llm.toPublic(stored)
+  if (!pub.configured) {
     send('ai:chat-error', { requestId, error: 'No LLM provider configured' })
     return
   }
+  const caps = pub.capabilities
 
   const controller = new AbortController()
   chatAborts.set(requestId, controller)
   const myConfirmIds = new Set<string>()
+  let sentImages = false // tracked here so the catch can tailor the error message
   try {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
     const { system, sources } = await buildChatContext(lastUser)
@@ -1499,10 +1615,25 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: llm.
     const provider = llm.getProvider(llm.resolveConfig(stored))
     const ctx = buildToolContext()
 
-    // Seed the agentic conversation from the renderer's text messages.
-    const convo: llm.AgentMessage[] = messages
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    // Seed the agentic conversation from the renderer's messages, resolving each user message's
+    // attachment ids from the in-main cache: text/code files inline into the text, pdf/image go native.
+    const convo: llm.AgentMessage[] = []
+    for (const m of messages) {
+      if (m.role === 'system') continue
+      if (m.role === 'assistant') { convo.push({ role: 'assistant', content: m.content }); continue }
+      let content = m.content
+      const attachments: llm.Attachment[] = []
+      for (const id of m.attachmentIds ?? []) {
+        const f = chatFiles.get(id)
+        if (!f) continue
+        if (f.kind === 'text' && f.text) content += `\n\n## File: ${f.name}\n${f.text}`
+        else if (f.data && ((f.kind === 'pdf' && caps.pdf) || (f.kind === 'image' && caps.images))) {
+          attachments.push({ kind: f.kind, mediaType: f.mediaType, data: f.data })
+          if (f.kind === 'image') sentImages = true
+        }
+      }
+      convo.push(attachments.length ? { role: 'user', content, attachments } : { role: 'user', content })
+    }
 
     for (let step = 0; step < MAX_AGENT_STEPS; step++) {
       const { text, toolCalls } = await provider.streamTurn(
@@ -1517,7 +1648,8 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: llm.
         send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input })
 
         if (agentTools.DESTRUCTIVE_TOOLS.has(call.name)) {
-          send('ai:chat-confirm-request', { requestId, toolCallId: call.id, name: call.name, input: call.input })
+          const target = agentTools.describeTarget(call.name, call.input, ctx)
+          send('ai:chat-confirm-request', { requestId, toolCallId: call.id, name: call.name, input: call.input, target })
           myConfirmIds.add(call.id)
           const approved = await new Promise<boolean>((resolve) => {
             if (controller.signal.aborted) return resolve(false)
@@ -1544,12 +1676,28 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: llm.
     send('ai:chat-done', { requestId })
   } catch (err) {
     if (controller.signal.aborted) send('ai:chat-done', { requestId, aborted: true })
-    else send('ai:chat-error', { requestId, error: err instanceof Error ? err.message : String(err) })
+    else send('ai:chat-error', { requestId, error: friendlyChatError(err instanceof Error ? err.message : String(err), sentImages) })
   } finally {
     for (const id of myConfirmIds) chatConfirms.delete(id)
     chatAborts.delete(requestId)
   }
 })
+
+// Turn a raw provider error into something actionable. The common BYO failure is attaching an image
+// to a text-only model (e.g. DeepSeek answers HTTP 400 with `unknown variant image_url`); detect that
+// and explain it instead of dumping the raw JSON. Everything else passes through unchanged.
+function friendlyChatError(raw: string, sentImages: boolean): string {
+  if (sentImages) {
+    const low = raw.toLowerCase()
+    if (
+      low.includes('image_url') || low.includes('unknown variant') ||
+      (low.includes('400') && (low.includes('image') || low.includes('multimodal') || low.includes('vision')))
+    ) {
+      return "This model can't read images. Pick a vision-capable model, or remove the image and ask in text."
+    }
+  }
+  return raw
+}
 
 ipcMain.on('ai:chat-cancel', (_event, requestId: string) => {
   chatAborts.get(requestId)?.abort()
@@ -1585,6 +1733,151 @@ ipcMain.handle('ai:chats-save', (_event, sessions: unknown) => {
 
 // ── Second-brain profile ───────────────────────────────────────────────────────
 
+// ── Second-brain profile: attachment cache + link fetch ──────────────────────
+// File bytes stay in main and never cross to the renderer; the wizard only holds metadata
+// (id/name/kind/size). PDFs and images are forwarded to the model NATIVELY (the app never
+// extracts text itself); .txt/.md are inlined as plain text.
+interface ProfileFile {
+  id: string
+  name: string
+  kind: 'pdf' | 'image' | 'text'
+  mediaType: string
+  data?: string // base64 (pdf/image)
+  text?: string // inlined (txt/md)
+  sizeBytes: number
+}
+const profileFiles = new Map<string, ProfileFile>()
+// Chat attachments live in their own cache so they aren't consumed by profile generation.
+// Bytes stay in main (never cross to the renderer) and persist for the app session so follow-up
+// questions about the same image/PDF keep working across turns.
+const chatFiles = new Map<string, ProfileFile>()
+const PROFILE_FILE_MAX_BYTES = 10 * 1024 * 1024
+const PROFILE_FILES_TOTAL_MAX_BYTES = 20 * 1024 * 1024
+const PROFILE_IMAGE_TYPES: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+}
+
+// Plain-text & code files we can safely inline verbatim (no parsing/extraction needed). Extension
+// list kept broad on purpose: anything whose bytes ARE the text. Binary/structured formats that
+// need decoding (docx, xlsx, images, pdf) are NOT here. Used by both the picker filter and classify.
+const TEXT_EXTS = [
+  'txt', 'text', 'md', 'markdown', 'mdx', 'rst', 'log', 'csv', 'tsv', 'tex', 'bib', 'rtf',
+  'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'py', 'pyw', 'rb', 'go', 'rs', 'java', 'kt', 'kts',
+  'scala', 'swift', 'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hh', 'cs', 'php', 'pl', 'pm', 'lua',
+  'r', 'dart', 'ex', 'exs', 'erl', 'hrl', 'clj', 'cljs', 'hs', 'ml', 'mli', 'fs', 'fsx', 'vb',
+  'groovy', 'gradle', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd', 'sql', 'graphql', 'gql',
+  'html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte', 'astro',
+  'json', 'jsonc', 'json5', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties',
+  'xml', 'csproj', 'gitignore', 'dockerignore', 'editorconfig', 'diff', 'patch',
+]
+const TEXT_EXT_SET = new Set(TEXT_EXTS)
+
+function classifyProfileFile(filePath: string): { kind: ProfileFile['kind']; mediaType: string } | null {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.pdf') return { kind: 'pdf', mediaType: 'application/pdf' }
+  if (PROFILE_IMAGE_TYPES[ext]) return { kind: 'image', mediaType: PROFILE_IMAGE_TYPES[ext] }
+  if (TEXT_EXT_SET.has(ext.replace(/^\./, ''))) return { kind: 'text', mediaType: 'text/plain' }
+  return null
+}
+
+function cacheTotalBytes(cache: Map<string, ProfileFile>): number {
+  let n = 0
+  for (const f of cache.values()) n += f.sizeBytes
+  return n
+}
+
+// Open a file picker scoped to what the ACTIVE provider can read natively, read the chosen files
+// into the given in-main cache, and return only metadata. .txt/.md are inlined; pdf/image kept as base64.
+async function pickFilesIntoCache(cache: Map<string, ProfileFile>, title: string) {
+  const caps = llm.toPublic(readLlmSettings()).capabilities
+  const exts = [...TEXT_EXTS]
+  if (caps.images) exts.push('png', 'jpg', 'jpeg', 'gif', 'webp')
+  if (caps.pdf) exts.push('pdf')
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title,
+    filters: [{ name: 'Supported files', extensions: exts }],
+    properties: ['openFile', 'multiSelections'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return { ok: false as const, canceled: true }
+  const added: Array<{ id: string; name: string; kind: ProfileFile['kind']; sizeBytes: number }> = []
+  const errors: string[] = []
+  let total = cacheTotalBytes(cache)
+  for (const fp of result.filePaths) {
+    const name = path.basename(fp)
+    const cls = classifyProfileFile(fp)
+    if (!cls) { errors.push(`${name}: unsupported type`); continue }
+    if ((cls.kind === 'pdf' && !caps.pdf) || (cls.kind === 'image' && !caps.images)) {
+      errors.push(`${name}: not supported by this provider`); continue
+    }
+    let size = 0
+    try { size = fs.statSync(fp).size } catch { errors.push(`${name}: cannot read`); continue }
+    if (size > PROFILE_FILE_MAX_BYTES) { errors.push(`${name}: too large (max 10 MB)`); continue }
+    if (total + size > PROFILE_FILES_TOTAL_MAX_BYTES) { errors.push(`${name}: total size limit reached`); continue }
+    try {
+      const buf = fs.readFileSync(fp)
+      const id = randomBytes(6).toString('hex')
+      const entry: ProfileFile = cls.kind === 'text'
+        ? { id, name, kind: 'text', mediaType: cls.mediaType, text: buf.toString('utf-8').slice(0, 20000), sizeBytes: size }
+        : { id, name, kind: cls.kind, mediaType: cls.mediaType, data: buf.toString('base64'), sizeBytes: size }
+      cache.set(id, entry)
+      total += size
+      added.push({ id, name, kind: cls.kind, sizeBytes: size })
+    } catch { errors.push(`${name}: cannot read`) }
+  }
+  return { ok: true as const, files: added, errors }
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<\/(p|div|section|article|li|h[1-6]|tr)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n\s*\n+/g, '\n\n')
+    .trim()
+}
+
+/** Download a page and reduce it to readable text. https only; bounded time + size. */
+async function fetchReadableText(rawUrl: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  const url = parseHttpsUrl(rawUrl)
+  if (!url) return { ok: false, error: 'Only https URLs are allowed' }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const response = await net.fetch(url.toString(), {
+      signal: controller.signal,
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; NoteFlow profile reader)' },
+    })
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` }
+    const ctype = (response.headers.get('content-type') ?? '').toLowerCase()
+    if (!ctype.includes('text/html') && !ctype.includes('text/plain') && !ctype.includes('xhtml')) {
+      return { ok: false, error: `unsupported content type${ctype ? ` (${ctype.split(';')[0]})` : ''}` }
+    }
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let html = ''
+    const MAX_HTML = 1_500_000
+    while (html.length < MAX_HTML) {
+      const { done, value } = await reader.read()
+      if (done) break
+      html += decoder.decode(value, { stream: true })
+    }
+    reader.cancel().catch(() => {})
+    const text = htmlToText(html).slice(0, 6000)
+    return text ? { ok: true, text } : { ok: false, error: 'no readable text found' }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function extractJson(text: string): { title: string; sections: Array<{ name: string; content: string }> } | null {
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
@@ -1602,24 +1895,120 @@ function extractJson(text: string): { title: string; sections: Array<{ name: str
   }
 }
 
-ipcMain.handle('ai:profile-generate', async (_event, req: { answers: Array<{ question: string; answer: string }>; locale?: string }) => {
+ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, 'Add files to your profile'))
+
+ipcMain.handle('ai:profile-remove-file', (_event, id: string) => {
+  profileFiles.delete(id)
+  return { ok: true }
+})
+
+// Chat attachments: same picker, but into the chat cache (kept across turns, not consumed).
+ipcMain.handle('ai:chat-pick-files', () => pickFilesIntoCache(chatFiles, 'Attach files to the chat'))
+
+ipcMain.handle('ai:chat-remove-file', (_event, id: string) => {
+  chatFiles.delete(id)
+  return { ok: true }
+})
+
+ipcMain.handle('ai:profile-generate', async (_event, req: { fields?: Array<{ label: string; value: string; section?: string }>; fileIds?: string[]; urls?: string[]; locale?: string }) => {
   const stored = readLlmSettings()
   if (!llm.toPublic(stored).configured) return { ok: false, error: 'No LLM provider configured' }
   const provider = llm.getProvider(llm.resolveConfig(stored))
-  const locale = req.locale?.trim() || "the language the user answered in"
-  const qa = req.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')
+  const locale = req.locale?.trim() || 'the language the user used'
+
+  const parts: string[] = []
+  const fields = (req.fields ?? []).filter((f) => f.value?.trim())
+  if (fields.length) {
+    parts.push('# Form answers')
+    // Group answers under their section header so the model can weigh them in context.
+    const bySection = new Map<string, Array<{ label: string; value: string }>>()
+    for (const f of fields) {
+      const sec = f.section?.trim() || 'Other'
+      if (!bySection.has(sec)) bySection.set(sec, [])
+      bySection.get(sec)!.push({ label: f.label, value: f.value.trim() })
+    }
+    for (const [sec, items] of bySection) {
+      parts.push(`## ${sec}`)
+      for (const it of items) parts.push(`- ${it.label}: ${it.value}`)
+    }
+  }
+
+  // Inline text files; collect pdf/image as native attachments.
+  const attachments: llm.Attachment[] = []
+  const attachedNames: string[] = []
+  for (const id of req.fileIds ?? []) {
+    const f = profileFiles.get(id)
+    if (!f) continue
+    if (f.kind === 'text' && f.text) parts.push(`## File: ${f.name}\n${f.text}`)
+    else if ((f.kind === 'pdf' || f.kind === 'image') && f.data) {
+      attachments.push({ kind: f.kind, mediaType: f.mediaType, data: f.data })
+      attachedNames.push(f.name)
+    }
+  }
+  if (attachedNames.length) {
+    parts.push(`## Attached documents\n${attachedNames.map((n) => `- ${n}`).join('\n')}\n(Read the attached files to learn more about the user.)`)
+  }
+
+  // Scrape readable text from the provided links.
+  const urls = (req.urls ?? []).map((u) => u.trim()).filter(Boolean)
+  if (urls.length) {
+    parts.push('## Links')
+    for (const u of urls) {
+      const r = await fetchReadableText(u)
+      if (r.ok && r.text) parts.push(`### ${u}\n${r.text}`)
+      else parts.push(`### ${u}\n(Could not read this page${r.error ? `: ${r.error}` : ''}. Still record the link in the profile.)`)
+    }
+  }
+
+  if (!parts.length && !attachments.length) return { ok: false, error: 'Nothing to build a profile from' }
+
   const system =
-    'You build a personal profile note for a "second brain" notes app from the user\'s answers. ' +
-    `Write the profile in ${locale}. ` +
+    'You are a perceptive profiler building a personal profile note for a "second brain" notes app. ' +
+    'The note is later retrieved as BACKGROUND CONTEXT to tailor answers to this person, so its value ' +
+    'is in capturing WHO THEY ARE, not in cataloguing trivia. The user may be anyone (not necessarily ' +
+    'a developer). You are given short form answers (grouped by section), optional attached documents ' +
+    '(CV/PDF/images) and text scraped from links. ' +
+    `Write the profile in ${locale}.\n\n` +
+
+    'INFER, DON\'T JUST TRANSCRIBE. Many answers are intentionally INDIRECT proxies — favourite ' +
+    'music/films/books, a dream trip, and playful "this or that" picks. Read them through validated ' +
+    'personality psychology (the Big Five / OCEAN: openness, conscientiousness, extraversion, ' +
+    'agreeableness, emotional stability) to infer likely TRAITS, VALUES, MOTIVATIONS and working/' +
+    'communication preferences. These signals are PROBABILISTIC and modest, so treat them as soft ' +
+    'priors, never certainties: phrase inferences as tendencies ("tends to…", "likely values…", ' +
+    '"seems energised by…"), and let multiple cues converge before you commit to a trait.\n\n' +
+
+    'ABSTRACT AWAY THE SOURCE. The main body must describe the person in terms of traits, values and ' +
+    'how they think and want to be treated — NOT by naming the specific media that produced the ' +
+    'inference. Write what a favourite REPRESENTS, not its title: e.g. "drawn to introspective, ' +
+    'character-driven stories and big-picture thinking" rather than "likes Interstellar". This keeps ' +
+    'the assistant from awkwardly name-dropping a movie/song in unrelated conversations.\n\n' +
+
+    'Cover BOTH professional and personal dimensions, and especially HOW they want the assistant to ' +
+    'communicate with them (tone, length, level of detail) — capture this clearly so future answers ' +
+    'can adapt. Stay faithful: do not invent hard specifics (names, employers, dates) that the inputs ' +
+    'do not support.\n\n' +
+
+    'STRUCTURE. Organize into a few clear sections; skip any with no information. Suggested: ' +
+    '"About" (a tight summary), "How they think & what they value" (the inferred traits/values), ' +
+    '"Communication style" (how the assistant should talk to them), "Work & focus", "Interests", ' +
+    'and "Links" (the URLs provided). ' +
+    'Then, ONLY if the user gave literal favourites (songs, films, books, etc.), add a FINAL section ' +
+    'named exactly "Soft signals (raw — do not cite)" that lists them verbatim, opening with one ' +
+    'line: "Raw references kept for background only — do not bring these up in unrelated ' +
+    'conversations." Keep this section short and low-key.\n\n' +
+
     'Return ONLY a JSON object with this exact shape: ' +
     '{"title": string, "sections": [{"name": string, "content": string}]}. ' +
-    'No text outside the JSON. "content" is Markdown. Organize the profile into a few clear sections ' +
-    '(e.g. About, Work, Interests, Goals). Stay faithful to the answers — do not invent facts.'
+    'No text outside the JSON. "content" is Markdown.'
+
   try {
     let text = ''
-    await provider.chat({ system, messages: [{ role: 'user', content: qa }], maxTokens: 2048 }, (d) => { text += d })
+    const userText = parts.join('\n\n') || 'Build my profile from the attached files.'
+    await provider.chat({ system, messages: [{ role: 'user', content: userText }], maxTokens: 3072, attachments }, (d) => { text += d })
     const parsed = extractJson(text)
     if (!parsed) return { ok: false, error: 'Could not parse the model output' }
+    for (const id of req.fileIds ?? []) profileFiles.delete(id) // attachments consumed
     return { ok: true, ...parsed }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -1730,7 +2119,7 @@ ipcMain.handle('groups:get', () => {
   } catch { return [] }
 })
 
-function applyGroupsSet(groups: unknown[], senderId?: number): void {
+function applyGroupsSet(groups: unknown[], senderId?: number, opts?: { durablePush?: boolean }): void | Promise<void> {
   const content = JSON.stringify(groups, null, 2)
   fs.writeFileSync(GROUPS_FILE, content, 'utf-8')
   // Broadcast to other windows so their groups reload immediately
@@ -1739,6 +2128,16 @@ function applyGroupsSet(groups: unknown[], senderId?: number): void {
       win.webContents.send('notes-updated')
     }
   })
+  // Durable push for agentic chat tools (see applyNoteWrite): land groups.json on
+  // the remote NOW so a racing pull doesn't overwrite the new group with the stale
+  // remote copy before the debounced push fires.
+  if (opts?.durablePush) {
+    if (!githubSync.getSyncStatus().connected) return Promise.resolve()
+    return githubSync
+      .pushPathsNow(NOTES_DIR, ['groups.json'])
+      .then(() => undefined)
+      .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
+  }
   githubSync.schedulePush('groups.json', content)
 }
 
@@ -1752,7 +2151,7 @@ ipcMain.handle('folders:get', () => {
   } catch { return [] }
 })
 
-function applyFoldersSet(folders: unknown[], senderId?: number): void {
+function applyFoldersSet(folders: unknown[], senderId?: number, opts?: { durablePush?: boolean }): void | Promise<void> {
   const content = JSON.stringify(folders, null, 2)
   fs.writeFileSync(FOLDERS_FILE, content, 'utf-8')
   // Broadcast to other windows so their folders reload immediately
@@ -1761,6 +2160,14 @@ function applyFoldersSet(folders: unknown[], senderId?: number): void {
       win.webContents.send('notes-updated')
     }
   })
+  // Durable push for agentic chat tools — see applyGroupsSet / applyNoteWrite.
+  if (opts?.durablePush) {
+    if (!githubSync.getSyncStatus().connected) return Promise.resolve()
+    return githubSync
+      .pushPathsNow(NOTES_DIR, ['folders.json'])
+      .then(() => undefined)
+      .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
+  }
   githubSync.schedulePush('folders.json', content)
 }
 

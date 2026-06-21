@@ -19,6 +19,9 @@ const api = {
   // Identification
   windowId: (): number => ipcRenderer.sendSync('window:get-id'),
 
+  // Platform — lets the renderer adapt shortcut labels (⌘ vs Ctrl), etc.
+  platform: process.platform as NodeJS.Platform,
+
   // File system (folder-per-note: one dir per note, one .md per section)
   readAllNotes: (): Promise<NoteDirRecord[]> => ipcRenderer.invoke('fs:read-all-notes'),
   readNoteDir: (dir: string): Promise<NoteDirRecord | null> => ipcRenderer.invoke('fs:read-note-dir', dir),
@@ -63,6 +66,7 @@ const api = {
   unfold: () => ipcRenderer.send('window:unfold'),
 
   // Updates
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:get-version'),
   checkUpdate: (): Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }> =>
     ipcRenderer.invoke('app:check-update'),
   openUrl: (url: string): Promise<void> =>
@@ -70,10 +74,14 @@ const api = {
   downloadAndInstall: (url: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('app:download-and-install', url),
   onUpdateProgress: (callback: (percent: number) => void) => {
-    ipcRenderer.on('update:download-progress', (_event, percent) => callback(percent))
+    const wrapper = (_event: any, percent: number) => callback(percent)
+    ipcRenderer.on('update:download-progress', wrapper)
+    return () => ipcRenderer.removeListener('update:download-progress', wrapper)
   },
   onUpdateInstalling: (callback: () => void) => {
-    ipcRenderer.on('update:installing', () => callback())
+    const wrapper = () => callback()
+    ipcRenderer.on('update:installing', wrapper)
+    return () => ipcRenderer.removeListener('update:installing', wrapper)
   },
 
   // Export / Import — .noteflow entries are v2 folder bundles { dir, files };
@@ -82,6 +90,14 @@ const api = {
     ipcRenderer.invoke('notes:export', entries, format, hint),
   parseImportFile: (): Promise<{ ok: boolean; file?: { version: number; exported: string; app: string; notes: Array<{ dir: string; files: Record<string, string> }> }; error?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('notes:parse-import-file'),
+  parseExternalImport: (source: 'md-folder' | 'notion' | 'keep'): Promise<{
+    ok: boolean
+    source?: string
+    notes?: Array<{ title: string; format: 'html' | 'md'; body: string; tags?: string[]; created?: string; archived?: boolean; favorited?: boolean; relPath: string[] }>
+    error?: string
+    canceled?: boolean
+  }> =>
+    ipcRenderer.invoke('notes:parse-external-import', source),
   writeImportedNotes: (entries: Array<{ dir: string; files: Record<string, string> }>): Promise<{ written: string[]; errors: string[] }> =>
     ipcRenderer.invoke('notes:write-imported', entries),
 
@@ -158,8 +174,10 @@ const api = {
   aiLlmTest: () => ipcRenderer.invoke('ai:llm-test'),
   aiChatsLoad: () => ipcRenderer.invoke('ai:chats-load'),
   aiChatsSave: (sessions: unknown) => ipcRenderer.invoke('ai:chats-save', sessions),
-  aiChat: (requestId: string, messages: Array<{ role: string; content: string }>) =>
+  aiChat: (requestId: string, messages: Array<{ role: string; content: string; attachmentIds?: string[] }>) =>
     ipcRenderer.invoke('ai:chat', { requestId, messages }),
+  aiChatPickFiles: () => ipcRenderer.invoke('ai:chat-pick-files'),
+  aiChatRemoveFile: (id: string) => ipcRenderer.invoke('ai:chat-remove-file', id),
   aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
   aiChatConfirm: (toolCallId: string, approved: boolean) =>
     ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
@@ -173,8 +191,8 @@ const api = {
     ipcRenderer.on('ai:chat-tool-result', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-tool-result', wrapper)
   },
-  onAiChatConfirmRequest: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => {
-    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown }) => cb(p)
+  onAiChatConfirmRequest: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; target?: string }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown; target?: string }) => cb(p)
     ipcRenderer.on('ai:chat-confirm-request', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-confirm-request', wrapper)
   },
@@ -198,8 +216,10 @@ const api = {
     ipcRenderer.on('ai:chat-error', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-error', wrapper)
   },
-  aiProfileGenerate: (answers: Array<{ question: string; answer: string }>, locale?: string) =>
-    ipcRenderer.invoke('ai:profile-generate', { answers, locale }),
+  aiProfilePickFiles: () => ipcRenderer.invoke('ai:profile-pick-files'),
+  aiProfileRemoveFile: (id: string) => ipcRenderer.invoke('ai:profile-remove-file', id),
+  aiProfileGenerate: (req: { fields: Array<{ label: string; value: string; section?: string }>; fileIds: string[]; urls: string[]; locale?: string }) =>
+    ipcRenderer.invoke('ai:profile-generate', req),
   aiProfileGetStatus: () => ipcRenderer.invoke('ai:profile-get-status'),
   aiProfileSetCompleted: () => ipcRenderer.invoke('ai:profile-set-completed'),
 
