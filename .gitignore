@@ -153,3 +153,11 @@ docs-ai/
 # Astro marketing site (docs/) — build output and cache
 docs/dist/
 docs/.astro/
+
+# Local build/lint output and dev artifacts (never commit)
+build_log.txt
+build_output.txt
+eslint*.txt
+*_output.txt
+*_output_utf8.txt
+app-state.png
