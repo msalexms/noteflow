@@ -1,12 +1,13 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useEffect, useState } from 'react'
+import { Fragment, useMemo, useRef, useEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, ArchiveRestore, Search, Star, StarOff, PanelLeftClose, Trash2, Lock, Unlock, Copy, Columns2, ExternalLink, FolderPlus, FolderMinus, Folder, FolderOpen, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer, LayoutGrid } from 'lucide-react'
+import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPlus, Folder, FolderOpen, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer, LayoutGrid } from 'lucide-react'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
-import { EncryptionModal } from '../EncryptionModal'
-import { normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { ContextMenu } from '../ContextMenu'
+import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
+import { TAG_COLOR_VARS } from '../../lib/tagColors'
 import { normalize, escapeRegExp, parseSearchQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { NoteFolderHeader } from './NoteFolderHeader'
@@ -72,50 +73,10 @@ function dayKeyToDate(dayKey: string): Date {
 
 const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
 
-// Context menu that measures its own size after rendering and shifts itself back
-// into the viewport when it would overflow — the menu's height varies (encryption
-// state, section colors, group submenus…), so a fixed height estimate can't reliably
-// keep the bottom options visible.
-function ContextMenu({ x, y, className, children }: {
-  x: number
-  y: number
-  className: string
-  children: React.ReactNode
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: x, top: y })
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const margin = 8
-    const { width, height } = el.getBoundingClientRect()
-    let left = x
-    let top = y
-    if (top + height > window.innerHeight - margin) {
-      top = Math.max(margin, window.innerHeight - height - margin)
-    }
-    if (left + width > window.innerWidth - margin) {
-      left = Math.max(margin, window.innerWidth - width - margin)
-    }
-    setPos((prev) => (prev.left === left && prev.top === top ? prev : { left, top }))
-  })
-
-  return (
-    <div
-      ref={ref}
-      className={className}
-      style={{ left: pos.left, top: pos.top }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {children}
-    </div>
-  )
-}
-
 export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
+  const noteViewId = useNotesStore((s) => s.noteViewId)
   const searchQuery = useNotesStore((s) => s.searchQuery)
   const filterDate = useNotesStore((s) => s.filterDate)
   const filterTag = useNotesStore((s) => s.filterTag)
@@ -125,13 +86,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const setGroupView = useNotesStore((s) => s.setGroupView)
   const setNoteView = useNotesStore((s) => s.setNoteView)
   const updateNote = useNotesStore((s) => s.updateNote)
-  const archiveNote = useNotesStore((s) => s.archiveNote)
-  const deleteNote = useNotesStore((s) => s.deleteNote)
-  const encryptNote = useNotesStore((s) => s.encryptNote)
-  const unlockNote = useNotesStore((s) => s.unlockNote)
-  const lockNote = useNotesStore((s) => s.lockNote)
-  const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
-  const sessionPasswords = useNotesStore((s) => s.sessionPasswords)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
@@ -139,11 +93,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const createNote = useNotesStore((s) => s.createNote)
   const createTempNote = useNotesStore((s) => s.createTempNote)
-  const duplicateNote = useNotesStore((s) => s.duplicateNote)
 
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
-  const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
-  const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
 
   const groups = useGroupsStore((s) => s.groups)
   const folders = useGroupsStore((s) => s.folders)
@@ -165,12 +116,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const searchRef = useRef<HTMLInputElement>(null)
 
   // ── Note context menu ──────────────────────────────────────────────────────
-  const [contextMenu, setContextMenu] = useState<{
-    x: number
-    y: number
-    noteId: string
-    sectionId: string | null
-  } | null>(null)
+  const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
 
   // ── Group context menu ─────────────────────────────────────────────────────
   const [groupContextMenu, setGroupContextMenu] = useState<{
@@ -186,9 +132,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     folderId: string
   } | null>(null)
 
-  // ── Folder picker (move note to folder) ────────────────────────────────────
-  const [folderPickerNoteId, setFolderPickerNoteId] = useState<string | null>(null)
-
   // ── Folder rename inline ───────────────────────────────────────────────────
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
   const [editingFolderName, setEditingFolderName] = useState('')
@@ -196,11 +139,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   // ── New folder inline input (per group; optional note to assign on create) ──
   const [newFolderInput, setNewFolderInput] = useState<{ groupId: string; noteId?: string } | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
-
-  // ── Group picker / create inline ───────────────────────────────────────────
-  const [groupPickerNoteId, setGroupPickerNoteId] = useState<string | null>(null)
-  const [groupPickerFlip, setGroupPickerFlip] = useState<{ x: boolean; y: boolean }>({ x: false, y: false })
-  const [groupNameInput, setGroupNameInput] = useState<{ noteId: string; value: string } | null>(null)
 
   // ── Group rename inline ────────────────────────────────────────────────────
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
@@ -223,15 +161,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     onConfirm: () => void
   } | null>(null)
 
-  // ── Encryption modal ───────────────────────────────────────────────────────
-  const [encModal, setEncModal] = useState<{
-    mode: 'encrypt' | 'unlock' | 'remove'
-    noteId: string
-  } | null>(null)
-
-  // noteId to delete after a successful unlock (for delete-encrypted-note flow)
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
   const [calendarExpanded, setCalendarExpanded] = useState(false)
@@ -244,6 +173,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     position: 'before' | 'after'
     contextKey: string
   } | null>(null)
+  // ── Note move-to-group/folder via drag & drop ──────────────────────────────
+  const [noteMoveTarget, setNoteMoveTarget] = useState<{ groupId: string; folderId?: string } | null>(null)
   const draggingNoteContextRef = useRef<string | null>(null)
   const draggingNoteIdRef = useRef<string | null>(null)
 
@@ -253,9 +184,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       setContextMenu(null)
       setGroupContextMenu(null)
       setFolderContextMenu(null)
-      setGroupPickerNoteId(null)
-      setFolderPickerNoteId(null)
-      setGroupNameInput(null)
       setNewNoteCtx(null)
     }
     window.addEventListener('click', close)
@@ -434,18 +362,10 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }, [activeSearchNoteId])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
-  function getNoteGroupDirect(noteId: string) {
-    const note = rawNotes.find(n => n.id === noteId)
-    return note?.group ? groups.find(g => g.id === note.group) ?? null : null
-  }
-
   function closeAllMenus() {
     setContextMenu(null)
     setGroupContextMenu(null)
     setFolderContextMenu(null)
-    setGroupPickerNoteId(null)
-    setFolderPickerNoteId(null)
-    setGroupNameInput(null)
   }
 
   async function createNoteInGroup(groupId: string) {
@@ -545,9 +465,53 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     draggingNoteContextRef.current = null
     draggingNoteIdRef.current = null
     setNoteDropTarget(null)
+    setNoteMoveTarget(null)
     window.dispatchEvent(new CustomEvent('noteflow:note-drag', {
       detail: { active: false },
     }))
+  }
+
+  // ── Note move to a different group/folder via drag & drop ──────────────────
+  // Dropping a note onto a group (header or body) or a folder reassigns it.
+  // Same-context drags are owned by the reorder handlers above (which stop
+  // propagation), so these only fire when the note actually changes container.
+  function moveTargetContextKey(groupId: string, folderId?: string): string {
+    return folderId ? `folder:${folderId}` : `group:${groupId}`
+  }
+
+  function handleNoteMoveDragOver(e: React.DragEvent, groupId: string, folderId?: string) {
+    if (!draggingNoteIdRef.current) return
+    if (draggingNoteContextRef.current === moveTargetContextKey(groupId, folderId)) return
+    e.preventDefault()
+    if (folderId) e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    setNoteMoveTarget((prev) =>
+      prev?.groupId === groupId && prev.folderId === folderId ? prev : { groupId, folderId }
+    )
+  }
+
+  function handleNoteMoveDragLeave(e: React.DragEvent, groupId: string, folderId?: string) {
+    const next = e.relatedTarget as Node | null
+    if (next && e.currentTarget.contains(next)) return
+    setNoteMoveTarget((prev) =>
+      prev?.groupId === groupId && prev.folderId === folderId ? null : prev
+    )
+  }
+
+  function handleNoteMoveDrop(e: React.DragEvent, groupId: string, folderId?: string) {
+    if (!draggingNoteIdRef.current) return
+    if (draggingNoteContextRef.current === moveTargetContextKey(groupId, folderId)) {
+      setNoteMoveTarget(null)
+      return
+    }
+    e.preventDefault()
+    if (folderId) e.stopPropagation()
+    const noteId =
+      e.dataTransfer.getData('application/x-noteflow-note-id') ||
+      e.dataTransfer.getData('text/plain')
+    setNoteMoveTarget(null)
+    if (!noteId) return
+    void updateNote(noteId, { group: groupId, folder: folderId })
   }
 
   function handleNoteReorderDragOver(e: React.DragEvent<HTMLLIElement>, note: (typeof rawNotes)[0], contextKey: string) {
@@ -555,6 +519,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     if (draggingNoteContextRef.current !== contextKey) return
     if (draggingNoteIdRef.current === note.id) return
     e.preventDefault()
+    e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
     const rect = e.currentTarget.getBoundingClientRect()
     const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
@@ -564,7 +529,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }
 
   function handleNoteReorderDrop(e: React.DragEvent<HTMLLIElement>, targetNote: (typeof rawNotes)[0], contextKey: string) {
+    // Cross-context drops are handled by the group/folder move zones (which this
+    // would otherwise bubble into); only reorder within the same context here.
+    if (draggingNoteContextRef.current && draggingNoteContextRef.current !== contextKey) {
+      setNoteDropTarget(null)
+      return
+    }
     e.preventDefault()
+    e.stopPropagation()
     const draggedId = e.dataTransfer.getData('application/x-noteflow-note-id')
     if (!draggedId || draggedId === targetNote.id) { setNoteDropTarget(null); return }
     const position = noteDropTarget?.noteId === targetNote.id ? noteDropTarget.position : 'after'
@@ -654,7 +626,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   }
 
   function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
-    const isActive = activeNoteId === note.id
+    // When the note overview is open the editor is hidden, so the highlighted
+    // note must follow that view; otherwise fall back to the active editor note.
+    const isActive = noteViewId != null ? noteViewId === note.id : activeNoteId === note.id
     const isSearchTarget = activeSearchNoteId === note.id
     const contextKey = getNoteContextKey(note, inFavorites)
     const isDropBefore = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'before'
@@ -682,6 +656,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           onClick={(e) => {
             if (e.ctrlKey || e.metaKey) {
               openNoteInSplit(note.id)
+              return
+            }
+            // Clicking the note itself opens the note overview (every section with a
+            // content preview). With a single section there's nothing to choose, so go
+            // straight to it. Clicking a section tag (handled in SectionTabsRow) always
+            // jumps to that section regardless of count.
+            if (note.sections.length > 1) {
+              setNoteView(note.id)
               return
             }
             setOpenNoteIds([note.id])
@@ -712,7 +694,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
             {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
             <span className={`text-[13px] font-mono font-medium truncate flex-1
-              ${activeNoteId === note.id ? 'text-text' : 'text-text/80'}`}>
+              ${isActive ? 'text-text' : 'text-text/80'}`}>
               {renderHighlightedText(note.title || 'Untitled', searchQuery)}
             </span>
             <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
@@ -774,8 +756,20 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     const { folder, notes: folderNotes } = sf
     const collapsed = collapsedFolderIds.has(folder.id)
     if (hasActiveFilters && folderNotes.length === 0) return null
+    const isMoveTarget = noteMoveTarget?.folderId === folder.id
     return (
-      <div key={`folder-${folder.id}`}>
+      <div
+        key={`folder-${folder.id}`}
+        className="rounded-md"
+        onDragOver={(e) => handleNoteMoveDragOver(e, group.id, folder.id)}
+        onDragLeave={(e) => handleNoteMoveDragLeave(e, group.id, folder.id)}
+        onDrop={(e) => handleNoteMoveDrop(e, group.id, folder.id)}
+        style={
+          isMoveTarget
+            ? { boxShadow: `inset 0 0 0 1.5px rgb(var(${group.color}) / 0.7)`, background: `rgb(var(${group.color}) / 0.07)` }
+            : undefined
+        }
+      >
         {editingFolderId === folder.id ? (
           <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
             <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(var(${group.color}) / 0.22)`} style={{ color: `rgb(var(${group.color}))` }} />
@@ -860,42 +854,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           onCancel={() => setModal(null)}
         />
       )}
-      {encModal && (() => {
-        const encNote = rawNotes.find(n => n.id === encModal.noteId)
-        if (!encNote) return null
-        return (
-          <EncryptionModal
-            mode={encModal.mode}
-            noteTitle={encNote.title}
-            onConfirm={async (password, options) => {
-              if (encModal.mode === 'encrypt') {
-                await encryptNote(encModal.noteId, password, options)
-              } else if (encModal.mode === 'unlock') {
-                await unlockNote(encModal.noteId, password)
-                if (pendingDeleteId === encModal.noteId) {
-                  const target = rawNotes.find(n => n.id === pendingDeleteId)
-                  setPendingDeleteId(null)
-                  setEncModal(null)
-                  if (target) {
-                    setModal({
-                      title: 'Delete note',
-                      message: `"${target.title || 'Untitled'}" will be permanently deleted.`,
-                      confirmLabel: 'Delete',
-                      danger: true,
-                      onConfirm: () => { setModal(null); deleteNote(target.id) },
-                    })
-                  }
-                  return
-                }
-              } else {
-                await removeNoteEncryption(encModal.noteId, password)
-              }
-              setEncModal(null)
-            }}
-            onCancel={() => { setPendingDeleteId(null); setEncModal(null) }}
-          />
-        )
-      })()}
+      <NoteContextMenu request={contextMenu} onClose={() => setContextMenu(null)} />
 
       {/* ── Search + collapse ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2.5">
@@ -1084,8 +1043,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             onContextMenu={(e) => { e.preventDefault(); setNewNoteCtx({ x: e.clientX, y: e.clientY }) }}
             title="New note (Ctrl+N) · Right-click for temporary note"
             className="flex-1 py-1.5 rounded text-xs font-mono transition-all
-                       bg-surface-2 text-text border border-text/20
-                       hover:bg-surface-3 hover:border-text/30"
+                       bg-text/[0.12] text-text border border-text/20
+                       hover:bg-text/[0.18] hover:border-text/30"
           >
             + New note
           </button>
@@ -1166,7 +1125,17 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                         <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">groups</span>
                       </li>
                     )}
-                  <li className={`${isFirstGroup ? '' : 'first:mt-0 mt-1.5'} ${group.archived ? 'opacity-50' : ''}`}>
+                  <li
+                    className={`${isFirstGroup ? '' : 'first:mt-0 mt-1.5'} ${group.archived ? 'opacity-50' : ''} rounded-md`}
+                    onDragOver={(e) => handleNoteMoveDragOver(e, group.id)}
+                    onDragLeave={(e) => handleNoteMoveDragLeave(e, group.id)}
+                    onDrop={(e) => handleNoteMoveDrop(e, group.id)}
+                    style={
+                      noteMoveTarget?.groupId === group.id && !noteMoveTarget.folderId
+                        ? { boxShadow: `inset 0 0 0 1.5px rgb(var(${group.color}) / 0.7)`, background: `rgb(var(${group.color}) / 0.07)` }
+                        : undefined
+                    }
+                  >
                     {/* Group header / rename input — draggable to reorder groups */}
                     <div
                       style={{ position: 'relative', opacity: draggingGroupId === group.id ? 0.4 : 1 }}
@@ -1326,354 +1295,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           </button>
         </ContextMenu>
       )}
-
-      {/* ── Note Context Menu ────────────────────────────────────────────────── */}
-      {contextMenu && (() => {
-        const note = rawNotes.find(n => n.id === contextMenu.noteId)
-        if (!note) return null
-        const currentGroup = getNoteGroupDirect(note.id)
-        const currentSection = contextMenu.sectionId
-          ? note.sections.find((section) => section.id === contextMenu.sectionId) ?? null
-          : null
-        const currentSectionColor = currentSection
-          ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
-          : undefined
-        return (
-          <ContextMenu
-            x={contextMenu.x}
-            y={contextMenu.y}
-            className="fixed z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-48 animate-in fade-in zoom-in duration-100"
-          >
-            <button
-              onClick={() => { updateNote(note.id, { favorited: !note.favorited }); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              {note.favorited ? <StarOff size={12} /> : <Star size={12} />}
-              {note.favorited ? 'Remove from favorites' : 'Add to favorites'}
-            </button>
-            <button
-              onClick={() => { archiveNote(note.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Archive size={12} />
-              {note.archived ? 'Unarchive' : 'Archive'}
-            </button>
-            {note.encryption && !sessionPasswords[note.id] && (
-              <button
-                onClick={() => { closeAllMenus(); setEncModal({ mode: 'unlock', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-              >
-                <Unlock size={12} />
-                Unlock note
-              </button>
-            )}
-            {note.encryption && !!sessionPasswords[note.id] && (
-              <button
-                onClick={() => { lockNote(note.id); closeAllMenus() }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-              >
-                <Lock size={12} />
-                Lock note
-              </button>
-            )}
-            {note.encryption && (
-              <button
-                onClick={() => { closeAllMenus(); setEncModal({ mode: 'remove', noteId: note.id }) }}
-                className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-              >
-                <Unlock size={12} />
-                Remove encryption
-              </button>
-            )}
-            <button
-              onClick={() => {
-                openNoteInSplit(note.id)
-                closeAllMenus()
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Columns2 size={12} />
-              Open alongside
-            </button>
-            <button
-              onClick={() => { duplicateNote(note.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <Copy size={12} />
-              Duplicate note
-            </button>
-            <button
-              onClick={() => { setNoteView(note.id); closeAllMenus() }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-            >
-              <LayoutGrid size={12} />
-              Note overview
-            </button>
-
-            {currentSection && (
-              <>
-                <div className="h-px bg-border my-1" />
-                <div className="px-3 pt-1 text-[10px] font-mono text-text-muted uppercase tracking-wider">
-                  Section color
-                </div>
-                <div className="px-3 py-2">
-                  <div className="flex gap-1.5 flex-wrap">
-                    {GROUP_COLORS.map((color) => (
-                      <button
-                        key={`section-color-${color}`}
-                        title={color.replace('--', '')}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void setSectionTagColor(currentSection.name, color)
-                          closeAllMenus()
-                        }}
-                        className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${currentSectionColor === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
-                        style={{ background: `rgb(var(${color}))` }}
-                      />
-                    ))}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void clearSectionTagColor(currentSection.name)
-                        closeAllMenus()
-                      }}
-                      className={`px-1.5 h-4 rounded text-[9px] font-mono border transition-colors ${
-                        currentSectionColor
-                          ? 'text-text-muted border-border hover:text-text hover:border-text/30'
-                          : 'text-text border-text/25 bg-surface-2'
-                      }`}
-                    >
-                      Auto
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* ── Group section ── */}
-            <div className="h-px bg-border my-1" />
-            {currentGroup ? (
-              <>
-                {/* Move to folder submenu */}
-                <div
-                  className="relative"
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const groupFolders = folders.filter((f) => f.groupId === currentGroup.id)
-                    const submenuW = 160
-                    const submenuH = (groupFolders.length + 2) * 34
-                    setGroupPickerFlip({
-                      x: rect.right + submenuW > window.innerWidth,
-                      y: rect.top + submenuH > window.innerHeight,
-                    })
-                    setFolderPickerNoteId(note.id)
-                  }}
-                  onMouseLeave={() => setFolderPickerNoteId(null)}
-                >
-                  <button
-                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                  >
-                    <Folder size={12} />
-                    Move to folder
-                    <ChevronRight size={10} className="ml-auto" />
-                  </button>
-
-                  {folderPickerNoteId === note.id && (() => {
-                    const groupFolders = folders.filter((f) => f.groupId === currentGroup.id)
-                    return (
-                      <div
-                        className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-44 animate-in fade-in zoom-in duration-100"
-                        style={{
-                          [groupPickerFlip.x ? 'right' : 'left']: '100%',
-                          [groupPickerFlip.y ? 'bottom' : 'top']: 0,
-                        }}
-                      >
-                        {note.folder && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              updateNote(note.id, { folder: undefined })
-                              closeAllMenus()
-                            }}
-                            className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                          >
-                            <FolderMinus size={12} />
-                            Group root
-                          </button>
-                        )}
-                        {groupFolders.map((f) => (
-                          <button
-                            key={f.id}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              updateNote(note.id, { folder: f.id })
-                              closeAllMenus()
-                            }}
-                            className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 transition-colors hover:bg-surface-3 hover:text-text ${note.folder === f.id ? 'text-text' : 'text-text-muted'}`}
-                          >
-                            <Folder size={12} className="flex-shrink-0" style={{ color: `rgb(var(${currentGroup.color}))` }} />
-                            <span className="truncate">{f.name}</span>
-                          </button>
-                        ))}
-                        {groupFolders.length === 0 && (
-                          <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">No folders yet</div>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            startNewFolder(currentGroup.id, note.id)
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
-                        >
-                          + New folder…
-                        </button>
-                      </div>
-                    )
-                  })()}
-                </div>
-
-                <button
-                  onClick={() => { updateNote(note.id, { group: undefined, folder: undefined }); closeAllMenus() }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                >
-                  <FolderMinus size={12} />
-                  Remove from group
-                </button>
-              </>
-            ) : (
-              <>
-                <div
-                  className="relative"
-                  onMouseEnter={(e) => {
-                    if (groups.length === 0) return
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const submenuW = 160
-                    const submenuH = (groups.length + 1) * 34
-                    setGroupPickerFlip({
-                      x: rect.right + submenuW > window.innerWidth,
-                      y: rect.top + submenuH > window.innerHeight,
-                    })
-                    setGroupPickerNoteId(note.id)
-                    setGroupNameInput(null)
-                  }}
-                  onMouseLeave={() => setGroupPickerNoteId(null)}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (groups.length === 0) setGroupNameInput({ noteId: note.id, value: '' })
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                  >
-                    <FolderPlus size={12} />
-                    Add to group
-                    {groups.length > 0 && <ChevronRight size={10} className="ml-auto" />}
-                  </button>
-
-                  {/* Group picker — submenu, repositioned to stay within window */}
-                  {groupPickerNoteId === note.id && (
-                    <div
-                      className="absolute z-50 bg-surface-2 border border-border rounded shadow-xl py-1 w-40 animate-in fade-in zoom-in duration-100"
-                      style={{
-                        [groupPickerFlip.x ? 'right' : 'left']: '100%',
-                        [groupPickerFlip.y ? 'bottom' : 'top']: 0,
-                      }}
-                    >
-                      {groups.map((g) => (
-                        <button
-                          key={g.id}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            updateNote(note.id, { group: g.id })
-                            closeAllMenus()
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                        >
-                          <span
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                            style={{ background: `rgb(var(${g.color}))` }}
-                          />
-                          {g.name}
-                        </button>
-                      ))}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setGroupPickerNoteId(null)
-                          setGroupNameInput({ noteId: note.id, value: '' })
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
-                      >
-                        + New group…
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Inline group name input */}
-                {groupNameInput?.noteId === note.id && (
-                  <input
-                    autoFocus
-                    value={groupNameInput.value}
-                    onChange={(e) => setGroupNameInput({ ...groupNameInput, value: e.target.value })}
-                    onKeyDown={async (e) => {
-                      e.stopPropagation()
-                      if (e.key === 'Enter' && groupNameInput.value.trim()) {
-                        const g = await createGroup(groupNameInput.value.trim(), '--accent')
-                        updateNote(note.id, { group: g.id })
-                        closeAllMenus()
-                      }
-                      if (e.key === 'Escape') setGroupNameInput(null)
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="mx-3 my-1 px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text w-[calc(100%-1.5rem)] block"
-                    placeholder="Group name…"
-                  />
-                )}
-              </>
-            )}
-
-            {(!note.encryption || !!sessionPasswords[note.id]) && (
-              <>
-                <div className="h-px bg-border my-1" />
-                <button
-                  onClick={() => {
-                    const targetSectionId = contextMenu.sectionId ?? note.sections[0]?.id
-                    if (targetSectionId) window.noteflow.openSticky(note.id, targetSectionId)
-                    closeAllMenus()
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
-                >
-                  <ExternalLink size={12} />
-                  Open as Sticky Note
-                </button>
-              </>
-            )}
-            <div className="h-px bg-border my-1" />
-            <button
-              onClick={() => {
-                closeAllMenus()
-                if (note.encryption && !sessionPasswords[note.id]) {
-                  setPendingDeleteId(note.id)
-                  setEncModal({ mode: 'unlock', noteId: note.id })
-                  return
-                }
-                setModal({
-                  title: 'Delete note',
-                  message: `"${note.title || 'Untitled'}" will be permanently deleted.`,
-                  confirmLabel: 'Delete',
-                  danger: true,
-                  onConfirm: () => { setModal(null); deleteNote(note.id) },
-                })
-              }}
-              className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
-            >
-              <Trash2 size={12} />
-              Delete note
-            </button>
-          </ContextMenu>
-        )
-      })()}
 
       {/* ── Group Context Menu ───────────────────────────────────────────────── */}
       {groupContextMenu && (() => {

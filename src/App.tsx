@@ -13,6 +13,7 @@ import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
+import { modKey } from './lib/platform'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
@@ -42,6 +43,10 @@ export function App() {
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  // Notes sidebar inside the brain view — collapsed by default, toggled independently
+  // from the editor sidebar so it doesn't change the editor's layout. It always starts
+  // hidden when entering the brain view (reset by the effect below).
+  const [brainSidebarVisible, setBrainSidebarVisible] = useState(false)
   const [isSidebarDragging, setIsSidebarDragging] = useState(false)
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null)
   const [editorDropActive, setEditorDropActive] = useState(false)
@@ -56,6 +61,11 @@ export function App() {
   const paneContainerRef = useRef<HTMLDivElement | null>(null)
   const dragStartX = useRef(0)
   const dragStartW = useRef(SIDEBAR_DEFAULT)
+
+  // Entering the brain view always starts with the notes sidebar hidden.
+  useEffect(() => {
+    if (brainViewOpen) setBrainSidebarVisible(false)
+  }, [brainViewOpen])
 
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -93,7 +103,10 @@ export function App() {
       }
       // Ctrl+' — toggle sidebar (Spanish keyboards often have ' on the key next to 0)
       if (!e.shiftKey && (e.key === "'" || e.key === '´' || e.code === 'Quote' || e.code === 'Minus')) {
-        e.preventDefault(); setSidebarVisible((v) => !v); return
+        e.preventDefault()
+        if (useNotesStore.getState().brainViewOpen) setBrainSidebarVisible((v) => !v)
+        else setSidebarVisible((v) => !v)
+        return
       }
       // Ctrl+T — new tab in active note
       if (!e.shiftKey && (key === 't' || e.code === 'KeyT')) {
@@ -442,7 +455,7 @@ export function App() {
         {/* ── Sidebar ───────────────────────────────────────────────── */}
         <div
           style={{
-            width: brainViewOpen ? 0 : sidebarVisible ? sidebarWidth : 0,
+            width: (brainViewOpen ? brainSidebarVisible : sidebarVisible) ? sidebarWidth : 0,
             minWidth: 0,
             flexShrink: 0,
             overflow: 'hidden',
@@ -450,12 +463,12 @@ export function App() {
           }}
         >
           <div style={{ width: sidebarWidth, minWidth: sidebarWidth, height: '100%' }}>
-            <Sidebar onCollapse={() => setSidebarVisible(false)} />
+            <Sidebar onCollapse={() => (brainViewOpen ? setBrainSidebarVisible(false) : setSidebarVisible(false))} />
           </div>
         </div>
 
         {/* Drag handle */}
-        {sidebarVisible && !brainViewOpen && (
+        {(brainViewOpen ? brainSidebarVisible : sidebarVisible) && (
           <div
             onMouseDown={handleDragStart}
             className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
@@ -465,13 +478,13 @@ export function App() {
         )}
 
         {/* ── Collapse / expand toggle ──────────────────────────────── */}
-        {!sidebarVisible && !brainViewOpen && (
+        {!(brainViewOpen ? brainSidebarVisible : sidebarVisible) && (
           <button
-            onClick={() => setSidebarVisible(true)}
-            title="Show sidebar (Ctrl+')"
-            className="flex-shrink-0 flex items-center justify-center w-7 h-full
+            onClick={() => (brainViewOpen ? setBrainSidebarVisible(true) : setSidebarVisible(true))}
+            title={brainViewOpen ? 'Show notes' : `Show sidebar (${modKey}+')`}
+            className={`flex-shrink-0 flex items-center justify-center h-full
                        text-text-muted/40 hover:text-text-muted hover:bg-surface-2
-                       border-r border-border transition-colors"
+                       border-r border-border transition-colors ${brainViewOpen ? 'w-6' : 'w-7'}`}
           >
             <PanelLeftOpen size={14} />
           </button>
@@ -479,7 +492,7 @@ export function App() {
 
         {/* ── Main editor ──────────────────────────────────────────── */}
         <main
-          className={`flex-1 overflow-hidden relative ${editorDropActive ? 'ring-1 ring-inset ring-text/30' : ''}`}
+          className={`flex-1 overflow-hidden relative pr-1 ${editorDropActive ? 'ring-1 ring-inset ring-text/30' : ''}`}
           style={{ background: 'rgb(var(--bg-editor))' }}
           onDragOver={handleEditorDragOver}
           onDragLeave={handleEditorDragLeave}

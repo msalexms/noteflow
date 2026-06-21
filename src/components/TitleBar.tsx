@@ -1,36 +1,31 @@
 import { useState, useEffect } from 'react'
-import { Brain, Check, Cloud, CloudOff, Download, Minus, Palette, RefreshCw, Settings, Square, X } from 'lucide-react'
-import { THEMES } from '../lib/themes'
-import { useThemeStore } from '../stores/themeStore'
-import { useEditorSettingsStore } from '../stores/editorSettingsStore'
+import { Brain, Cloud, CloudOff, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
-import { TitleBarMenu } from './TitleBarMenu'
 import { ExportImportModal } from './ExportImportModal'
-import { GitHubSyncModal } from './GitHubSyncModal'
-import { StartupSettingsModal } from './StartupSettingsModal'
-import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
+import { SettingsModal } from './Settings/SettingsModal'
+import type { SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
-  const { activeThemeId, setTheme } = useThemeStore()
-  const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } = useEditorSettingsStore()
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [installing, setInstalling] = useState(false)
-  const [checkingUpdate, setCheckingUpdate] = useState(false)
-  const [upToDate, setUpToDate] = useState(false)
   const [exportImportModal, setExportImportModal] = useState<'export' | 'import' | null>(null)
-  const [syncModal, setSyncModal] = useState(false)
   type SyncStatus = { enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed' }
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ enabled: false, connected: false, initialPullStatus: 'pending' })
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
-  const [startupModal, setStartupModal] = useState(false)
-  const [shortcutsModal, setShortcutsModal] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
 
   const refreshSyncStatus = () => window.noteflow.getSyncStatus().then(setSyncStatus)
+
+  const openSettings = (section: SettingsSection) => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  }
 
   useEffect(() => {
     window.noteflow.checkUpdate().then((result) => {
@@ -39,42 +34,30 @@ export function TitleBar() {
       }
     })
     refreshSyncStatus()
-    window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
-    window.noteflow.onUpdateInstalling(() => setInstalling(true))
+    const unsubProgress = window.noteflow.onUpdateProgress((percent) => setDownloadProgress(percent))
+    const unsubInstalling = window.noteflow.onUpdateInstalling(() => setInstalling(true))
     const unsubNotes = window.noteflow.onNotesUpdated(() => refreshSyncStatus())
     const unsubPush = window.noteflow.onSyncPushState((state) => {
       setPushing(state === 'pushing')
       if (state === 'idle') refreshSyncStatus()
     })
     const unsubStatus = window.noteflow.onSyncStatusChanged(() => refreshSyncStatus())
-    const openShortcutsHandler = () => setShortcutsModal(true)
-    window.addEventListener('noteflow:open-shortcuts', openShortcutsHandler)
     return () => {
+      unsubProgress()
+      unsubInstalling()
       unsubNotes()
       unsubPush()
       unsubStatus()
-      window.removeEventListener('noteflow:open-shortcuts', openShortcutsHandler)
     }
   }, [])
 
   useEffect(() => {
     const openExport = () => setExportImportModal('export')
     const openImport = () => setExportImportModal('import')
-    const openGithubSync = () => setSyncModal(true)
-    const openStartup = () => setStartupModal(true)
-    const doCheckUpdate = () => {
-      setCheckingUpdate(true)
-      setUpToDate(false)
-      window.noteflow.checkUpdate().then((result) => {
-        if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
-          setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
-        } else {
-          setUpToDate(true)
-          setTimeout(() => setUpToDate(false), 3000)
-        }
-        setCheckingUpdate(false)
-      })
-    }
+    const openShortcuts = () => openSettings('shortcuts')
+    const openGithubSync = () => openSettings('sync')
+    const openStartup = () => openSettings('startup')
+    const openUpdates = () => openSettings('about')
     const doSync = () => {
       setSyncing(true)
       window.noteflow.pullNotes().then(() => {
@@ -84,16 +67,18 @@ export function TitleBar() {
     }
     window.addEventListener('noteflow:open-export', openExport)
     window.addEventListener('noteflow:open-import', openImport)
+    window.addEventListener('noteflow:open-shortcuts', openShortcuts)
     window.addEventListener('noteflow:open-github-sync', openGithubSync)
     window.addEventListener('noteflow:open-startup', openStartup)
-    window.addEventListener('noteflow:check-for-update', doCheckUpdate)
+    window.addEventListener('noteflow:check-for-update', openUpdates)
     window.addEventListener('noteflow:sync-notes', doSync)
     return () => {
       window.removeEventListener('noteflow:open-export', openExport)
       window.removeEventListener('noteflow:open-import', openImport)
+      window.removeEventListener('noteflow:open-shortcuts', openShortcuts)
       window.removeEventListener('noteflow:open-github-sync', openGithubSync)
       window.removeEventListener('noteflow:open-startup', openStartup)
-      window.removeEventListener('noteflow:check-for-update', doCheckUpdate)
+      window.removeEventListener('noteflow:check-for-update', openUpdates)
       window.removeEventListener('noteflow:sync-notes', doSync)
     }
   }, [])
@@ -113,20 +98,6 @@ export function TitleBar() {
     await window.noteflow.pullNotes()
     await refreshSyncStatus()
     setSyncing(false)
-  }
-
-  const handleCheckUpdate = async () => {
-    if (checkingUpdate) return
-    setCheckingUpdate(true)
-    setUpToDate(false)
-    const result = await window.noteflow.checkUpdate()
-    if (result.hasUpdate && result.latestVersion && result.downloadUrl) {
-      setUpdateInfo({ latestVersion: result.latestVersion, downloadUrl: result.downloadUrl })
-    } else {
-      setUpToDate(true)
-      setTimeout(() => setUpToDate(false), 3000)
-    }
-    setCheckingUpdate(false)
   }
 
   const handleUpdate = async () => {
@@ -164,7 +135,7 @@ export function TitleBar() {
           onClick={() => setBrainView(!brainViewOpen)}
           className={`flex items-center gap-1.5 px-2.5 h-5 my-auto mr-5 rounded border border-solid text-[10px] font-mono tracking-wide transition-colors ${
             brainViewOpen
-              ? 'border-text-muted bg-surface-2 text-text'
+              ? 'border-accent/60 bg-accent/15 text-accent'
               : 'border-text-muted/60 text-text-muted hover:text-text hover:border-text-muted hover:bg-surface-2'
           }`}
           title={brainViewOpen ? 'Close brain view' : 'Open brain view'}
@@ -224,152 +195,13 @@ export function TitleBar() {
             )}
           </button>
         )}
-        <TitleBarMenu
-          trigger={<Settings size={12} />}
-          groups={[
-            {
-              label: 'App',
-              items: [
-                {
-                  id: 'shortcuts',
-                  label: 'Keyboard shortcuts...',
-                  action: () => setShortcutsModal(true),
-                },
-                {
-                  id: 'startup',
-                  label: 'Startup settings...',
-                  action: () => setStartupModal(true),
-                },
-                {
-                  id: 'check-update',
-                  node: (
-                    <button
-                      onClick={handleCheckUpdate}
-                      disabled={checkingUpdate}
-                      className="w-full flex items-center gap-2 text-left hover:text-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {(checkingUpdate || upToDate || updateInfo) && (
-                        <span className="w-[10px] flex-shrink-0 flex items-center justify-center">
-                          {checkingUpdate
-                            ? <RefreshCw size={10} className="animate-spin" />
-                            : upToDate
-                            ? <Check size={10} className="text-green-400" />
-                            : <Download size={10} className="text-text/60" />}
-                        </span>
-                      )}
-                      {checkingUpdate
-                        ? 'Checking...'
-                        : upToDate
-                        ? 'Up to date'
-                        : updateInfo
-                        ? `Update available (v${updateInfo.latestVersion})`
-                        : 'Check for updates'}
-                    </button>
-                  ),
-                },
-              ],
-            },
-            {
-              label: 'Sync',
-              items: [
-                {
-                  id: 'github-sync',
-                  label: 'GitHub Sync...',
-                  indicator: syncStatus.connected
-                    ? <Cloud size={10} className="text-green-400" />
-                    : <CloudOff size={10} className="text-text-muted/50" />,
-                  action: () => setSyncModal(true),
-                },
-              ],
-            },
-            {
-              label: 'Notes',
-              items: [
-                { id: 'export', label: 'Export notes...', action: () => setExportImportModal('export') },
-                { id: 'import', label: 'Import notes...', action: () => setExportImportModal('import') },
-              ],
-            },
-            {
-              label: 'Editor',
-              items: [
-                {
-                  id: 'font-size',
-                  node: (
-                    <div className="flex items-center justify-between w-full">
-                      <span className="text-text-muted">Font size</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => changeFontSize(-1)}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-surface-3 text-text-muted hover:text-text transition-colors"
-                          title="Decrease (Ctrl+-)"
-                        >−</button>
-                        <button
-                          onClick={resetFontSize}
-                          className="w-10 text-center rounded hover:bg-surface-3 text-text hover:text-text transition-colors py-0.5"
-                          title="Reset (Ctrl+0)"
-                        >{fontSize}px</button>
-                        <button
-                          onClick={() => changeFontSize(1)}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-surface-3 text-text-muted hover:text-text transition-colors"
-                          title="Increase (Ctrl++)"
-                        >+</button>
-                      </div>
-                    </div>
-                  ),
-                },
-                {
-                  id: 'font-family',
-                  node: (
-                    <div className="flex items-center justify-between w-full">
-                      <span className="text-text-muted">Font</span>
-                      <button
-                        onClick={() => setFontFamily(fontFamily === 'mono' ? 'inter' : 'mono')}
-                        className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted hover:text-text transition-colors"
-                      >
-                        <span className={fontFamily === 'mono' ? 'text-text' : ''}>Mono</span>
-                        <span className="opacity-30 px-0.5">/</span>
-                        <span className={fontFamily === 'inter' ? 'text-text' : ''}>Inter</span>
-                      </button>
-                    </div>
-                  ),
-                },
-                {
-                  id: 'reading-width',
-                  node: (
-                    <div className="flex items-center justify-between w-full">
-                      <span className="text-text-muted">Width</span>
-                      <button
-                        onClick={() => setReadableWidth(!readableWidth)}
-                        className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-text-muted hover:text-text transition-colors"
-                        title="Constrain editor content to a readable column"
-                      >
-                        <span className={!readableWidth ? 'text-text' : ''}>Full</span>
-                        <span className="opacity-30 px-0.5">/</span>
-                        <span className={readableWidth ? 'text-text' : ''}>Readable</span>
-                      </button>
-                    </div>
-                  ),
-                },
-              ],
-            },
-          ]}
-        />
-        <TitleBarMenu
-          trigger={<Palette size={12} />}
-          groups={[
-            {
-              label: 'Tema',
-              items: THEMES.map((t) => ({
-                id: t.id,
-                label: t.label,
-                indicator: activeThemeId === t.id
-                  ? <Check size={10} className="text-text" />
-                  : undefined,
-                action: () => setTheme(t.id),
-              })),
-            },
-          ]}
-        />
+        <button
+          onClick={() => openSettings('appearance')}
+          className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
+          title="Settings"
+        >
+          <Settings size={12} />
+        </button>
         <div className="flex">
           <button
             onClick={() => window.noteflow.minimize()}
@@ -402,19 +234,15 @@ export function TitleBar() {
         onClose={() => setExportImportModal(null)}
       />
     )}
-    {syncModal && (
-      <GitHubSyncModal
-        onClose={() => {
-          setSyncModal(false)
-          refreshSyncStatus()
+    {settingsOpen && (
+      <SettingsModal
+        initialSection={settingsSection}
+        onClose={() => setSettingsOpen(false)}
+        onOpenExportImport={(mode) => {
+          setSettingsOpen(false)
+          setExportImportModal(mode)
         }}
       />
-    )}
-    {startupModal && (
-      <StartupSettingsModal onClose={() => setStartupModal(false)} />
-    )}
-    {shortcutsModal && (
-      <KeyboardShortcutsModal onClose={() => setShortcutsModal(false)} />
     )}
     </>
   )
