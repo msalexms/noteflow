@@ -18,66 +18,98 @@ export interface ThemeVars {
   '--pink':        string
 }
 
+// App-level font registry. Each theme picks one of these for the whole UI chrome
+// (titlebar, sidebar, panels, buttons…). This is independent from the editor font
+// (--prose-font-family, toggled separately), so a theme's personality reaches the
+// whole shell while the writing surface stays under the user's Mono/Inter control.
+export interface AppFont {
+  id: string
+  label: string
+  /** Full CSS font-family stack applied via --app-font-family. */
+  stack: string
+}
+
+export const APP_FONTS: Record<string, AppFont> = {
+  'jetbrains-mono': { id: 'jetbrains-mono', label: 'JetBrains Mono', stack: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace" },
+  'inter':          { id: 'inter',          label: 'Inter',          stack: "'Inter', system-ui, sans-serif" },
+  'space-grotesk':  { id: 'space-grotesk',  label: 'Space Grotesk',  stack: "'Space Grotesk', system-ui, sans-serif" },
+  'sora':           { id: 'sora',           label: 'Sora',           stack: "'Sora', system-ui, sans-serif" },
+  'ibm-plex-mono':  { id: 'ibm-plex-mono',  label: 'IBM Plex Mono',  stack: "'IBM Plex Mono', 'JetBrains Mono', monospace" },
+  'lora':           { id: 'lora',           label: 'Lora',           stack: "'Lora', Georgia, serif" },
+}
+
+export const DEFAULT_APP_FONT = 'jetbrains-mono'
+
 export interface Theme {
   id: string
   label: string
   colorScheme: 'dark' | 'light'
+  /** Key into APP_FONTS — the app-level font this theme applies to the UI chrome. */
+  font: string
   vars: ThemeVars
 }
 
 export const THEMES: Theme[] = [
   {
-    id: 'tokyo-night',
-    label: 'Tokyo Night',
+    // NoteFlow's signature themes — mirror the colours of the live landing page
+    // ("The Brain" design system, docs/src/styles/brain-site.css), NOT the unused
+    // tokens.css. Warm near-black surfaces + warm off-white ink + the amber "detail"
+    // accent (#f5a623) that fires on every hover/highlight on the site. These are
+    // the app defaults; Dark is the default theme.
+    id: 'noteflow-dark',
+    label: 'NoteFlow Dark',
     colorScheme: 'dark',
+    font: 'inter',
     vars: {
-      '--bg-0':        '19 20 30',
-      '--bg-1':        '26 27 38',
-      '--bg-2':        '36 40 59',
-      '--bg-3':        '47 52 73',
-      '--border':      '47 52 73',
-      '--text':        '192 202 245',
-      '--text-muted':  '130 140 190',
-      '--accent':      '122 162 247',
-      '--accent-2':    '158 206 106',
-      '--accent-3':    '224 175 104',
-      '--red':         '247 118 142',
-      '--cyan':        '125 207 255',
-      '--purple':      '187 154 247',
-      '--bg-editor':   '19 20 30',
-      '--tab-active':  '224 175 104',
-      '--orange':      '255 158 100',
-      '--pink':        '255 121 198',
-    },
-  },
-  {
-    id: 'midnight-blue',
-    label: 'Midnight Blue',
-    colorScheme: 'dark',
-    vars: {
-      '--bg-0':        '9 12 17',
-      '--bg-1':        '14 19 26',
-      '--bg-2':        '22 29 40',
-      '--bg-3':        '30 40 55',
-      '--border':      '38 50 68',
-      '--text':        '212 212 212',
-      '--text-muted':  '140 140 140',
-      '--accent':      '78 158 255',
-      '--accent-2':    '78 201 176',
-      '--accent-3':    '240 160 48',
+      '--bg-0':        '12 12 17',   // --bg #0c0c11
+      '--bg-1':        '16 16 23',   // --bg-soft #101017
+      '--bg-2':        '21 21 28',   // --card #15151c
+      '--bg-3':        '27 27 35',   // --card-2 #1b1b23
+      '--border':      '45 44 52',   // --line/--line-2 (warm-white over near-black)
+      '--text':        '236 234 224', // --ink #ECEAE0
+      '--text-muted':  '166 163 154', // --ink-dim #a6a39a
+      '--accent':      '245 166 35',  // --detail amber #f5a623 (signature)
+      '--accent-2':    '96 166 150',  // web --accent (teal)
+      '--accent-3':    '240 160 48', // web --accent-2 (yellow)
       '--red':         '244 71 71',
       '--cyan':        '79 195 247',
       '--purple':      '197 134 192',
-      '--bg-editor':   '16 22 30',
-      '--tab-active':  '240 160 48',
+      '--bg-editor':   '20 20 27',
+      '--tab-active':  '245 166 35',
       '--orange':      '255 130 40',
       '--pink':        '255 80 160',
+    },
+  },
+  {
+    id: 'noteflow-light',
+    label: 'NoteFlow Light',
+    colorScheme: 'light',
+    font: 'space-grotesk',
+    vars: {
+      '--bg-0':        '231 223 204', // --bg #E7DFCC (parchment)
+      '--bg-1':        '239 232 216', // --bg-soft #EFE8D8
+      '--bg-2':        '245 239 224', // --card #F5EFE0
+      '--bg-3':        '235 227 208', // --card-2 #EBE3D0
+      '--border':      '205 192 168', // --line-2 over parchment
+      '--text':        '42 38 32',    // --ink #2a2620
+      '--text-muted':  '108 102 86',  // --ink-dim #6c6656
+      '--accent':      '184 117 20',  // --detail deeper amber #b87514
+      '--accent-2':    '58 130 116',  // teal, deepened for contrast on parchment
+      '--accent-3':    '240 160 48',   // green, deepened
+      '--red':         '188 72 60',
+      '--cyan':        '40 138 150',
+      '--purple':      '108 86 180',
+      '--bg-editor':   '247 242 230',
+      '--tab-active':  '184 117 20',
+      '--orange':      '168 110 40',
+      '--pink':        '168 78 124',
     },
   },
   {
     id: 'arctic-day',
     label: 'Arctic Day',
     colorScheme: 'light',
+    font: 'sora',
     vars: {
       '--bg-0':        '220 230 242',
       '--bg-1':        '237 243 252',
@@ -99,9 +131,35 @@ export const THEMES: Theme[] = [
     },
   },
   {
+    id: 'midnight-blue',
+    label: 'Midnight Blue',
+    colorScheme: 'dark',
+    font: 'inter',
+    vars: {
+      '--bg-0':        '9 12 17',
+      '--bg-1':        '14 19 26',
+      '--bg-2':        '22 29 40',
+      '--bg-3':        '30 40 55',
+      '--border':      '38 50 68',
+      '--text':        '212 212 212',
+      '--text-muted':  '140 140 140',
+      '--accent':      '78 158 255',
+      '--accent-2':    '78 201 176',
+      '--accent-3':    '240 160 48',
+      '--red':         '244 71 71',
+      '--cyan':        '79 195 247',
+      '--purple':      '197 134 192',
+      '--bg-editor':   '16 22 30',
+      '--tab-active':  '240 160 48',
+      '--orange':      '255 130 40',
+      '--pink':        '255 80 160',
+    },
+  },
+  {
     id: 'carbon',
     label: 'Carbon',
     colorScheme: 'dark',
+    font: 'jetbrains-mono',
     vars: {
       '--bg-0':        '9 9 9',
       '--bg-1':        '17 17 17',
@@ -123,9 +181,35 @@ export const THEMES: Theme[] = [
     },
   },
   {
+    id: 'tokyo-night',
+    label: 'Tokyo Night',
+    colorScheme: 'dark',
+    font: 'jetbrains-mono',
+    vars: {
+      '--bg-0':        '19 20 30',
+      '--bg-1':        '26 27 38',
+      '--bg-2':        '36 40 59',
+      '--bg-3':        '47 52 73',
+      '--border':      '47 52 73',
+      '--text':        '192 202 245',
+      '--text-muted':  '130 140 190',
+      '--accent':      '122 162 247',
+      '--accent-2':    '158 206 106',
+      '--accent-3':    '224 175 104',
+      '--red':         '247 118 142',
+      '--cyan':        '125 207 255',
+      '--purple':      '187 154 247',
+      '--bg-editor':   '19 20 30',
+      '--tab-active':  '224 175 104',
+      '--orange':      '255 158 100',
+      '--pink':        '255 121 198',
+    },
+  },
+  {
     id: 'vscode-dark',
     label: 'VS Code Dark',
     colorScheme: 'dark',
+    font: 'inter',
     vars: {
       '--bg-0':        '38 38 40',
       '--bg-1':        '22 22 22',
@@ -150,6 +234,7 @@ export const THEMES: Theme[] = [
     id: 'dracula',
     label: 'Dracula',
     colorScheme: 'dark',
+    font: 'space-grotesk',
     vars: {
       '--bg-0':        '30 31 41',
       '--bg-1':        '34 36 47',
@@ -174,6 +259,7 @@ export const THEMES: Theme[] = [
     id: 'true-godot',
     label: 'True Godot',
     colorScheme: 'dark',
+    font: 'ibm-plex-mono',
     vars: {
       '--bg-0':        '26 26 26',
       '--bg-1':        '37 37 37',
@@ -198,6 +284,7 @@ export const THEMES: Theme[] = [
     id: 'gruvbox-dark',
     label: 'GruvBox Dark',
     colorScheme: 'dark',
+    font: 'ibm-plex-mono',
     vars: {
       '--bg-0':        '29 28 26',
       '--bg-1':        '34 32 30',
@@ -222,6 +309,7 @@ export const THEMES: Theme[] = [
     id: 'obsidian',
     label: 'Obsidian',
     colorScheme: 'dark',
+    font: 'inter',
     vars: {
       '--bg-0':        '12 12 12',
       '--bg-1':        '20 20 20',
@@ -246,6 +334,7 @@ export const THEMES: Theme[] = [
     id: 'emerald-forest',
     label: 'Emerald Forest',
     colorScheme: 'dark',
+    font: 'sora',
     vars: {
       '--bg-0':        '10 20 14',
       '--bg-1':        '16 30 22',
@@ -270,6 +359,7 @@ export const THEMES: Theme[] = [
     id: 'synthwave',
     label: 'Synthwave',
     colorScheme: 'dark',
+    font: 'space-grotesk',
     vars: {
       '--bg-0':        '15 10 25',
       '--bg-1':        '28 18 45',
@@ -294,6 +384,7 @@ export const THEMES: Theme[] = [
     id: 'parchment',
     label: 'Parchment',
     colorScheme: 'light',
+    font: 'lora',
     vars: {
       '--bg-0':        '220 220 218',
       '--bg-1':        '233 233 231',
@@ -316,4 +407,4 @@ export const THEMES: Theme[] = [
   },
 ]
 
-export const DEFAULT_THEME_ID = 'carbon'
+export const DEFAULT_THEME_ID = 'noteflow-dark'

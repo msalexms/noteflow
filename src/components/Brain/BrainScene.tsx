@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { useThemeStore } from '../../stores/themeStore'
-import { readPalette, type BrainPalette, type RGB } from './brainColors'
+import { readBrainPalette, type BrainPalette, type RGB } from './brainColors'
 import { adaptiveDetail, buildBrainMesh, normalizeShape, rotateAround, type BrainMesh, type BrainShapeParams, type Vec3 } from './brainMesh'
 import { assignVertices } from './assignVertices'
 import { BrainTuner } from './BrainTuner'
@@ -85,7 +85,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
 
   const activeThemeId = useThemeStore((s) => s.activeThemeId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const palette = useMemo<BrainPalette>(() => readPalette(), [activeThemeId])
+  const palette = useMemo<BrainPalette>(() => readBrainPalette(), [activeThemeId])
 
   const saved = useMemo(() => (SHOW_TUNER ? loadTuner() : null), [])
   // normalizeShape fills any fields missing from older saved states (lobes/bulges/density). The
@@ -117,8 +117,18 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
     // dark bg, where even 5% accumulates into a visible glowing lattice. On a light bg the scaffold
     // falls back to normal blending (no additive build-up, no bloom), so those same opacities leave
     // the structure a barely-there grey that melts into the white. Raise the floor in light mode.
-    const wireOpacityFor = (base: number) => (isDark ? base : Math.max(base, 0.5))
-    const dotOpacityFor = (base: number) => (isDark ? base : Math.max(base, 0.75))
+    const wireOpacityFor = (base: number) => (isDark ? base : Math.max(base, 0.42))
+    const dotOpacityFor = (base: number) => (isDark ? base : Math.max(base, 0.62))
+    // The coloured data edges (structure routes + dendrites + content synapses) are 1px lines at
+    // very low opacity (0.12–0.32), tuned to glow additively over a dark bg. On a light bg they
+    // fall to normal blending (no glow) and all but vanish. Push their opacity way up so the colour
+    // actually carries. (Line *thickness* can't help here — WebGL LineBasicMaterial is locked to 1px
+    // on virtually all drivers; real fat lines would need Line2/LineMaterial.)
+    const edgeOpacityFor = (base: number) => (isDark ? base : Math.min(0.95, base * 2.6))
+    // …and darken every resolved hue in light mode so the nodes/edges read as saturated dark marks
+    // against the bright bg instead of washed-out pastels (the light themes' accents are already
+    // "deepened for parchment"; this takes them a step further). Applied centrally in colorOf.
+    const LIGHT_DARKEN = 0.62
 
     // ── renderer / scene / camera ──
     const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -155,9 +165,10 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
     controls.autoRotateSpeed = 0.35
 
     // Scaffold tint: pull the text colour toward the bg so the lattice reads as a low-contrast
-    // blue-grey instead of crisp white lines. Pull less on a light bg (normal blending darkens
-    // rather than glows) so the scaffold doesn't fade into the background.
-    const wireColor = rgbTo(pal.text).lerp(bg, isDark ? 0.44 : 0.22)
+    // blue-grey instead of crisp white lines. On a light bg pull it MOST of the way to the bg — the
+    // scaffold should be a faint backdrop so the coloured data edges/nodes stand out, not a heavy
+    // dark mesh competing with them (it darkens rather than glows there).
+    const wireColor = rgbTo(pal.text).lerp(bg, isDark ? 0.44 : 0.52)
 
     // ── wireframe scaffold + fat vertex dots (geometry swapped on rebuild) ──
     const makeWireGeo = (m: BrainMesh) => {
@@ -265,7 +276,11 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
     const colorCache = new Map<string, THREE.Color>()
     const colorOf = (cssVar: string) => {
       let c = colorCache.get(cssVar)
-      if (!c) { c = rgbTo(pal.color(cssVar)); colorCache.set(cssVar, c) }
+      if (!c) {
+        c = rgbTo(pal.color(cssVar))
+        if (!isDark) c.multiplyScalar(LIGHT_DARKEN)
+        colorCache.set(cssVar, c)
+      }
       return c
     }
     const disposeObj = (obj: THREE.Object3D) => {
@@ -287,13 +302,16 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
       return g
     }
 
-    // Route a content edge (note↔note) along the mesh lattice via pathThroughInterior — Dijkstra
-    // weighted to penalise the outer shell, so the route bends inward through the interior fill and
-    // crosses the core instead of skimming the surface. We orient the returned path to start at `a`
-    // (the cache is keyed on the unordered pair, so it may come back reversed); callers reverse
-    // again as needed.
+    // Content-edge routes (note↔note), computed in one congestion-aware batch per rebuildData so
+    // relations fan out onto parallel corridors instead of stacking onto a single line (where one
+    // would hide the other). Keyed by the unordered vertex pair (min*N+max) — the mesh's scheme.
+    let contentRoutes = new Map<number, number[]>()
+    // Look up a content edge's batch route and orient it to start at `a` (the map is keyed on the
+    // unordered pair, so it may come back reversed); callers reverse again as needed. Falls back to
+    // a fresh interior route for any pair not in the batch.
     const routeContent = (a: number, b: number): number[] => {
-      const p = mesh.pathThroughInterior(a, b)
+      const key = a < b ? a * mesh.vertexCount + b : b * mesh.vertexCount + a
+      const p = contentRoutes.get(key) ?? mesh.pathThroughInterior(a, b)
       if (!p || p.length < 2) return [a, b]
       return p[0] === a ? p : p.slice().reverse()
     }
@@ -316,6 +334,16 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         })
       }
 
+      // Batch-route every content edge at once (strongest relations first, so they win the directest
+      // path and weaker ones detour around them). Used by both the static synapse lines below and the
+      // hover/thinking sweeps, via routeContent.
+      const routePairs: Array<readonly [number, number]> = []
+      for (const e of [...m.contentEdges].sort((x, y) => y.score - x.score)) {
+        const a = assignment.get(e.source), b = assignment.get(e.target)
+        if (a != null && b != null) routePairs.push([a, b])
+      }
+      contentRoutes = mesh.routeContentEdges(routePairs)
+
       // Every placed node = a bright centre dot + a coloured ring halo around it.
       const allPlaced = m.nodes.filter((n) => assignment.has(n.id))
 
@@ -327,7 +355,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           arr[i * 3] = p[v * 3]; arr[i * 3 + 1] = p[v * 3 + 1]; arr[i * 3 + 2] = p[v * 3 + 2]
           // Notes a touch dimmer; groups a touch hotter so the bloom wraps them in a faint neon glow.
           const c = colorOf(node.colorVar).clone().multiplyScalar(
-            node.colorVar === '--text' ? 1.1 : node.kind === 'note' ? 1.15 : node.kind === 'group' ? 1.95 : 1.5,
+            node.colorVar === '--text' ? 0.80 : node.kind === 'note' ? 0.80 : node.kind === 'group' ? 1.2 : 1.0,
           )
           carr[i * 3] = c.r; carr[i * 3 + 1] = c.g; carr[i * 3 + 2] = c.b
         })
@@ -335,9 +363,14 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         g.setAttribute('position', new THREE.BufferAttribute(arr, 3))
         g.setAttribute('color', new THREE.BufferAttribute(carr, 3))
         const pts = new THREE.Points(g, new THREE.PointsMaterial({
+          // NormalBlending (not additive) so the orb PAINTS its colour over whatever's behind. With
+          // additive, a bright synapse corridor behind the orb would sum to white regardless of draw
+          // order — addition is commutative, so renderOrder alone couldn't keep the group colour.
           map: dotTex, vertexColors: true, size: CENTER_SIZE, transparent: true,
-          depthWrite: false, blending: wireBlend, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
+          depthWrite: false, blending: THREE.NormalBlending, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
         }))
+        // …and draw it AFTER the relation lines (renderOrder 0) so it sits on top of the corridor.
+        pts.renderOrder = 3
         nodeGroup.add(pts)
         pickPoints.push({ points: pts, ids: allPlaced.map((n) => n.id) })
       }
@@ -352,7 +385,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           const v = assignment.get(node.id)!
           arr[i * 3] = p[v * 3]; arr[i * 3 + 1] = p[v * 3 + 1]; arr[i * 3 + 2] = p[v * 3 + 2]
           const c = colorOf(node.colorVar).clone().multiplyScalar(
-            node.colorVar === '--text' ? 0.8 : node.kind === 'group' ? 1.3 : 1.0,
+            node.colorVar === '--text' ? 0.62 : node.kind === 'group' ? 0.80 : 0.68,
           )
           carr[i * 3] = c.r; carr[i * 3 + 1] = c.g; carr[i * 3 + 2] = c.b
         })
@@ -361,8 +394,10 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         g.setAttribute('color', new THREE.BufferAttribute(carr, 3))
         const pts = new THREE.Points(g, new THREE.PointsMaterial({
           map: ringTex, vertexColors: true, size: RING_SIZE[kind as BrainNodeKind], transparent: true,
-          opacity: kind === 'note' ? 0.72 : kind === 'group' ? 1.0 : 0.95, depthWrite: false, blending: wireBlend, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
+          opacity: kind === 'note' ? 0.72 : kind === 'group' ? 1.0 : 0.95, depthWrite: false, blending: THREE.NormalBlending, sizeAttenuation: true, alphaTest: 0.02, toneMapped: false,
         }))
+        // Ring halos above the lines too (but below the centre dots) so relations don't stack on them.
+        pts.renderOrder = 2
         nodeGroup.add(pts)
         pickPoints.push({ points: pts, ids: list.map((n) => n.id) })
       }
@@ -379,9 +414,13 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           lc.push(col.r, col.g, col.b, col.r, col.g, col.b)
         }
         if (lp.length) {
-          dendriteGroup.add(new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
-            vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false, blending: wireBlend, toneMapped: false,
-          })))
+          // Normal blending + above the synapses (renderOrder 0) so these group-coloured threads keep
+          // their colour where the additive synapse corridors would otherwise sum over them to white.
+          const seg = new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: edgeOpacityFor(0.32), depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
+          }))
+          seg.renderOrder = 1
+          dendriteGroup.add(seg)
         }
       }
 
@@ -393,7 +432,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           const a = assignment.get(e.source), b = assignment.get(e.target)
           if (a == null || b == null) continue
           // Slight boost (HDR, feeds bloom) → a faint neon trace along the group hierarchy routes.
-          const col = colorOf(nodeById.get(e.target)!.colorVar).clone().multiplyScalar(1.3)
+          const col = colorOf(nodeById.get(e.target)!.colorVar).clone().multiplyScalar(0.80)
           const path = mesh.pathBetween(a, b)
           const seq = path && path.length >= 2 ? path : [a, b]
           for (let i = 0; i < seq.length - 1; i++) {
@@ -403,31 +442,53 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           }
         }
         if (lp.length) {
-          structureGroup.add(new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
-            vertexColors: true, transparent: true, opacity: 0.46, depthWrite: false, blending: wireBlend, toneMapped: false,
-          })))
+          const seg = new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: edgeOpacityFor(0.28), depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
+          }))
+          seg.renderOrder = 1
+          structureGroup.add(seg)
         }
       }
 
       // ── Synapses: content edges note↔note routed via pathThroughInterior (faint), hopping
       // vertex-to-vertex through the interior lattice so the trace dips through the core — no
-      // free-floating cords. Shared segments stack → frequently-travelled edges glow more. ──
+      // free-floating cords. Each shared segment is drawn once (deduped below) so busy corridors
+      // never bleach the group-coloured edges they cross, no matter how many relations run through. ──
       {
-        const syn = colorOf('--text')
+        // Dimmer than the old near-text white, but still clearly above the faint wireframe scaffold:
+        // pull the hue partway toward the bg with a smaller lerp than the wireframe's 0.44, so the
+        // relation threads read as soft, muted lines instead of bright white cords — while staying a
+        // notch brighter than the lattice they cross.
+        const syn = colorOf('--text').clone().lerp(bg, isDark ? 0.34 : 0.24)
         const lp: number[] = [], lc: number[] = []
+        // Draw each lattice segment a relation traverses AT MOST ONCE. Many relations sharing a
+        // corridor used to push their faint white line onto the very same segment N times; even with
+        // NormalBlending the repeated over-compositing crept toward solid white, so a group edge
+        // crossed by lots of relations bleached out — and the more relations, the whiter. Deduping
+        // makes a corridor look identical whether 2 or 50 relations run through it, so the group
+        // colour underneath always keeps its hue regardless of traffic.
+        const drawnSeg = new Set<number>()
         for (const e of m.contentEdges) {
           const a = assignment.get(e.source), b = assignment.get(e.target)
           if (a == null || b == null) continue
           const seq = routeContent(a, b)
           for (let i = 0; i < seq.length - 1; i++) {
             const u = seq[i], w = seq[i + 1]
+            const key = u < w ? u * mesh.vertexCount + w : w * mesh.vertexCount + u
+            if (drawnSeg.has(key)) continue
+            drawnSeg.add(key)
             lp.push(p[u * 3], p[u * 3 + 1], p[u * 3 + 2], p[w * 3], p[w * 3 + 1], p[w * 3 + 2])
             lc.push(syn.r, syn.g, syn.b, syn.r, syn.g, syn.b)
           }
         }
         if (lp.length) {
           synapseGroup.add(new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
-            vertexColors: true, transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+            // White neutral threads. NormalBlending (not additive): overlapping relations no longer
+            // SUM to pure white and bleed (via bloom) over the group-coloured edges/orbs they cross —
+            // each stays a faint white line, and the group colours underneath keep their hue. The
+            // "brighter when related" cue now lives only in the hover/thinking sweeps. Opacity is
+            // pushed up a bit since there's no additive stacking to make busy corridors read.
+            vertexColors: true, transparent: true, opacity: isDark ? 0.18 : 0.5, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
           })))
         }
       }
@@ -695,7 +756,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
       const assignment = assignmentRef.current
       const pos = mesh.positions
       const self = `n:${noteId}`
-      const col = colorOf(info.colorVar).clone().multiplyScalar(1.6)
+      const col = colorOf(info.colorVar).clone().multiplyScalar(1.1)
       for (const e of m.contentEdges) {
         const isSrc = e.source === self, isTgt = e.target === self
         if (!isSrc && !isTgt) continue
@@ -720,11 +781,15 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         for (let i = 0; i < n; i++) arc[i] /= total // normalise to 0..1 along the edge
         const g = new THREE.BufferGeometry()
         g.setAttribute('position', new THREE.BufferAttribute(posArr, 3))
-        const colorAttr = new THREE.BufferAttribute(new Float32Array(n * 3), 3) // starts black = off
+        // RGBA per vertex: RGB stays the group colour, alpha is the reveal factor (0 = off →
+        // invisible). With NormalBlending the over-operator can't saturate to white where many bright
+        // relations overlap a group orb (the additive build-up that washed groups out); the unlit
+        // tail and the thinking fade simply go transparent instead of painting black threads.
+        const colorAttr = new THREE.BufferAttribute(new Float32Array(n * 4), 4) // starts alpha 0 = off
         g.setAttribute('color', colorAttr)
         // THREE.Line interpolates colour between consecutive vertices → smooth lit/unlit boundary.
         const line = new THREE.Line(g, new THREE.LineBasicMaterial({
-          vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+          vertexColors: true, transparent: true, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
         }))
         group.add(line); objects.push(line)
         lines.push({ colorAttr, arc, n, r: col.r, g: col.g, b: col.b })
@@ -779,7 +844,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           const ca = hl.colorAttr
           for (let i = 0; i < hl.n; i++) {
             const f = Math.max(0, Math.min(1, (h - hl.arc[i]) / EDGE)) // 1 behind the sweep, 0 ahead
-            ca.setXYZ(i, hl.r * f, hl.g * f, hl.b * f)
+            ca.setXYZW(i, hl.r, hl.g, hl.b, f)
           }
           ca.needsUpdate = true
         }
@@ -799,7 +864,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
           const ca = hl.colorAttr
           for (let i = 0; i < hl.n; i++) {
             const f = Math.max(0, Math.min(1, (h - hl.arc[i]) / EDGE)) * env
-            ca.setXYZ(i, hl.r * f, hl.g * f, hl.b * f)
+            ca.setXYZW(i, hl.r, hl.g, hl.b, f)
           }
           ca.needsUpdate = true
         }

@@ -14,12 +14,12 @@ export interface LookParams {
 }
 
 export const DEFAULT_LOOK: LookParams = {
-  bloomStrength: 0.28,
-  bloomRadius: 0.3,
+  bloomStrength: 0.12,
+  bloomRadius: 0.20,
   bloomThreshold: 0.25,
-  wireOpacity: 0.06,
+  wireOpacity: 0.035,
   dotSize: 0.02,
-  dotOpacity: 0.38,
+  dotOpacity: 0.28,
   fogNear: 4.5,
   fogFar: 10,
   bgDarken: 0,

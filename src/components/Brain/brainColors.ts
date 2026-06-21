@@ -43,3 +43,17 @@ export function readPalette(): BrainPalette {
     color,
   }
 }
+
+/**
+ * Palette for the brain canvas: the live theme, used as-is for both dark and light themes.
+ *
+ * The brain used to force dark neutrals under light themes (the additive glow/bloom look was
+ * built for a dark backdrop). That left an out-of-place dark slate panel in an otherwise light
+ * app. Instead the renderers now adapt to a light bg directly — on light themes the wireframe
+ * falls back to normal blending with raised opacity floors and the node hues come straight from
+ * the theme (the light themes already define accents "deepened for contrast on parchment"), so
+ * the same colours simply read darker against the light background. See BrainScene/BrainCanvas.
+ */
+export function readBrainPalette(): BrainPalette {
+  return readPalette()
+}

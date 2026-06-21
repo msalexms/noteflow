@@ -9,7 +9,7 @@ import { RawNoteSearchBar } from './RawNoteSearchBar'
 import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
-  Star, Trash2, Copy, Eye, Edit3,
+  Star, Trash2, Copy, Eye, Edit3, EyeOff,
   Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid,
 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -130,11 +130,16 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     if (!note) return
     const pending = pendingSectionRef.current
     const initialSection = useNotesStore.getState().pendingInitialSectionId
+    // Section the user was last on for this note — restores it when the editor
+    // remounts (e.g. after closing the brain / overview views).
+    const remembered = useNotesStore.getState().activeSectionByNote[note.id]
     const targetId =
       (pending && note.sections.find((s) => s.id === pending))
         ? pending
         : (initialSection && note.sections.find((s) => s.id === initialSection))
         ? initialSection
+        : (remembered && note.sections.find((s) => s.id === remembered))
+        ? remembered
         : note.sections[0]?.id ?? null
     pendingSectionRef.current = null
     if (initialSection) useNotesStore.setState({ pendingInitialSectionId: null })
@@ -238,6 +243,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   // Stable ref for activeSectionId (for use inside event handlers)
   const activeSectionIdRef = useRef(activeSectionId)
   useEffect(() => { activeSectionIdRef.current = activeSectionId }, [activeSectionId])
+
+  // Remember the active section per note so it survives editor remounts (brain /
+  // overview views unmount the editor; this restores the section on the way back).
+  useEffect(() => {
+    if (note?.id && activeSectionId) {
+      useNotesStore.getState().rememberActiveSection(note.id, activeSectionId)
+    }
+  }, [note?.id, activeSectionId])
 
   // Auto-show unlock modal when switching to a locked encrypted note
   useEffect(() => {
@@ -549,6 +562,16 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         ),
       })
     }
+  }
+
+  const handleToggleAiHidden = () => {
+    if (!activeSection) return
+    const newHidden = !activeSection.aiHidden
+    updateNote(note.id, {
+      sections: note.sections.map((s) =>
+        s.id === activeSection.id ? { ...s, aiHidden: newHidden } : s,
+      ),
+    })
   }
 
   const handleSwitchSection = (sectionId: string) => {
@@ -944,10 +967,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       {...(isActive || !note ? {} : previewProps(note.id, section.id, { placement: 'cursor-below' }))}
                       onClick={() => handleSwitchSection(section.id)}
                       onDoubleClick={() => handleStartRename(section)}
-                      className={`px-3 py-1 text-xs font-mono transition-colors whitespace-nowrap
+                      className={`px-3 py-1 text-xs font-mono transition-colors whitespace-nowrap inline-flex items-center gap-1
                         ${isActive ? 'font-semibold' : 'text-text-muted hover:text-text'}`}
                       style={isActive ? { color: colorStyle.color } : undefined}
                     >
+                      {section.aiHidden && (
+                        <EyeOff size={11} className="opacity-60 flex-shrink-0" aria-label="Hidden from AI" />
+                      )}
                       {section.name}
                     </button>
                   )}
@@ -1005,7 +1031,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               onClick={() => updateNote(note.id, { favorited: !note.favorited })}
               title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
               className={`p-1.5 rounded text-xs transition-colors
-                ${note.favorited ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
+                ${note.favorited ? 'text-accent-3 bg-accent-3/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
             >
               <Star size={13} />
             </button>
@@ -1039,6 +1065,16 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   >
                     <Copy size={13} />
                     Copy section text
+                  </button>
+                  <button
+                    onClick={() => { handleToggleAiHidden(); setSectionMenuOpen(false) }}
+                    title={activeSection?.aiHidden
+                      ? 'The AI will index and use this section again'
+                      : 'The AI will never index, read or reference this section'}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                  >
+                    {activeSection?.aiHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                    {activeSection?.aiHidden ? 'Show to AI' : 'Hide from AI'}
                   </button>
                   <button
                     onClick={() => {

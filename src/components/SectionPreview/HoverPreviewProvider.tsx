@@ -31,8 +31,8 @@ const CURSOR_OFFSET_Y = 14
 const VIEWPORT_MARGIN = 8
 // The floating card is a touch smaller than the Note-overview grid cards.
 const HOVER_WIDTH = 224
-const HOVER_PREVIEW_HEIGHT = 104
-const HOVER_PREVIEW_ZOOM = 0.62
+const HOVER_PREVIEW_HEIGHT = 118
+const HOVER_PREVIEW_ZOOM = 0.58
 // Used only for the first paint, before the card is measured — keeps the very
 // first frame near its final spot so there's no visible jump.
 const ESTIMATED_HEIGHT = 200

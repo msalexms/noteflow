@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { getTagColor } from '../../lib/tagColors'
 import { normalize } from '../../lib/searchUtils'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
@@ -109,9 +109,12 @@ export function SectionTabsRow({
               if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click()
             }}
             className="text-[11px] font-mono px-1 rounded flex-shrink-0 leading-[1.55]
-                       hover:opacity-70 transition-opacity cursor-pointer"
+                       hover:opacity-70 transition-opacity cursor-pointer inline-flex items-center gap-0.5"
             style={getTagColor(section.name, sectionTagColors)}
           >
+            {section.aiHidden && (
+              <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label="Hidden from AI" />
+            )}
             {renderHighlightedText(section.name, searchQuery)}
           </span>
         ))}

@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, Loader2, RefreshCw, Sparkles, X } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Brain, Loader2, PanelLeftOpen, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useAiStore } from '../../stores/aiStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
@@ -51,8 +51,15 @@ export function BrainView({ onClose }: { onClose: () => void }) {
   const model = useBrainGraph()
   const [enabling, setEnabling] = useState(false)
   const [enableError, setEnableError] = useState<string | null>(null)
-  const [ctaDismissed, setCtaDismissed] = useState(false)
+  // The Local AI button always opens this dialog; its content depends on whether
+  // AI is currently on (offer to disable) or off (offer to enable). Auto-opens on
+  // entry when AI is off, as an onboarding nudge.
+  const [showDialog, setShowDialog] = useState(() => !enabled)
   const [use3D] = useState(() => detectWebGL() && localStorage.getItem('noteflow:brain-force-2d') !== '1')
+
+  // The AI panel can be collapsed to give the brain the full width (combined with
+  // hiding the notes sidebar this yields a fullscreen brain). Resets on each entry.
+  const [aiCollapsed, setAiCollapsed] = useState(false)
 
   // ── Resizable split (AI panel | brain) ──
   const containerRef = useRef<HTMLDivElement>(null)
@@ -61,6 +68,18 @@ export function BrainView({ onClose }: { onClose: () => void }) {
     return saved >= 25 && saved <= 75 ? saved : 42
   })
   const [dragging, setDragging] = useState(false)
+  // Track the container's pixel width so the AI panel can animate its collapse with a
+  // fixed-width inner (like the sidebar) instead of squishing its content.
+  const [containerWidth, setContainerWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    setContainerWidth(el.getBoundingClientRect().width)
+    const ro = new ResizeObserver((entries) => setContainerWidth(entries[0].contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const panelPx = Math.round((containerWidth * splitPct) / 100)
   useEffect(() => {
     if (!dragging) return
     const onMove = (e: MouseEvent) => {
@@ -98,15 +117,19 @@ export function BrainView({ onClose }: { onClose: () => void }) {
   const enableAi = async () => {
     setEnabling(true)
     setEnableError(null)
-    setCtaDismissed(true)
     try {
       await setEnabled(true)
+      setShowDialog(false)
     } catch (err) {
       setEnableError(String((err as Error)?.message ?? err))
-      setCtaDismissed(false)
     } finally {
       setEnabling(false)
     }
+  }
+
+  const disableAi = () => {
+    setEnabled(false)
+    setShowDialog(false)
   }
 
   const indexing = indexState !== 'idle'
@@ -114,17 +137,37 @@ export function BrainView({ onClose }: { onClose: () => void }) {
 
   return (
     <div ref={containerRef} className="absolute inset-0 overflow-hidden flex" style={{ background: 'rgb(var(--bg-editor))' }}>
-      {/* ── Left: AI panel ─────────────────────────────────────────── */}
-      <div style={{ width: `${splitPct}%` }} className="flex-shrink-0 min-w-0 h-full">
-        <AiPanel onOpenNote={openNote} />
+      {/* ── Left: AI panel (animated collapse, mirrors the sidebar) ──── */}
+      <div
+        style={{ width: aiCollapsed ? 0 : panelPx, transition: dragging ? 'none' : 'width 220ms ease' }}
+        className="flex-shrink-0 h-full overflow-hidden"
+      >
+        <div style={{ width: panelPx, height: '100%' }}>
+          <AiPanel onOpenNote={openNote} onCollapse={() => setAiCollapsed(true)} />
+        </div>
       </div>
 
-      {/* Divider */}
-      <div
-        onMouseDown={() => setDragging(true)}
-        className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50 transition-colors z-10"
-        title="Drag to resize"
-      />
+      {/* Divider — only while the panel is open */}
+      {!aiCollapsed && (
+        <div
+          onMouseDown={() => setDragging(true)}
+          className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50 transition-colors z-10"
+          title="Drag to resize"
+        />
+      )}
+
+      {/* Re-open the collapsed AI panel — discreet slim bar */}
+      {aiCollapsed && (
+        <button
+          onClick={() => setAiCollapsed(false)}
+          title="Show AI panel"
+          className="flex-shrink-0 flex items-center justify-center w-6 h-full
+                     text-text-muted/40 hover:text-text-muted hover:bg-surface-2
+                     border-r border-border transition-colors"
+        >
+          <PanelLeftOpen size={14} />
+        </button>
+      )}
 
       {/* ── Right: brain canvas ────────────────────────────────────── */}
       <div className="flex-1 relative min-h-0 min-w-0 overflow-hidden">
@@ -159,20 +202,16 @@ export function BrainView({ onClose }: { onClose: () => void }) {
           </div>
           <div className="flex items-center gap-1.5 pointer-events-auto">
             <button
-              onClick={enabling ? undefined : () => { if (enabled) { setEnabled(false); setCtaDismissed(true) } else setCtaDismissed(false) }}
+              onClick={() => setShowDialog(true)}
               disabled={enabling}
-              role="switch"
-              aria-checked={enabled}
-              title={enabled ? 'Disable local AI' : 'Enable local AI'}
-              className={`flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded text-[11px] font-mono border transition-colors disabled:opacity-60 ${
+              title={enabled ? 'Local AI enabled' : 'Local AI disabled'}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono border transition-colors disabled:opacity-60 ${
                 enabled || enabling ? 'border-text/30 text-text bg-surface-2' : 'border-border text-text-muted hover:text-text'
               }`}
             >
               {enabling ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
               <span>Local AI</span>
-              <span className={`relative flex-shrink-0 w-7 h-4 rounded-full transition-colors ${enabled ? 'bg-text/70' : 'bg-surface-3 border border-border'}`}>
-                <span className={`absolute top-[2px] w-3 h-3 bg-white rounded-full shadow transition-all duration-200 ${enabled ? 'left-[14px]' : 'left-[2px]'}`} />
-              </span>
+              <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full transition-colors ${enabled ? 'bg-emerald-400' : 'bg-text-muted/40'}`} />
             </button>
             {enabled && (
               <button
@@ -215,18 +254,29 @@ export function BrainView({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Activation CTA */}
-        {!enabled && !ctaDismissed && (
+        {/* Activate / deactivate dialog — always shown via the Local AI button */}
+        {showDialog && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
             <div className="w-[380px] max-w-[85%] rounded-lg border border-border bg-surface-1 p-5 shadow-2xl">
               <div className="flex items-center gap-2 mb-2 text-text">
                 <Sparkles size={16} />
-                <h2 className="text-sm font-mono font-bold tracking-wide">Enable local AI</h2>
+                <h2 className="text-sm font-mono font-bold tracking-wide">{enabled ? 'Disable local AI' : 'Enable local AI'}</h2>
               </div>
               <p className="text-[12px] leading-relaxed text-text-muted font-mono mb-4">
-                Brain already shows your notes and groups structure. Enable local AI (100% offline) to also reveal{' '}
-                <span className="text-text">content connections</span> and give the chat context from your notes. On first
-                use, a small model is downloaded and your notes are indexed — the app may use more CPU for a while.
+                {enabled ? (
+                  <>
+                    Local AI is on. Disabling hides <span className="text-text">content connections</span> in Brain and
+                    stops giving the chat context from your notes. Your existing index is kept, so you can re-enable it
+                    later without re-downloading or re-indexing.
+                  </>
+                ) : (
+                  <>
+                    Brain already shows your notes and groups structure. Enable local AI (100% offline) to also reveal{' '}
+                    <span className="text-text">content connections</span> and give the chat context from your notes. On
+                    first use, a small model is downloaded and your notes are indexed — the app may use more CPU for a
+                    while.
+                  </>
+                )}
               </p>
               {enableError && (
                 <div className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2">
@@ -236,19 +286,28 @@ export function BrainView({ onClose }: { onClose: () => void }) {
               )}
               <div className="flex gap-2">
                 <button
-                  onClick={() => setCtaDismissed(true)}
+                  onClick={() => setShowDialog(false)}
                   className="flex-1 flex items-center justify-center px-3 py-2 rounded border border-border text-text-muted text-xs font-mono hover:text-text hover:border-text/30 transition-colors"
                 >
-                  Don't enable
+                  Cancel
                 </button>
-                <button
-                  onClick={enableAi}
-                  disabled={enabling}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity disabled:opacity-60"
-                >
-                  {enabling ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  {enabling ? 'Enabling…' : 'Enable local AI'}
-                </button>
+                {enabled ? (
+                  <button
+                    onClick={disableAi}
+                    className="flex-1 flex items-center justify-center px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity"
+                  >
+                    Disable local AI
+                  </button>
+                ) : (
+                  <button
+                    onClick={enableAi}
+                    disabled={enabling}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity disabled:opacity-60"
+                  >
+                    {enabling ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                    {enabling ? 'Enabling…' : 'Enable local AI'}
+                  </button>
+                )}
               </div>
             </div>
           </div>

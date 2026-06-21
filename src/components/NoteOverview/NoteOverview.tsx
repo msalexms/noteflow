@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { X, Star, FileText, Lock, Plus } from 'lucide-react'
+import { X, Star, FileText, Lock, Plus, EyeOff } from 'lucide-react'
 import { format } from 'date-fns'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore, type SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import { SectionPreviewCard, CARD_WIDTH } from '../SectionPreview/SectionPreviewCard'
+import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import type { Note, NoteSection } from '../../types'
 
 interface NoteOverviewProps {
@@ -18,6 +19,9 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const updateNote = useNotesStore((s) => s.updateNote)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+
+  // Same right-click menu as a section tag in the sidebar (self-contained component)
+  const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
 
   // Note vanished (deleted locally or via sync) → close the overview
   useEffect(() => {
@@ -68,12 +72,12 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
   return (
     <div
-      className="h-full w-full overflow-y-auto"
+      className="h-full w-full flex flex-col"
       style={{ background: 'rgb(var(--bg-editor))' }}
     >
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* ── Header (fixed — outside the scroll area so the scrollbar starts below it) ── */}
       <div
-        className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 border-b border-border backdrop-blur"
+        className="flex-shrink-0 z-10 flex items-center gap-3 px-6 py-4 border-b border-border"
         style={{ background: 'rgb(var(--bg-1) / 0.85)' }}
       >
         {note.encryption && <Lock size={13} className="text-amber-400 flex-shrink-0" />}
@@ -84,7 +88,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
           onClick={() => updateNote(note.id, { favorited: !note.favorited })}
           title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
           className={`p-1 rounded flex-shrink-0 transition-colors
-            ${note.favorited ? 'text-yellow-400 bg-yellow-400/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
+            ${note.favorited ? 'text-accent-3 bg-accent-3/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
         >
           <Star size={13} fill={note.favorited ? 'currentColor' : 'none'} />
         </button>
@@ -114,6 +118,8 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
         </button>
       </div>
 
+      {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="px-6 py-5">
         {locked ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -138,11 +144,15 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                 section={section}
                 sectionTagColors={sectionTagColors}
                 onOpen={openSection}
+                onContextMenu={setContextMenu}
               />
             ))}
           </div>
         )}
       </div>
+      </div>
+
+      <NoteContextMenu request={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )
 }
@@ -153,18 +163,33 @@ interface SectionCardProps {
   section: NoteSection
   sectionTagColors: SectionTagColorMap
   onOpen: (sectionId: string) => void
+  onContextMenu: (request: NoteContextMenuRequest) => void
 }
 
-function SectionCard({ note, section, sectionTagColors, onOpen }: SectionCardProps) {
+function SectionCard({ note, section, sectionTagColors, onOpen, onContextMenu }: SectionCardProps) {
   return (
     <button
       onClick={() => onOpen(section.id)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: section.id })
+      }}
       title={`Open "${section.name}"`}
       className="group relative text-left rounded-lg border border-solid border-text/20 bg-surface-1 shadow-md
                  hover:border-text/45 hover:shadow-lg hover:-translate-y-0.5
                  transition-all duration-150 overflow-hidden flex flex-col"
       style={{ width: CARD_WIDTH }}
     >
+      {section.aiHidden && (
+        <span
+          title="Hidden from AI"
+          className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded
+                     bg-surface-3/90 text-text-muted text-[9px] font-mono"
+        >
+          <EyeOff size={10} /> AI
+        </span>
+      )}
       <SectionPreviewCard note={note} section={section} sectionTagColors={sectionTagColors} />
     </button>
   )

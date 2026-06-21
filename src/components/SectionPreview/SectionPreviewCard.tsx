@@ -9,10 +9,10 @@ import type { Note, NoteSection } from '../../types'
 // Fixed card width (px) — a section card is a small mock of the open editor.
 export const CARD_WIDTH = 240
 // Height of the clamped content area (≈ a handful of lines once zoomed).
-const PREVIEW_HEIGHT = 120
+const PREVIEW_HEIGHT = 132
 // `zoom` shrinks the rendered body (Chromium-only, fine in Electron) so the few
 // visible lines read like the open note, just tiny.
-const PREVIEW_ZOOM = 0.5
+const PREVIEW_ZOOM = 0.47
 
 interface SectionPreviewCardProps {
   note: Note
@@ -63,19 +63,19 @@ export function SectionPreviewCard({
 
       {/* Editor mock — title + date, a representational toolbar, then a few lines */}
       <div className="flex flex-col" style={{ background: 'rgb(var(--bg-editor))' }}>
-        <div className="px-3 pt-2.5">
+        <div className="px-3 pt-1.5">
           <div className={`${compact ? 'text-[11px]' : 'text-[12.5px]'} font-mono font-bold text-text truncate`}>
             {note.title || 'Untitled'}
           </div>
-          <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-0.5`}>
+          <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-px`}>
             {format(new Date(note.created), 'MMM d, yyyy · HH:mm')}
           </div>
         </div>
 
         {/* Toolbar — purely representational: a dark bar with a few faint marks */}
-        <div className="px-3 mt-2">
+        <div className="px-3 mt-1.5">
           <div
-            className="h-3.5 rounded-sm flex items-center gap-1 px-1.5"
+            className="h-3 rounded-sm flex items-center gap-1 px-1.5"
             style={{ background: 'rgb(var(--bg-0) / 0.65)' }}
           >
             {Array.from({ length: 5 }).map((_, i) => (
@@ -86,7 +86,7 @@ export function SectionPreviewCard({
 
         {/* A few lines of the section, as if the note were open — just tiny */}
         <div
-          className="note-preview relative overflow-hidden px-3 pt-1.5"
+          className="note-preview relative overflow-hidden px-3 pt-1"
           style={{ height: previewHeight }}
         >
           {hasContent ? (

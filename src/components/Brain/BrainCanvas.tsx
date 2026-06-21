@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useThemeStore } from '../../stores/themeStore'
-import { readPalette, rgba, type BrainPalette } from './brainColors'
+import { readBrainPalette, rgba, type BrainPalette } from './brainColors'
 import { useForceLayout, type SimNode } from './useForceLayout'
 import type { BrainGraphModel } from './useBrainGraph'
 
@@ -27,9 +27,10 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup, 
   const [size, setSize] = useState({ width: 0, height: 0 })
 
   const activeThemeId = useThemeStore((s) => s.activeThemeId)
-  // Re-read the CSS-var palette whenever the theme changes (readPalette reads :root live).
+  // Re-read the CSS-var palette whenever the theme changes (readBrainPalette reads :root live,
+  // forcing dark neutrals under light themes so the brain keeps its dark backdrop).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const palette = useMemo<BrainPalette>(() => readPalette(), [activeThemeId])
+  const palette = useMemo<BrainPalette>(() => readBrainPalette(), [activeThemeId])
 
   const { simRef, nodesRef, reheat } = useForceLayout(model, size.width, size.height)
 

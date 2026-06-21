@@ -63,8 +63,11 @@ export function useBrainGraph(): BrainGraphModel {
         favorited: note.favorited,
       })
       noteNodeIds.add(note.id)
-      // Every section becomes a dendrite hanging off the soma — including the first one. The soma
-      // keeps the first section as its own click target so clicking the note lands on its top.
+      // A single-section note collapses to just the soma: one node that already carries that
+      // section as its click target (preview + navigation), so we skip the redundant dendrite.
+      // With two or more sections, every section becomes a dendrite hanging off the soma —
+      // including the first one, which the soma also keeps as its own click target.
+      if (note.sections.length < 2) return id
       for (let i = 0; i < note.sections.length; i++) {
         const sec = note.sections[i]
         const sid = `s:${sec.id}`
@@ -104,11 +107,24 @@ export function useBrainGraph(): BrainGraphModel {
       }
     }
 
+    // The AI index emits relations generously (cosine > 0.05, up to 6 per note). Across a full
+    // vault that's enough edges to drape the whole wireframe in a uniform whitish wash. Thin them
+    // down to just the meaningful links: drop anything below MIN_SCORE, then keep only each note's
+    // strongest MAX_PER_NOTE relations (strongest-first, and an edge survives as long as either
+    // endpoint still has room — so no note is left fully unconnected). Raise/lower these two to
+    // trade a denser web for a cleaner brain.
+    const MIN_SCORE = 0.12
+    const MAX_PER_NOTE = 5
+    const candidates = graphEdges
+      .filter((e) => e.score >= MIN_SCORE && noteNodeIds.has(e.a) && noteNodeIds.has(e.b))
+      .sort((x, y) => y.score - x.score)
+    const perNote = new Map<string, number>()
     const contentEdges: BrainContentEdge[] = []
-    for (const e of graphEdges) {
-      if (noteNodeIds.has(e.a) && noteNodeIds.has(e.b)) {
-        contentEdges.push({ source: `n:${e.a}`, target: `n:${e.b}`, score: e.score })
-      }
+    for (const e of candidates) {
+      const ca = perNote.get(e.a) ?? 0, cb = perNote.get(e.b) ?? 0
+      if (ca >= MAX_PER_NOTE && cb >= MAX_PER_NOTE) continue // both endpoints already saturated
+      perNote.set(e.a, ca + 1); perNote.set(e.b, cb + 1)
+      contentEdges.push({ source: `n:${e.a}`, target: `n:${e.b}`, score: e.score })
     }
 
     return { nodes, structureEdges, contentEdges }

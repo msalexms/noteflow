@@ -72,7 +72,7 @@ export const DEFAULT_BRAIN_PARAMS: BrainShapeParams = {
   noiseAmp: 0.065, noiseFreq: 2.4,
   shells: [1], // single outer shell = the brain silhouette; the interior is filled below
   // Random interior lattice (region-tagged → notes can live inside too, not just on the surface).
-  interior: { fillDensity: 1.4, margin: 0.92, neighbors: 3, maxEdge: 0.4 },
+  interior: { fillDensity: 0.9, margin: 0.92, neighbors: 3, maxEdge: 0.4 },
   centerY: 0.2,
   rotation: [-8, 0, 0],
   lobes: {
@@ -122,9 +122,13 @@ export interface BrainMesh {
   interiorVertices: number[]   // indices of the random interior-fill points (for routing through the volume)
   pathBetween: (a: number, b: number) => number[] | null
   // Same lattice routing as pathBetween, but penalises edges near the outer shell so the path dives
-  // through the interior fill and crosses the core. Used for content edges (synapses) so relations
-  // visibly pass through the middle of the brain instead of skimming the surface.
+  // through the interior fill and crosses the core. Used as the per-edge fallback when a content
+  // edge isn't part of a batch route.
   pathThroughInterior: (a: number, b: number) => number[] | null
+  // Congestion-aware batch router for content edges (synapses): routes all relations together so
+  // they fan out onto parallel corridors instead of stacking onto one (which would hide each
+  // other). Pass pairs strongest-first; returns a map keyed by the unordered pair (min*N+max).
+  routeContentEdges: (pairs: Array<readonly [number, number]>) => Map<number, number[]>
 }
 
 // ── deterministic value noise (no deps) ─────────────────────────────────────────
@@ -533,48 +537,58 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
     if (rMax > 0) for (let i = 0; i < vCount; i++) radialFrac[i] /= rMax
   }
 
+  // Undirected edge-id lookup: maps a vertex pair to its index in edgePairs so the congestion-aware
+  // content router can track how many content routes already traverse each lattice edge.
+  const edgeId = new Map<number, number>()
+  for (let i = 0; i < edgePairs.length; i++) edgeId.set(edgePairs[i][0] * vCount + edgePairs[i][1], i)
+  const edgeKey = (u: number, v: number) => (u < v ? u * vCount + v : v * vCount + u)
+
   // Shortest path over the lattice via Dijkstra with a pluggable edge weight (lazy-deleting binary
-  // min-heap). Each pather has its own cache, keyed by the unordered {a,b} pair; the returned path
-  // is reversed by callers when they need a fixed start.
+  // min-heap). The returned path is reversed by callers when they need a fixed start.
+  const dijkstra = (a: number, b: number, weight: (u: number, v: number) => number): number[] | null => {
+    if (a === b) return [a]
+    const dist = new Float64Array(vCount).fill(Infinity)
+    const prev = new Int32Array(vCount).fill(-1)
+    const done = new Uint8Array(vCount)
+    dist[a] = 0
+    const heap: number[] = [a]
+    const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
+    const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
+    const siftDown = (i: number) => {
+      const n = heap.length
+      for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
+    }
+    let found = false
+    while (heap.length) {
+      const cur = heap[0]
+      const last = heap.pop()!
+      if (heap.length) { heap[0] = last; siftDown(0) }
+      if (done[cur]) continue
+      done[cur] = 1
+      if (cur === b) { found = true; break }
+      const dcur = dist[cur]
+      for (const nb of adjacency[cur]) {
+        if (done[nb]) continue
+        const nd = dcur + weight(cur, nb)
+        if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
+      }
+    }
+    if (!found) return null
+    const path: number[] = []
+    for (let cur = b; cur !== -1; cur = prev[cur]) path.push(cur)
+    path.reverse()
+    return path
+  }
+
+  // A cached single-weight pather, keyed by the unordered {a,b} pair.
   const makePather = (weight: (u: number, v: number) => number) => {
     const cache = new Map<number, number[] | null>()
     return (a: number, b: number): number[] | null => {
       if (a === b) return [a]
-      const key = Math.min(a, b) * vCount + Math.max(a, b)
+      const key = edgeKey(a, b)
       const cached = cache.get(key)
       if (cached !== undefined) return cached
-      const dist = new Float64Array(vCount).fill(Infinity)
-      const prev = new Int32Array(vCount).fill(-1)
-      const done = new Uint8Array(vCount)
-      dist[a] = 0
-      const heap: number[] = [a]
-      const swap = (i: number, j: number) => { const t = heap[i]; heap[i] = heap[j]; heap[j] = t }
-      const siftUp = (i: number) => { while (i > 0) { const p = (i - 1) >> 1; if (dist[heap[p]] <= dist[heap[i]]) break; swap(p, i); i = p } }
-      const siftDown = (i: number) => {
-        const n = heap.length
-        for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < n && dist[heap[l]] < dist[heap[m]]) m = l; if (r < n && dist[heap[r]] < dist[heap[m]]) m = r; if (m === i) break; swap(m, i); i = m }
-      }
-      let found = false
-      while (heap.length) {
-        const cur = heap[0]
-        const last = heap.pop()!
-        if (heap.length) { heap[0] = last; siftDown(0) }
-        if (done[cur]) continue
-        done[cur] = 1
-        if (cur === b) { found = true; break }
-        const dcur = dist[cur]
-        for (const nb of adjacency[cur]) {
-          if (done[nb]) continue
-          const nd = dcur + weight(cur, nb)
-          if (nd < dist[nb]) { dist[nb] = nd; prev[nb] = cur; heap.push(nb); siftUp(heap.length - 1) }
-        }
-      }
-      let path: number[] | null = null
-      if (found) {
-        path = []
-        for (let cur = b; cur !== -1; cur = prev[cur]) path.push(cur)
-        path.reverse()
-      }
+      const path = dijkstra(a, b, weight)
       cache.set(key, path)
       return path
     }
@@ -584,15 +598,44 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
   // dives through the interior only when that's literally shorter, otherwise it hugs the surface.
   const pathBetween = makePather((u, v) => Math.sqrt(dist2(u, v)))
 
-  // Content edges (synapses) instead penalise edges near the outer shell by their radial fraction,
-  // so the cheapest route bends inward through the interior fill and crosses the core before
-  // surfacing at the far note — relations visibly pass through the middle of the brain rather than
-  // skimming the exterior. INTERIOR_BIAS controls how hard the path is pulled inward (0 = same as
-  // pathBetween; higher = deeper dives even between nearby notes).
-  const INTERIOR_BIAS = 1.8
-  const pathThroughInterior = makePather(
-    (u, v) => Math.sqrt(dist2(u, v)) * (1 + INTERIOR_BIAS * 0.5 * (radialFrac[u] + radialFrac[v])),
-  )
+  // Content edges (synapses) penalise edges near the outer shell by their radial fraction, so the
+  // cheapest route bends inward through the interior fill and crosses the core before surfacing at
+  // the far note — relations visibly pass through the middle of the brain rather than skimming the
+  // exterior. EXTERIOR_BIAS controls how hard the path is pulled inward; EXTERIOR_POW (>1) makes the
+  // very outer shell disproportionately expensive so routes only surface right at their endpoints.
+  const EXTERIOR_BIAS = 5.5
+  const EXTERIOR_POW = 3
+  const contentWeight = (u: number, v: number) =>
+    Math.sqrt(dist2(u, v)) * (1 + EXTERIOR_BIAS * 0.5 * (radialFrac[u] ** EXTERIOR_POW + radialFrac[v] ** EXTERIOR_POW))
+  const pathThroughInterior = makePather(contentWeight)
+
+  // Batch-route every content edge TOGETHER with congestion awareness, so two relations don't
+  // collapse onto the same corridor (where one line hides the other, looking like a single edge).
+  // Each chosen route adds load to the lattice edges it uses; the next route pays CONGESTION per
+  // unit of existing load on an edge, so it fans out onto a parallel path through the interior fill
+  // instead of overlapping. Routes are processed in the order given, so callers pass the strongest
+  // relations first — they win the cleaner, directer path and weaker ones detour around them.
+  // Returns a map keyed by the unordered pair (edgeKey); callers orient each path to their start.
+  const CONGESTION = 2.6
+  const routeContentEdges = (pairs: Array<readonly [number, number]>): Map<number, number[]> => {
+    const usage = new Float64Array(edgePairs.length)
+    const routes = new Map<number, number[]>()
+    for (const [a, b] of pairs) {
+      const key = edgeKey(a, b)
+      if (routes.has(key)) continue
+      const path = a === b ? [a] : dijkstra(a, b, (u, v) => {
+        const eid = edgeId.get(edgeKey(u, v))
+        return contentWeight(u, v) * (1 + CONGESTION * (eid != null ? usage[eid] : 0))
+      })
+      const seq = path && path.length >= 2 ? path : [a, b]
+      routes.set(key, seq)
+      for (let i = 0; i < seq.length - 1; i++) {
+        const eid = edgeId.get(edgeKey(seq[i], seq[i + 1]))
+        if (eid != null) usage[eid] += 1
+      }
+    }
+    return routes
+  }
 
   const edges = new Uint32Array(edgePairs.length * 2)
   for (let i = 0; i < edgePairs.length; i++) { edges[i * 2] = edgePairs[i][0]; edges[i * 2 + 1] = edgePairs[i][1] }
@@ -600,6 +643,7 @@ export function buildBrainMesh(params: BrainShapeParams = DEFAULT_BRAIN_PARAMS):
   return {
     positions: posArr, edges, faces: new Uint32Array(surfaceFaces), regionOf: new Int8Array(regionOf),
     adjacency, centroid, vertexCount: vCount, verticesByRegion, interiorVertices, pathBetween, pathThroughInterior,
+    routeContentEdges,
   }
 }
 

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;1,400;1,500&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;1,400;1,500&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
 /* ── Tailwind ────────────────────────────────────────────────────────────── */
 @tailwind base;
@@ -21,6 +21,9 @@
   --cyan:        125 207 255; /* #7dcfff */
   --purple:      187 154 247; /* #bb9af7 */
 
+  /* App-level UI font (fallback; runtime value set per-theme by themeStore). */
+  --app-font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -40,7 +43,7 @@ html, body, #root {
 }
 
 body {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: var(--app-font-family, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace);
   background: transparent;
   color: rgb(var(--text));
   font-size: 13px;
@@ -55,9 +58,9 @@ button {
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.001); }
-::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); border-radius: 2px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgb(var(--text-muted) / 0.08); }
+::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--text-muted) / 0.7); }
 
 /* ── Tab active color (themed) ───────────────────────────────────────────── */
@@ -89,6 +92,93 @@ button {
 .note-preview .prose-editor .ProseMirror img {
   max-width: 100%;
   height: auto;
+}
+
+/* AI chat markdown. Reuses the editor's prose markup (via htmlFromMarkdown) but
+   scaled down to the chat panel: 12px base, compact headings/spacing, and no
+   editor padding (the message bubble supplies its own insets). */
+.chat-md.prose-editor {
+  height: auto;
+}
+.chat-md.prose-editor .ProseMirror {
+  min-height: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  caret-color: transparent;
+}
+.chat-md.prose-editor .ProseMirror > :first-child { margin-top: 0; }
+.chat-md.prose-editor .ProseMirror > :last-child { margin-bottom: 0; }
+.chat-md.prose-editor .ProseMirror h1,
+.chat-md.prose-editor .ProseMirror h2,
+.chat-md.prose-editor .ProseMirror h3 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.3rem;
+}
+/* Integer px sizes (not em) on purpose: fractional font sizes render blurry for
+   monospace in Chromium. Keep every chat element on a whole-pixel size. */
+.chat-md.prose-editor .ProseMirror h1 { font-size: 16px; }
+.chat-md.prose-editor .ProseMirror h2 { font-size: 14px; }
+.chat-md.prose-editor .ProseMirror h3 { font-size: 13px; }
+.chat-md.prose-editor .ProseMirror code { font-size: 11px; }
+.chat-md.prose-editor .ProseMirror pre {
+  padding: 0.6rem 0.7rem;
+  margin: 0.5rem 0;
+}
+.chat-md.prose-editor .ProseMirror pre code { font-size: 11px; }
+.chat-md.prose-editor .ProseMirror ul,
+.chat-md.prose-editor .ProseMirror ol {
+  padding-left: 1.25rem;
+}
+.chat-md.prose-editor .ProseMirror ul:not([data-type="taskList"]) > li,
+.chat-md.prose-editor .ProseMirror ol > li {
+  margin-bottom: 0.2rem;
+}
+.chat-md.prose-editor .ProseMirror table {
+  font-size: 11px;
+}
+.chat-md.prose-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Task lists: the editor's flex layout is keyed on li[data-node-view-wrapper],
+   an attribute TipTap only adds at runtime. The static HTML from htmlFromMarkdown
+   lacks it, so checkbox + text stack onto separate lines. Re-create the inline
+   layout for the contexts that render that static HTML — the chat (.chat-md) and
+   the section preview cards (.note-preview) — so the live editor's rules stay untouched. */
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] > li,
+.note-preview .ProseMirror ul[data-type="taskList"] > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.4rem;
+  line-height: 1.5;
+}
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] > li > label,
+.note-preview .ProseMirror ul[data-type="taskList"] > li > label {
+  flex-shrink: 0;
+  margin-top: 2px;
+  user-select: none;
+}
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] > li > p,
+.note-preview .ProseMirror ul[data-type="taskList"] > li > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+/* Nested lists inside a task item wrap onto their own full-width row. */
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] > li > ul,
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] > li > ol,
+.note-preview .ProseMirror ul[data-type="taskList"] > li > ul,
+.note-preview .ProseMirror ul[data-type="taskList"] > li > ol {
+  flex-basis: 100%;
+  margin: 0;
+}
+.chat-md.prose-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > p,
+.note-preview .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > p {
+  color: rgb(var(--text-muted) / 0.55);
+  text-decoration: line-through;
 }
 
 .prose-editor .ProseMirror {
@@ -151,9 +241,9 @@ button {
   line-height: 1.3;
 }
 
-.prose-editor .ProseMirror h1 { font-size: 1.5rem; color: rgb(var(--accent)); }
-.prose-editor .ProseMirror h2 { font-size: 1.2rem; color: rgb(var(--cyan)); }
-.prose-editor .ProseMirror h3 { font-size: 1rem;   color: rgb(var(--text)); }
+.prose-editor .ProseMirror h1 { font-size: 1.5rem; color: rgb(var(--heading-1, var(--accent))); }
+.prose-editor .ProseMirror h2 { font-size: 1.2rem; color: rgb(var(--heading-2, var(--cyan))); }
+.prose-editor .ProseMirror h3 { font-size: 1rem;   color: rgb(var(--heading-3, var(--text))); }
 
 .prose-editor .ProseMirror p { margin-bottom: 0.25rem; }
 
@@ -515,11 +605,14 @@ button {
 /* ── Tab scrollbar: space reserved, thumb visible only on hover ──────────── */
 .tabs-scroll { padding-bottom: 0; }
 .tabs-scroll::-webkit-scrollbar { height: 4px; }
+.tabs-scroll::-webkit-scrollbar-track { background: transparent; }
 .tabs-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .tabs-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
 
-/* ── Sidebar notes list: scrollbar visible only on hover ─────────────────── */
-.notes-list-scroll::-webkit-scrollbar-thumb { background: transparent; }
+/* ── Sidebar notes list: thin scrollbar, visible only on hover ───────────── */
+.notes-list-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.notes-list-scroll::-webkit-scrollbar-track { background: transparent; }
+.notes-list-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
 .notes-list-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--text-muted) / 0.4); }
 
 /* ── Sidebar section tabs: hide native scrollbar (edges faded via CSS mask) */

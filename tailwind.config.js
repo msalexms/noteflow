@@ -19,7 +19,11 @@ module.exports = {
         purple:       'rgb(var(--purple) / <alpha-value>)',
       },
       fontFamily: {
-        mono: ['"JetBrains Mono"', '"Fira Code"', '"Cascadia Code"', 'monospace'],
+        // `font-mono` is the app's general UI font: it follows the active theme's
+        // app font via --app-font-family (set by themeStore), falling back to the
+        // mono stack before the theme loads. Real code keeps its own monospace
+        // styling in index.css (.ProseMirror code, task badges), so it stays mono.
+        mono: ["var(--app-font-family, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace)"],
       },
     },
   },

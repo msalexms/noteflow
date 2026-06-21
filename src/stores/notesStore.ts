@@ -59,6 +59,11 @@ interface NotesState {
   // Used once on startup to restore the last active section
   pendingInitialSectionId: string | null
 
+  // Last active section per note (in-memory). Survives editor remounts — e.g. when
+  // the brain/group/note overview opens and the editor unmounts — so closing them
+  // returns to the section the user was on instead of falling back to the first one.
+  activeSectionByNote: Record<string, string>
+
   // Actions
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
@@ -82,6 +87,7 @@ interface NotesState {
   clearFilters: () => void
   setCommandPaletteOpen: (v: boolean) => void
   setNewlyCreatedNoteId: (id: string | null) => void
+  rememberActiveSection: (noteId: string, sectionId: string) => void
   syncNote: (filePath: string) => Promise<void>
   pruneEmptyNote: (id: string) => Promise<void>
   encryptNote: (id: string, password: string, options?: EncryptionOptions) => Promise<void>
@@ -113,6 +119,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   newlyCreatedNoteId: null,
   sessionPasswords: {},
   pendingInitialSectionId: null,
+  activeSectionByNote: {},
 
   loadNotes: async () => {
     set({ isLoading: true })
@@ -467,6 +474,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   }),
   setCommandPaletteOpen:(v)   => set({ commandPaletteOpen: v }),
   setNewlyCreatedNoteId:(id) => set({ newlyCreatedNoteId: id }),
+
+  rememberActiveSection: (noteId, sectionId) => set((s) =>
+    s.activeSectionByNote[noteId] === sectionId
+      ? {}
+      : { activeSectionByNote: { ...s.activeSectionByNote, [noteId]: sectionId } }
+  ),
 
   pruneEmptyNote: async (id) => {
     const note = get().notes.find((n) => n.id === id)

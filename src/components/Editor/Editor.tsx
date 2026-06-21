@@ -197,8 +197,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!editor) return
-      // Ctrl+Shift+B → code block
-      if (e.ctrlKey && e.shiftKey && e.key === 'B') {
+      // Ctrl/Cmd+Shift+B → code block
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'B') {
         e.preventDefault()
         editor.chain().focus().toggleCodeBlock().run()
         return
