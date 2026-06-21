@@ -1,8 +1,30 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AlertTriangle, ArrowUp, Check, History, Loader2, Plus, RefreshCw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { AlertTriangle, ArrowUp, Check, FileText, History, Image as ImageIcon, Loader2, Paperclip, Plus, RefreshCw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
-import type { ChatToolActivity } from '../../types'
+import { htmlFromMarkdown } from '../../lib/markdownHtml'
+import { GENERIC_SUGGESTIONS, splitSuggestions } from '../../lib/chatSuggestions'
+import { Card } from './ui'
+import type { ChatAttachment, ChatToolActivity } from '../../types'
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// A file chip shown in the composer (removable) or on a sent user message (read-only).
+function AttachmentChip({ a, onRemove }: { a: ChatAttachment; onRemove?: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5 max-w-[160px] text-[11.5px] font-mono text-text bg-surface-0 border border-border rounded px-1.5 py-1">
+      {a.kind === 'image' ? <ImageIcon size={11} className="shrink-0 text-accent" /> : <FileText size={11} className="shrink-0 text-accent" />}
+      <span className="truncate flex-1">{a.name}</span>
+      {onRemove
+        ? <button onClick={onRemove} title="Remove" className="shrink-0 text-text-muted hover:text-red transition-colors"><X size={11} /></button>
+        : <span className="shrink-0 text-text-muted/50">{formatBytes(a.sizeBytes)}</span>}
+    </div>
+  )
+}
 
 // Present-continuous labels shown while a tool runs (replaced by its summary once it finishes).
 const RUNNING_LABELS: Record<string, string> = {
@@ -29,9 +51,35 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
     : a.status === 'cancelled' ? <X size={11} className="text-text-muted" />
     : <Check size={11} className="text-emerald-400" />
   return (
-    <div className="flex items-center gap-1.5 text-[10.5px] font-mono text-text-muted">
+    <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-text-muted">
       {icon}
       <span className={`truncate ${a.status === 'cancelled' ? 'line-through opacity-60' : ''}`}>{label}</span>
+    </div>
+  )
+}
+
+// Shown while the assistant is working but hasn't produced visible text yet (initial
+// thinking, or the gap after a tool finishes). Makes "still going" unmistakable so an
+// error mid-turn isn't mistaken for a finished reply.
+function ThinkingIndicator() {
+  return (
+    <div className="self-start flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-mono text-text-muted">
+      <Loader2 size={12} className="animate-spin text-accent" />
+      <span className="animate-pulse">Thinking…</span>
+    </div>
+  )
+}
+
+// Assistant replies arrive as Markdown (headings, code, tables, lists…). Render
+// them through the same markdown→HTML pipeline the editor uses, scaled down to
+// the chat panel via the `chat-md` scope (see index.css).
+function MarkdownMessage({ content }: { content: string }) {
+  // Hide the trailing suggestion marker/block live while streaming (the store keeps the
+  // raw content until the turn finishes; suggestions become chips below the chat).
+  const html = useMemo(() => htmlFromMarkdown(splitSuggestions(content).visible), [content])
+  return (
+    <div className="chat-md prose-editor">
+      <div className="ProseMirror" dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   )
 }
@@ -53,6 +101,7 @@ export function ChatView({
   const messages = useAiChatStore((s) => s.messages)
   const streaming = useAiChatStore((s) => s.streaming)
   const activeSources = useAiChatStore((s) => s.activeSources)
+  const suggestions = useAiChatStore((s) => s.suggestions)
   const sendMessage = useAiChatStore((s) => s.sendMessage)
   const cancel = useAiChatStore((s) => s.cancel)
   const pendingConfirm = useAiChatStore((s) => s.pendingConfirm)
@@ -64,6 +113,10 @@ export function ChatView({
   const deleteSession = useAiChatStore((s) => s.deleteSession)
   const draft = useAiChatStore((s) => s.draft)
   const setDraft = useAiChatStore((s) => s.setDraft)
+  const pendingPrompt = useAiChatStore((s) => s.pendingPrompt)
+  const pendingAttachments = useAiChatStore((s) => s.pendingAttachments)
+  const pickAttachments = useAiChatStore((s) => s.pickAttachments)
+  const removeAttachment = useAiChatStore((s) => s.removeAttachment)
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -71,15 +124,28 @@ export function ChatView({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages, pendingConfirm])
+  }, [messages, pendingConfirm, streaming])
 
   // Grow the composer with its content (capped by max-h-32), and shrink it back when cleared.
-  useEffect(() => {
+  const autosize = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-  }, [draft])
+  }, [])
+
+  useEffect(() => { autosize() }, [draft, autosize])
+
+  // Recompute on width changes too: the panel mounts at ~zero width during the brain
+  // view's open animation, where the empty placeholder wraps and scrollHeight balloons.
+  // Without this the composer stays stuck tall until the first keystroke re-measures it.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => autosize())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [autosize])
 
   const preset = useMemo(() => presets.find((p) => p.id === llmConfig?.active) ?? null, [presets, llmConfig?.active])
   const modelOptions = useMemo(() => {
@@ -89,10 +155,33 @@ export function ChatView({
   }, [preset, models, llmConfig?.model])
 
   const configured = llmConfig?.configured ?? false
+  const caps = llmConfig?.capabilities
+  const attachHint = caps
+    ? `Attach files — ${caps.pdf ? 'PDF, ' : ''}${caps.images ? 'images, ' : ''}text & code`
+    : 'Attach text & code files'
 
+  // A question queued from the command palette ("Ask AI") auto-sends once a provider is ready.
+  // If none is configured yet it lingers until one is, then fires.
+  useEffect(() => {
+    if (!pendingPrompt || !configured || streaming) return
+    useAiChatStore.setState({ pendingPrompt: null })
+    sendMessage(pendingPrompt)
+  }, [pendingPrompt, configured, streaming, sendMessage])
+
+  // The assistant turn is always the last message; while streaming with no text yet,
+  // surface an explicit "Thinking…" row so the wait doesn't read as a finished reply.
+  const lastMsg = messages[messages.length - 1]
+  const toolRunning = lastMsg?.actions?.some((a) => a.status === 'running') ?? false
+  const thinking = streaming && lastMsg?.role === 'assistant' && lastMsg.content.length === 0 && !toolRunning
+
+  // Prompt suggestions above the composer: generic starters on an empty chat, or the
+  // model's parsed next-actions once there's a conversation. Hidden while streaming.
+  const shownSuggestions = streaming ? [] : messages.length === 0 ? GENERIC_SUGGESTIONS : suggestions
+
+  const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !streaming
   const submit = () => {
-    if (!draft.trim() || streaming) return
-    sendMessage(draft) // clears the draft in the store
+    if (!canSend) return
+    sendMessage(draft) // clears the draft + pending attachments in the store
   }
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
@@ -100,14 +189,18 @@ export function ChatView({
 
   if (!configured) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
-        <Settings size={20} className="text-text-muted/60" />
-        <p className="text-[12px] font-mono text-text-muted leading-relaxed">
-          Connect a model (your Anthropic/OpenAI key or a local Ollama) to chat with your notes.
-        </p>
-        <button onClick={onConfigure} className="px-3 py-1.5 rounded bg-text text-surface-0 text-[11px] font-mono font-bold hover:opacity-90">
-          Configure provider
-        </button>
+      <div className="flex items-center justify-center h-full p-5">
+        <Card className="flex flex-col items-center gap-3 p-6 max-w-[260px] text-center">
+          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-accent/15 text-accent">
+            <Settings size={18} />
+          </span>
+          <p className="text-[13px] font-mono text-text-muted leading-relaxed">
+            Connect a model (your Anthropic/OpenAI key or a local Ollama) to chat with your notes.
+          </p>
+          <button onClick={onConfigure} className="px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90">
+            Configure provider
+          </button>
+        </Card>
       </div>
     )
   }
@@ -135,7 +228,7 @@ export function ChatView({
             value={llmConfig?.model ?? ''}
             onChange={(e) => setLlmConfig({ model: e.target.value })}
             title="Model used for the next question"
-            className="max-w-[150px] bg-surface-0 border border-border rounded px-1.5 py-1 text-[10px] font-mono text-text outline-none focus:border-text/30"
+            className="max-w-[150px] bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30"
           >
             {modelOptions.length === 0 && <option value="">(no model)</option>}
             {modelOptions.map((m) => (
@@ -158,14 +251,14 @@ export function ChatView({
         <>
           <div className="absolute inset-0 z-10" onClick={() => setHistoryOpen(false)} />
           <div className="absolute top-9 left-2 z-20 w-64 max-h-80 overflow-y-auto rounded-lg border border-border bg-surface-1 shadow-2xl py-1">
-            {sessions.length === 0 && <p className="px-3 py-2 text-[11px] font-mono text-text-muted/60">No saved chats yet.</p>}
+            {sessions.length === 0 && <p className="px-3 py-2 text-[12px] font-mono text-text-muted/60">No saved chats yet.</p>}
             {sessions.map((s) => (
               <div
                 key={s.id}
                 className={`group flex items-center gap-1 px-2 py-1.5 hover:bg-text/5 cursor-pointer ${s.id === activeSessionId ? 'bg-surface-2' : ''}`}
                 onClick={() => { openSession(s.id); setHistoryOpen(false) }}
               >
-                <span className="flex-1 min-w-0 truncate text-[11px] font-mono text-text/80">{s.title}</span>
+                <span className="flex-1 min-w-0 truncate text-[12px] font-mono text-text/80">{s.title}</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
                   title="Delete chat"
@@ -182,7 +275,7 @@ export function ChatView({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
         {messages.length === 0 && (
-          <p className="text-[11px] font-mono text-text-muted/60 text-center mt-6">
+          <p className="text-[12px] font-mono text-text-muted/60 text-center mt-6">
             Ask about your notes. I'll light up the ones I use in the brain.
           </p>
         )}
@@ -193,13 +286,24 @@ export function ChatView({
                 {m.actions.map((a) => <ToolActivityRow key={a.toolCallId} a={a} />)}
               </div>
             )}
-            {(m.role === 'user' || m.content.length > 0 || !m.actions?.length) && (
-              <div
-                className={`px-2.5 py-1.5 rounded text-[12px] font-mono whitespace-pre-wrap break-words leading-relaxed ${
-                  m.role === 'user' ? 'bg-surface-2 text-text' : m.error ? 'bg-red-500/10 text-red-300 border border-red-500/30' : 'text-text/90'
-                }`}
-              >
-                {m.content || (streaming ? '…' : '')}
+            {m.content.length > 0 && (
+              m.role === 'assistant' && !m.error ? (
+                <div className="px-2.5 py-1.5 rounded text-[13px] text-text/90 break-words">
+                  <MarkdownMessage content={m.content} />
+                </div>
+              ) : (
+                <div
+                  className={`px-2.5 py-1.5 rounded text-[13px] font-mono whitespace-pre-wrap break-words leading-relaxed ${
+                    m.role === 'user' ? 'bg-surface-2 text-text' : m.error ? 'bg-red-500/10 text-red-300 border border-red-500/30' : 'text-text/90'
+                  }`}
+                >
+                  {m.content}
+                </div>
+              )
+            )}
+            {m.role === 'user' && m.attachments && m.attachments.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1 justify-end">
+                {m.attachments.map((a) => <AttachmentChip key={a.id} a={a} />)}
               </div>
             )}
           </div>
@@ -207,26 +311,33 @@ export function ChatView({
 
         {pendingConfirm && (
           <div className="self-start max-w-[92%] w-full rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 text-[11.5px] font-mono text-amber-200">
+            <div className="flex items-center gap-1.5 text-[12.5px] font-mono text-amber-200">
               <Wrench size={12} />
               <span>{CONFIRM_LABELS[pendingConfirm.name] ?? 'Confirm this action?'}</span>
             </div>
+            {pendingConfirm.target && (
+              <div className="text-[12px] font-mono text-amber-100/90 break-words pl-[18px]">
+                {pendingConfirm.target}
+              </div>
+            )}
             <div className="flex gap-1.5">
               <button
                 onClick={() => confirmAction(true)}
-                className="px-2.5 py-1 rounded bg-red-500/80 text-white text-[11px] font-mono font-bold hover:bg-red-500 transition-colors"
+                className="px-2.5 py-1 rounded bg-red-500/80 text-white text-[12px] font-mono font-bold hover:bg-red-500 transition-colors"
               >
                 Confirm
               </button>
               <button
                 onClick={() => confirmAction(false)}
-                className="px-2.5 py-1 rounded bg-surface-2 text-text text-[11px] font-mono hover:bg-surface-3 transition-colors"
+                className="px-2.5 py-1 rounded bg-surface-2 text-text text-[12px] font-mono hover:bg-surface-3 transition-colors"
               >
                 Cancel
               </button>
             </div>
           </div>
         )}
+
+        {thinking && <ThinkingIndicator />}
 
         {activeSources.length > 0 && (
           <div className="self-start flex flex-wrap gap-1 mt-0.5">
@@ -235,7 +346,7 @@ export function ChatView({
                 key={`${s.noteId}:${s.sectionId}`}
                 {...previewProps(s.noteId, s.sectionId)}
                 onClick={() => onOpenNote(s.noteId, s.sectionId)}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono border border-border bg-surface-1/60 text-text-muted hover:text-text hover:border-text/30 transition-colors max-w-[160px] truncate"
+                className="px-2 py-0.5 rounded-md text-[11px] font-mono border-solid border border-border bg-surface-0 text-text-muted hover:text-text hover:border-accent/50 transition-colors max-w-[160px] truncate"
               >
                 {s.title || 'Untitled'}
               </button>
@@ -244,27 +355,58 @@ export function ChatView({
         )}
       </div>
 
-      {/* Composer */}
-      <div className="flex-shrink-0 border-t border-text/10 p-2">
-        <div className="flex items-end gap-1.5">
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={1}
-            placeholder="Type a message…"
-            className="flex-1 resize-none bg-surface-0 border border-border rounded px-2 py-1.5 text-[12px] font-mono text-text placeholder-text-muted/40 outline-none focus:border-text/30 max-h-32 overflow-y-auto"
-          />
-          {streaming ? (
-            <button onClick={cancel} title="Stop" className="flex items-center justify-center w-8 h-8 rounded bg-surface-2 text-text hover:bg-surface-3 transition-colors">
-              <Square size={13} />
-            </button>
-          ) : (
-            <button onClick={submit} disabled={!draft.trim()} title="Send" className="flex items-center justify-center w-8 h-8 rounded bg-text text-surface-0 disabled:opacity-40 hover:opacity-90 transition-opacity">
-              <ArrowUp size={15} />
-            </button>
+      {/* Composer — one rounded surface (attachments + input + actions), like the design's cards. */}
+      <div className="flex-shrink-0 p-2">
+        {shownSuggestions.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {shownSuggestions.map((s) => (
+              <button
+                key={s}
+                onClick={() => sendMessage(s)}
+                title={s}
+                className="px-2 py-0.5 rounded-md text-[11px] font-mono border-solid border border-border bg-surface-0 text-text-muted hover:text-text hover:border-accent/50 transition-colors max-w-full truncate"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="rounded-xl border-solid border border-border bg-surface-0 p-1.5 transition-colors focus-within:border-accent/40">
+          {pendingAttachments.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {pendingAttachments.map((a) => (
+                <AttachmentChip key={a.id} a={a} onRemove={() => removeAttachment(a.id)} />
+              ))}
+            </div>
           )}
+          <div className="flex items-end gap-1.5">
+            <button
+              onClick={pickAttachments}
+              disabled={streaming}
+              title={attachHint}
+              className="flex items-center justify-center w-8 h-8 rounded-lg text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-40"
+            >
+              <Paperclip size={15} />
+            </button>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              rows={1}
+              placeholder="Type a message…"
+              className="flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] font-mono text-text placeholder-text-muted/40 outline-none max-h-32 overflow-y-auto"
+            />
+            {streaming ? (
+              <button onClick={cancel} title="Stop" className="flex items-center justify-center w-8 h-8 rounded-lg bg-surface-2 text-text hover:bg-surface-3 transition-colors">
+                <Square size={13} />
+              </button>
+            ) : (
+              <button onClick={submit} disabled={!canSend} title="Send" className="flex items-center justify-center w-8 h-8 rounded-lg bg-text text-surface-0 disabled:opacity-40 hover:opacity-90 transition-opacity">
+                <ArrowUp size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

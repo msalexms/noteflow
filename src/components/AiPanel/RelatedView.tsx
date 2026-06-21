@@ -3,6 +3,7 @@ import { ChevronDown, Loader2 } from 'lucide-react'
 import { useAiStore } from '../../stores/aiStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+import { PANEL_LABEL } from './ui'
 
 // "Related notes" for any note/section, picked right here. Reuses the existing AI index
 // (aiStore.fetchRelated). Lives as a tab in the AI panel; mirrors the old brain bottom strip.
@@ -62,7 +63,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
   if (!enabled) {
     return (
       <div className="flex items-center justify-center h-full px-6 text-center">
-        <p className="text-[11px] font-mono text-text-muted/70 leading-relaxed">
+        <p className="text-[12px] font-mono text-text-muted/70 leading-relaxed">
           Enable local AI (in the brain) to see content-related notes.
         </p>
       </div>
@@ -72,15 +73,20 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
   const indexing = indexState !== 'idle'
 
   return (
-    <div className="flex flex-col h-full min-h-0 p-3 text-[12px] font-mono">
+    <div className="flex flex-col h-full min-h-0 p-3 text-[13px] font-mono">
+      {/* What this section is */}
+      <p className="mb-2.5 text-[11px] leading-relaxed text-text-muted/70">
+        Notes and sections that the local AI finds most similar in content to the one you pick below — surfacing connections across your notes.
+      </p>
+
       {/* Source selector */}
       <div className="relative flex items-center gap-1.5 mb-2">
-        <span className="text-[10px] uppercase tracking-wider text-text/30 flex-shrink-0">From</span>
+        <span className={`${PANEL_LABEL} flex-shrink-0`}>From</span>
         <button
           onClick={() => setPickerOpen((o) => !o)}
-          className="flex items-center gap-1 min-w-0 px-2 py-1 rounded border border-border bg-surface-1/60 hover:border-text/25 transition-colors"
+          className="flex items-center gap-1 min-w-0 px-2 py-1 rounded-lg border-solid border border-border bg-surface-1/60 hover:border-text/25 transition-colors"
         >
-          <span className="truncate text-[11px] text-text/80 max-w-[180px]">{sourceNote?.title || 'Select a note'}</span>
+          <span className="truncate text-[12px] text-text/80 max-w-[180px]">{sourceNote?.title || 'Select a note'}</span>
           <ChevronDown size={11} className="text-text/40 flex-shrink-0" />
         </button>
         {pickerOpen && (
@@ -93,7 +99,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                   value={pickerFilter}
                   onChange={(e) => setPickerFilter(e.target.value)}
                   placeholder="Search notes…"
-                  className="w-full bg-surface-0 border border-border rounded px-2 py-1 text-[11px] text-text placeholder-text-muted/40 outline-none focus:border-text/30"
+                  className="w-full bg-surface-0 border border-border rounded px-2 py-1 text-[12px] text-text placeholder-text-muted/40 outline-none focus:border-text/30"
                 />
               </div>
               <ul className="max-h-56 overflow-y-auto py-1">
@@ -101,7 +107,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                   <li key={n.id}>
                     <button
                       onClick={() => pickNote(n.id)}
-                      className={`w-full text-left px-2.5 py-1 text-[11px] truncate hover:bg-text/5 transition-colors ${
+                      className={`w-full text-left px-2.5 py-1 text-[12px] truncate hover:bg-text/5 transition-colors ${
                         n.id === sourceNoteId ? 'text-text' : 'text-text/70'
                       }`}
                     >
@@ -109,7 +115,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                     </button>
                   </li>
                 ))}
-                {filteredNotes.length === 0 && <li className="px-2.5 py-2 text-[11px] text-text-muted/60">No notes</li>}
+                {filteredNotes.length === 0 && <li className="px-2.5 py-2 text-[12px] text-text-muted/60">No notes</li>}
               </ul>
             </div>
           </>
@@ -123,8 +129,8 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
             <button
               key={sec.id}
               onClick={() => setSourceSectionId(sec.id)}
-              className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
-                sec.id === sourceSection?.id ? 'border-text/30 text-text bg-surface-2' : 'border-border text-text-muted hover:text-text'
+              className={`px-2 py-0.5 rounded-md text-[11px] border-solid border transition-colors ${
+                sec.id === sourceSection?.id ? 'border-accent/50 bg-accent/15 text-text' : 'border-border text-text-muted hover:text-text hover:border-text/30'
               }`}
             >
               {sec.name}
@@ -147,7 +153,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                     className="w-full text-left px-2 py-1 rounded hover:bg-text/5 transition-colors group flex items-center gap-2"
                   >
                     <span className="truncate text-text/80 group-hover:text-text flex-1 min-w-0">{r.sectionName || 'Untitled section'}</span>
-                    <span className="flex-shrink-0 text-[9px] px-1 py-px rounded bg-text/8 text-text/50 max-w-[120px] truncate">
+                    <span className="flex-shrink-0 text-[10px] px-1 py-px rounded bg-text/8 text-text/50 max-w-[120px] truncate">
                       {sameNote ? '↻ this note' : r.title || 'Untitled'}
                     </span>
                   </button>
@@ -156,12 +162,12 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
             })}
           </ul>
         ) : relatedLoading || indexing ? (
-          <p className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-text-muted/60">
+          <p className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] text-text-muted/60">
             <Loader2 size={11} className="animate-spin" />
             {indexing ? 'Indexing…' : 'Finding related notes…'}
           </p>
         ) : (
-          <p className="px-2 py-1.5 text-[11px] text-text-muted/60">No related notes found.</p>
+          <p className="px-2 py-1.5 text-[12px] text-text-muted/60">No related notes found.</p>
         )}
       </div>
     </div>

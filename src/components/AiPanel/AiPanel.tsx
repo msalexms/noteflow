@@ -1,19 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link2, MessageSquare, Settings, Sparkles } from 'lucide-react'
-import { useAiChatStore } from '../../stores/aiChatStore'
+import { Link2, MessageSquare, PanelLeftClose, Settings, Sparkles } from 'lucide-react'
+import { useAiChatStore, type PanelTab } from '../../stores/aiChatStore'
 import { ChatView } from './ChatView'
 import { RelatedView } from './RelatedView'
 import { LlmConfigView } from './LlmConfigView'
 import { ProfileFlow } from './ProfileFlow'
 
-type Tab = 'chat' | 'related' | 'profile' | 'settings'
+type Tab = PanelTab
 
-export function AiPanel({ onOpenNote }: { onOpenNote: (noteId: string, sectionId: string) => void }) {
+export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: string, sectionId: string) => void; onCollapse?: () => void }) {
   const loadConfig = useAiChatStore((s) => s.loadConfig)
   const loadSessions = useAiChatStore((s) => s.loadSessions)
   const initListeners = useAiChatStore((s) => s.initListeners)
   const llmConfig = useAiChatStore((s) => s.llmConfig)
   const configLoaded = useAiChatStore((s) => s.configLoaded)
+  const panelTab = useAiChatStore((s) => s.panelTab)
 
   const [tab, setTab] = useState<Tab>('chat')
   const [profileDone, setProfileDone] = useState<boolean | null>(null) // null = unknown
@@ -36,6 +37,15 @@ export function AiPanel({ onOpenNote }: { onOpenNote: (noteId: string, sectionId
     else if (!llmConfig?.configured) setTab('settings')
   }, [autoRouted, configLoaded, profileDone, llmConfig?.configured])
 
+  // Explicit routing from the command palette wins over the first-time auto-routing above.
+  useEffect(() => {
+    if (!panelTab) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTab(panelTab)
+    setAutoRouted(true)
+    useAiChatStore.setState({ panelTab: null })
+  }, [panelTab])
+
   const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
     { id: 'chat', icon: <MessageSquare size={13} />, label: 'Chat' },
     { id: 'related', icon: <Link2 size={13} />, label: 'Related' },
@@ -50,8 +60,8 @@ export function AiPanel({ onOpenNote }: { onOpenNote: (noteId: string, sectionId
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono transition-colors ${
-              tab === t.id ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] font-mono transition-colors ${
+              tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text hover:bg-surface-2'
             }`}
           >
             {t.icon}
@@ -61,12 +71,21 @@ export function AiPanel({ onOpenNote }: { onOpenNote: (noteId: string, sectionId
         <button
           onClick={() => setTab('settings')}
           title="AI provider"
-          className={`ml-auto flex items-center justify-center w-7 h-7 rounded transition-colors ${
-            tab === 'settings' ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'
+          className={`ml-auto flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${
+            tab === 'settings' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text hover:bg-surface-2'
           }`}
         >
           <Settings size={13} />
         </button>
+        {onCollapse && (
+          <button
+            onClick={onCollapse}
+            title="Collapse AI panel"
+            className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text transition-colors"
+          >
+            <PanelLeftClose size={13} />
+          </button>
+        )}
       </div>
 
       {/* Body */}

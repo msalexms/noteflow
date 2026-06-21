@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { LlmConfigPublic, LlmPreset, ChatMessage, ChatSource, ChatSession, ChatToolActivity, ChatPendingConfirm } from '../types'
+import { splitSuggestions } from '../lib/chatSuggestions'
+import type { LlmConfigPublic, LlmPreset, ChatMessage, ChatSource, ChatSession, ChatToolActivity, ChatPendingConfirm, ChatAttachment } from '../types'
 
 export interface ChatTurn {
   id: string
@@ -8,7 +9,11 @@ export interface ChatTurn {
   content: string
   error?: boolean
   actions?: ChatToolActivity[]
+  attachments?: ChatAttachment[]
 }
+
+/** Tabs of the AI panel — shared so the command palette can route to one. */
+export type PanelTab = 'chat' | 'related' | 'profile' | 'settings'
 
 interface LlmConfigPatch {
   active?: string
@@ -33,11 +38,15 @@ interface AiChatState {
   // ── Chat ──
   draft: string // composer text, kept here so it survives ChatView unmount/remount
   setDraft: (text: string) => void
+  pendingAttachments: ChatAttachment[] // files picked for the next message (bytes live in main)
+  pickAttachments: () => Promise<void>
+  removeAttachment: (id: string) => void
   messages: ChatTurn[]
   streaming: boolean
   currentRequestId: string | null
   activeSources: ChatSource[]
   pendingConfirm: ChatPendingConfirm | null
+  suggestions: string[] // next-action prompts parsed from the last assistant reply
   sendMessage: (text: string) => void
   cancel: () => void
   confirmAction: (approved: boolean) => void
@@ -49,6 +58,11 @@ interface AiChatState {
   newChat: () => void
   openSession: (id: string) => void
   deleteSession: (id: string) => void
+
+  // ── AI panel routing (driven by the command palette) ──
+  panelTab: PanelTab | null      // requested initial tab — consumed by AiPanel
+  pendingPrompt: string | null   // a question to auto-send once chat is ready — consumed by ChatView
+  openAiPanel: (tab: PanelTab, prompt?: string) => void
 
   initListeners: () => () => void
 }
@@ -92,17 +106,35 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   // ── Chat ──
   draft: '',
   setDraft: (text) => set({ draft: text }),
+  pendingAttachments: [],
+
+  pickAttachments: async () => {
+    const res = await window.noteflow.aiChatPickFiles()
+    if (!res.ok || !res.files) return
+    set((s) => {
+      const seen = new Set(s.pendingAttachments.map((a) => a.id))
+      return { pendingAttachments: [...s.pendingAttachments, ...res.files!.filter((f) => !seen.has(f.id))] }
+    })
+  },
+
+  removeAttachment: (id) => {
+    void window.noteflow.aiChatRemoveFile(id)
+    set((s) => ({ pendingAttachments: s.pendingAttachments.filter((a) => a.id !== id) }))
+  },
+
   messages: [],
   streaming: false,
   currentRequestId: null,
   activeSources: [],
   pendingConfirm: null,
+  suggestions: [],
 
   sendMessage: (text) => {
     const trimmed = text.trim()
-    if (!trimmed || get().streaming) return
+    const atts = get().pendingAttachments
+    if ((!trimmed && atts.length === 0) || get().streaming) return
     const requestId = nanoid()
-    const userTurn: ChatTurn = { id: nanoid(), role: 'user', content: trimmed }
+    const userTurn: ChatTurn = { id: nanoid(), role: 'user', content: trimmed, ...(atts.length ? { attachments: atts } : {}) }
     const assistantTurn: ChatTurn = { id: nanoid(), role: 'assistant', content: '' }
     const history = get().messages
     set({
@@ -110,9 +142,14 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       streaming: true,
       currentRequestId: requestId,
       activeSources: [],
+      suggestions: [],
       draft: '',
+      pendingAttachments: [],
     })
-    const payload: ChatMessage[] = [...history, userTurn].map((m) => ({ role: m.role, content: m.content }))
+    // Re-send every turn's attachment ids so follow-up questions keep their files in context.
+    const payload: ChatMessage[] = [...history, userTurn].map((m) => ({
+      role: m.role, content: m.content, ...(m.attachments?.length ? { attachmentIds: m.attachments.map((a) => a.id) } : {}),
+    }))
     window.noteflow.aiChat(requestId, payload).catch((err) => console.error('aiChat failed:', err))
   },
 
@@ -144,20 +181,36 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
   newChat: () => {
     if (get().streaming) get().cancel()
-    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null })
+    for (const a of get().pendingAttachments) void window.noteflow.aiChatRemoveFile(a.id)
+    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null, pendingAttachments: [], suggestions: [] })
   },
 
   openSession: (id) => {
     if (get().streaming) get().cancel()
     const s = get().sessions.find((x) => x.id === id)
     if (!s) return
-    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [] })
+    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [], suggestions: [] })
   },
 
   deleteSession: (id) => {
     const sessions = get().sessions.filter((s) => s.id !== id)
     set({ sessions, ...(get().activeSessionId === id ? { messages: [], activeSessionId: null, activeSources: [] } : {}) })
     void window.noteflow.aiChatsSave(sessions)
+  },
+
+  // ── AI panel routing ──
+  panelTab: null,
+  pendingPrompt: null,
+
+  openAiPanel: (tab, prompt) => {
+    const trimmed = prompt?.trim()
+    if (trimmed) {
+      // Land the question in a clean conversation so it isn't tacked onto an old thread.
+      get().newChat()
+      set({ panelTab: 'chat', pendingPrompt: trimmed })
+    } else {
+      set({ panelTab: tab })
+    }
   },
 
   initListeners: () => {
@@ -226,7 +279,19 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     })
     const offDone = window.noteflow.onAiChatDone((p) => {
       if (p.requestId !== get().currentRequestId) return
-      set({ streaming: false, currentRequestId: null, pendingConfirm: null })
+      // Pull the trailing suggestion block out of the final assistant turn: strip it from
+      // the stored content (so saved history stays clean) and surface it as chips.
+      let suggestions: string[] = []
+      set((s) => {
+        const msgs = s.messages.slice()
+        const last = msgs[msgs.length - 1]
+        if (last && last.role === 'assistant' && !last.error) {
+          const split = splitSuggestions(last.content)
+          suggestions = split.suggestions
+          if (split.visible !== last.content) msgs[msgs.length - 1] = { ...last, content: split.visible }
+        }
+        return { messages: msgs, streaming: false, currentRequestId: null, pendingConfirm: null, suggestions }
+      })
       persist()
     })
     const offError = window.noteflow.onAiChatError((p) => {
@@ -235,7 +300,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         const msgs = s.messages.slice()
         const last = msgs[msgs.length - 1]
         if (last && last.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content || `⚠ ${p.error}`, error: true }
-        return { messages: msgs, streaming: false, currentRequestId: null, pendingConfirm: null }
+        return { messages: msgs, streaming: false, currentRequestId: null, pendingConfirm: null, suggestions: [] }
       })
       persist()
     })

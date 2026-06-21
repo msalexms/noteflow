@@ -80,6 +80,7 @@ export function parseNoteFolder(
         name: String(s.name ?? 'Section'),
         content: normalizeNewlines(sectionFiles[file] ?? ''),
         isRawMode: Boolean(s.isRawMode ?? false),
+        ...(s.aiHidden ? { aiHidden: true } : {}),
       }
     })
   } else {
@@ -146,6 +147,7 @@ export function serializeNoteFolder(
       name: s.name,
       file: sectionFilename(s.id),
       ...(s.isRawMode && { isRawMode: true }),
+      ...(s.aiHidden && { aiHidden: true }),
     })),
   }
 
@@ -243,6 +245,7 @@ export function parseLegacyNote(raw: string, filePath: string): Note {
       name:    String(s.name    ?? 'Section'),
       content: String(s.content ?? ''),
       isRawMode: Boolean(s.isRawMode ?? false),
+      ...(s.aiHidden ? { aiHidden: true } : {}),
     }))
   }
   // Legacy format: old fixed section_note / section_task / section_question keys
