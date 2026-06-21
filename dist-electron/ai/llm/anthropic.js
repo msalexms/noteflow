@@ -11,8 +11,26 @@ const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const FALLBACK_MODELS = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 function toAnthropicMessages(messages) {
     return messages.map((m) => {
-        if (m.role === 'user')
-            return { role: 'user', content: m.content };
+        if (m.role === 'user') {
+            if (!m.attachments?.length)
+                return { role: 'user', content: m.content };
+            // Mixed content: leading text + native document/image blocks (no local extraction).
+            const blocks = [];
+            if (m.content)
+                blocks.push({ type: 'text', text: m.content });
+            for (const a of m.attachments) {
+                if (a.kind === 'pdf') {
+                    blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.data } });
+                }
+                else {
+                    blocks.push({
+                        type: 'image',
+                        source: { type: 'base64', media_type: a.mediaType, data: a.data },
+                    });
+                }
+            }
+            return { role: 'user', content: blocks };
+        }
         if (m.role === 'assistant') {
             const blocks = [];
             if (m.content)
@@ -39,6 +57,15 @@ class AnthropicProvider {
         const messages = opts.messages
             .filter((m) => m.role !== 'system')
             .map((m) => ({ role: m.role, content: m.content }));
+        // Attach to the last user message (profile generation sends a single user turn).
+        if (opts.attachments?.length) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].role === 'user') {
+                    messages[i].attachments = opts.attachments;
+                    break;
+                }
+            }
+        }
         await this.streamTurn({ system: opts.system, messages, signal: opts.signal, maxTokens: opts.maxTokens }, onDelta);
     }
     async streamTurn(opts, onDelta) {

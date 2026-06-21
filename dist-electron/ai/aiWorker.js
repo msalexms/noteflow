@@ -122,7 +122,7 @@ function readNoteFolder(dirPath) {
         noteId: disk.id || null,
         title: disk.title,
         encrypted: !!disk.encryption,
-        sections: disk.sections.map((s) => ({ id: s.id, name: s.name, content: s.content })),
+        sections: disk.sections.map((s) => ({ id: s.id, name: s.name, content: s.content, aiHidden: s.aiHidden })),
     };
 }
 // ── Embedding provider ──────────────────────────────────────────────────────
@@ -676,6 +676,7 @@ async function handleIndexNote(dirPath) {
         return { ok: true, skipped: true };
     }
     const desired = parsed.sections
+        .filter((s) => !s.aiHidden) // sections hidden from the AI never enter the index
         .map((s) => ({ sectionId: s.id, sectionName: s.name, text: chunkTextFor(s) }))
         .filter((d) => d.text.length > 0)
         .map((d) => ({ ...d, hash: fnv1a(d.text) }));
@@ -716,6 +717,8 @@ async function handleReindexAll(notesDir) {
         if (!parsed || !parsed.noteId || parsed.encrypted)
             continue;
         for (const s of parsed.sections) {
+            if (s.aiHidden)
+                continue; // sections hidden from the AI never enter the index
             const text = chunkTextFor(s);
             if (!text)
                 continue;

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_LLM_CONFIG = exports.decryptSecret = exports.encryptSecret = exports.PRESETS = void 0;
 exports.resolveConfig = resolveConfig;
+exports.providerCapabilities = providerCapabilities;
 exports.toPublic = toPublic;
 exports.getProvider = getProvider;
 const presets_1 = require("./presets");
@@ -35,6 +36,13 @@ function resolveConfig(cfg) {
         apiKey: ps.encryptedApiKey ? (0, secret_1.decryptSecret)(ps.encryptedApiKey) : '',
     };
 }
+/** Native attachment support per preset (the app never extracts text itself). */
+function providerCapabilities(preset) {
+    // PDF is only reliable on Anthropic (native document blocks). Images (vision) are model-dependent,
+    // so each preset declares a default via `images`: text-only providers (DeepSeek, MiniMax, Moonshot's
+    // suggested models) set it to false; vision-capable/flexible ones default to true.
+    return { images: preset.images ?? true, pdf: preset.impl === 'anthropic' };
+}
 /** Renderer-safe projection of the ACTIVE preset: no key, plus a `configured` flag the UI gates on. */
 function toPublic(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);
@@ -47,6 +55,7 @@ function toPublic(cfg) {
         baseUrl: effectiveBaseUrl(cfg),
         hasKey,
         configured: (!preset.needsKey || hasKey) && !!model,
+        capabilities: providerCapabilities(preset),
     };
 }
 function getProvider(resolved) {

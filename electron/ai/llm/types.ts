@@ -20,6 +20,12 @@ export interface LlmConfigStored {
   byPreset: Record<string, LlmPresetState>
 }
 
+/** What kinds of attachments the active provider can ingest natively (no local processing). */
+export interface ProviderCapabilities {
+  images: boolean
+  pdf: boolean
+}
+
 /** Renderer-safe view of the ACTIVE preset — never carries the key. */
 export interface LlmConfigPublic {
   active: string
@@ -27,6 +33,7 @@ export interface LlmConfigPublic {
   baseUrl: string
   hasKey: boolean
   configured: boolean
+  capabilities: ProviderCapabilities
 }
 
 /** Resolved config handed to a provider (key in clear; in-memory only). */
@@ -37,11 +44,24 @@ export interface ResolvedLlmConfig {
   apiKey: string
 }
 
+/**
+ * A document/image passed to the model NATIVELY (the app never extracts text itself).
+ * `data` is base64 with no `data:` prefix. Text files (.txt/.md) are NOT attachments —
+ * they get inlined into the prompt text upstream.
+ */
+export interface Attachment {
+  kind: 'pdf' | 'image'
+  mediaType: string
+  data: string
+}
+
 export interface ChatOptions {
   system?: string
   messages: ChatMessage[]
   signal?: AbortSignal
   maxTokens?: number
+  /** Attached to the (single) user message when present. */
+  attachments?: Attachment[]
 }
 
 // ── Tool calling (agentic chat) ─────────────────────────────────────────────
@@ -71,7 +91,7 @@ export interface ToolResult {
 
 /** Internal multi-turn message model that carries tool turns across providers. */
 export type AgentMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; attachments?: Attachment[] }
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | { role: 'tool'; results: ToolResult[] }
 

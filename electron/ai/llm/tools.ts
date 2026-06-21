@@ -45,14 +45,15 @@ interface FolderRec { id: string; name: string; groupId: string; order: number }
 /** Everything the executor needs from main, injected so this module stays pure/testable. */
 export interface ToolContext {
   notesDir: string
-  /** Apply a multi-file note write (handles broadcast + GitHub push + semantic index). */
-  writeNote(payload: { dir: string; files: Record<string, string>; deleteFiles?: string[] }): void
+  /** Apply a multi-file note write (handles broadcast + GitHub push + semantic index).
+   *  May return a promise that resolves once the durable remote push has landed. */
+  writeNote(payload: { dir: string; files: Record<string, string>; deleteFiles?: string[] }): void | Promise<void>
   /** Delete an entire note directory. */
   deleteNoteDir(dir: string): void
   readGroups(): GroupRec[]
-  writeGroups(groups: GroupRec[]): void
+  writeGroups(groups: GroupRec[]): void | Promise<void>
   readFolders(): FolderRec[]
-  writeFolders(folders: FolderRec[]): void
+  writeFolders(folders: FolderRec[]): void | Promise<void>
   /** Semantic search; present only when the local index is enabled. */
   search?: (query: string, k: number) => Promise<Array<{ noteId: string; sectionId: string; snippet: string }>>
 }
@@ -200,11 +201,11 @@ function loadNote(ctx: ToolContext, noteId: string): { dir: string; note: DiskNo
 }
 
 /** Re-serialize a (mutated) note and write it, deleting any section files that no longer exist. */
-function writeNoteRecord(ctx: ToolContext, dir: string, before: DiskNote, after: DiskNote): void {
+async function writeNoteRecord(ctx: ToolContext, dir: string, before: DiskNote, after: DiskNote): Promise<void> {
   const beforeFiles = new Set(before.sections.map((s) => `${s.id}.md`))
   const { files, sectionFiles } = noteFormat.serializeNoteFolder(after)
   for (const f of sectionFiles) beforeFiles.delete(f)
-  ctx.writeNote({ dir, files, deleteFiles: [...beforeFiles] })
+  await ctx.writeNote({ dir, files, deleteFiles: [...beforeFiles] })
 }
 
 function ok(summary: string, content?: string): ToolRunResult {
@@ -212,6 +213,68 @@ function ok(summary: string, content?: string): ToolRunResult {
 }
 function fail(message: string): ToolRunResult {
   return { summary: message, content: message, isError: true }
+}
+
+/** Compact id↔title listing of the current notes, embedded in "not found" errors so the model can
+ *  self-correct in the same step instead of reusing a stale/mistyped id. */
+function listNotesBrief(ctx: ToolContext, cap = 40): string {
+  const rows: string[] = []
+  for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
+    const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`)
+    if (!note) continue
+    rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]`)
+    if (rows.length >= cap) break
+  }
+  return rows.join('\n')
+}
+
+/** Self-correcting error for a missing note id. Note ids are stable on disk; a miss means the id is
+ *  stale or garbled, so we hand back the live id↔title list rather than a dead end. */
+function noteNotFound(ctx: ToolContext, id: string): ToolRunResult {
+  const listing = listNotesBrief(ctx)
+  return fail(
+    `No note with id "${id}". Note ids are stable and never change, so this id is stale or mistyped — ` +
+    `do not retry it verbatim. ` +
+    (listing ? `Use the correct id from the current notes below:\n${listing}` : 'There are currently no notes.'),
+  )
+}
+
+/** Self-correcting error for a missing section id — lists the note's real section ids. */
+function sectionNotFound(note: DiskNote, sid: string): ToolRunResult {
+  const secs = note.sections.map((s) => `${s.name} [section_id=${s.id}]`).join(', ')
+  return fail(`No section "${sid}" in note "${note.title || 'Untitled'}". Its sections are: ${secs || '(none)'}.`)
+}
+
+/** Human-readable description of what a destructive tool call will affect, resolved from the live
+ *  store — for the in-chat confirmation prompt, so the user sees the actual target (a title) rather
+ *  than an opaque id and can catch a wrong-target deletion before approving it. */
+export function describeTarget(name: string, rawInput: unknown, ctx: ToolContext): string {
+  const input = (rawInput && typeof rawInput === 'object' ? rawInput : {}) as Args
+  switch (name) {
+    case 'delete_note': {
+      const found = loadNote(ctx, asStr(input.note_id))
+      return found
+        ? `note "${found.note.title || 'Untitled'}"`
+        : `an unknown note (id ${asStr(input.note_id)} not found — it may already be gone)`
+    }
+    case 'delete_section': {
+      const found = loadNote(ctx, asStr(input.note_id))
+      const sec = found?.note.sections.find((s) => s.id === asStr(input.section_id))
+      return found && sec
+        ? `section "${sec.name}" in note "${found.note.title || 'Untitled'}"`
+        : 'a section that no longer exists'
+    }
+    case 'delete_group': {
+      const g = ctx.readGroups().find((x) => x.id === asStr(input.group_id))
+      return g ? `group "${g.name}" (its notes are kept, just ungrouped)` : 'a group that no longer exists'
+    }
+    case 'delete_folder': {
+      const f = ctx.readFolders().find((x) => x.id === asStr(input.folder_id))
+      return f ? `folder "${f.name}" (its notes keep their group)` : 'a folder that no longer exists'
+    }
+    default:
+      return name
+  }
 }
 
 export async function executeTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolRunResult> {
@@ -229,7 +292,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
           if (note.archived && !includeArchived) continue
           if (groupFilter && note.group !== groupFilter) continue
           if (q && !note.title.toLowerCase().includes(q) && !note.tags.some((t) => t.includes(q))) continue
-          const secs = note.encryption ? '(encrypted)' : note.sections.map((s) => `${s.name}#${s.id}`).join(', ')
+          const secs = note.encryption ? '(encrypted)' : note.sections.filter((s) => !s.aiHidden).map((s) => `${s.name}#${s.id}`).join(', ')
           const place = [note.group ? `group=${note.group}` : '', note.folder ? `folder=${note.folder}` : ''].filter(Boolean).join(' ')
           rows.push(`- ${note.title || 'Untitled'} [id=${note.id}]${place ? ` ${place}` : ''} :: ${secs}`)
           if (rows.length >= 60) break
@@ -239,10 +302,11 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
 
       case 'get_note': {
         const found = loadNote(ctx, asStr(input.note_id))
-        if (!found) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!found) return noteNotFound(ctx, asStr(input.note_id))
         const { note } = found
         if (note.encryption) return ok(`Read "${note.title}"`, `Note "${note.title}" is encrypted; its content is not readable.`)
         const body = note.sections
+          .filter((s) => !s.aiHidden) // sections hidden from the AI are never exposed to the model
           .map((s) => `## ${s.name} [section_id=${s.id}]\n${stripBase64(s.content).slice(0, 6000)}`)
           .join('\n\n')
         return ok(`Read "${note.title}"`, `# ${note.title} [id=${note.id}]\n${body}`)
@@ -290,13 +354,13 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         }
         const dir = noteDirname(id, title)
         const { files } = noteFormat.serializeNoteFolder(note)
-        ctx.writeNote({ dir, files })
+        await ctx.writeNote({ dir, files })
         return ok(`Created note "${title}"`, `Created note "${title}" with id ${id} and ${sections.length} section(s).`)
       }
 
       case 'update_note': {
         const found = loadNote(ctx, asStr(input.note_id))
-        if (!found) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!found) return noteNotFound(ctx, asStr(input.note_id))
         const { dir, note } = found
         const after: DiskNote = { ...note, sections: [...note.sections] }
         if (typeof input.title === 'string' && input.title.trim()) after.title = input.title.trim()
@@ -305,37 +369,37 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         if (typeof input.group_id === 'string') after.group = input.group_id.trim() || undefined
         if (typeof input.folder_id === 'string') after.folder = input.folder_id.trim() || undefined
         if (!after.group) after.folder = undefined // a folder requires a group
-        writeNoteRecord(ctx, dir, note, after)
+        await writeNoteRecord(ctx, dir, note, after)
         return ok(`Updated "${after.title}"`)
       }
 
       case 'add_section': {
         const found = loadNote(ctx, asStr(input.note_id))
-        if (!found) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!found) return noteNotFound(ctx, asStr(input.note_id))
         if (found.note.encryption) return fail('Cannot edit an encrypted note.')
         const sid = makeId(6)
         const after: DiskNote = {
           ...found.note,
           sections: [...found.note.sections, { id: sid, name: asStr(input.name).trim() || 'Section', content: asStr(input.content), isRawMode: asBool(input.raw) ?? false }],
         }
-        writeNoteRecord(ctx, found.dir, found.note, after)
+        await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(`Added section "${asStr(input.name)}"`, `Added section "${asStr(input.name)}" (id ${sid}).`)
       }
 
       case 'update_section':
       case 'rename_section': {
         const found = loadNote(ctx, asStr(input.note_id))
-        if (!found) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!found) return noteNotFound(ctx, asStr(input.note_id))
         if (found.note.encryption) return fail('Cannot edit an encrypted note.')
         const sid = asStr(input.section_id)
-        if (!found.note.sections.some((s) => s.id === sid)) return fail(`No section ${sid} in that note.`)
+        if (!found.note.sections.some((s) => s.id === sid)) return sectionNotFound(found.note, sid)
         const after: DiskNote = {
           ...found.note,
           sections: found.note.sections.map((s) => s.id !== sid ? s
             : name === 'rename_section' ? { ...s, name: asStr(input.name).trim() || s.name }
             : { ...s, content: asStr(input.content) }),
         }
-        writeNoteRecord(ctx, found.dir, found.note, after)
+        await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(name === 'rename_section' ? `Renamed section` : `Updated section`)
       }
 
@@ -343,7 +407,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const groups = ctx.readGroups()
         const id = makeId(8)
         groups.push({ id, name: asStr(input.name).trim() || 'Group', color: asStr(input.color).trim() || DEFAULT_GROUP_COLOR, order: groups.length })
-        ctx.writeGroups(groups)
+        await ctx.writeGroups(groups)
         return ok(`Created group "${asStr(input.name)}"`, `Created group "${asStr(input.name)}" with id ${id}.`)
       }
 
@@ -353,7 +417,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const folders = ctx.readFolders()
         const id = makeId(8)
         folders.push({ id, name: asStr(input.name).trim() || 'Folder', groupId, order: folders.filter((f) => f.groupId === groupId).length })
-        ctx.writeFolders(folders)
+        await ctx.writeFolders(folders)
         return ok(`Created folder "${asStr(input.name)}"`, `Created folder "${asStr(input.name)}" with id ${id}.`)
       }
 
@@ -361,7 +425,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const id = asStr(input.group_id)
         const groups = ctx.readGroups()
         if (!groups.some((g) => g.id === id)) return fail(`No group with id ${id}`)
-        ctx.writeGroups(groups.map((g) => g.id === id ? { ...g, name: asStr(input.name).trim() || g.name } : g))
+        await ctx.writeGroups(groups.map((g) => g.id === id ? { ...g, name: asStr(input.name).trim() || g.name } : g))
         return ok(`Renamed group`)
       }
 
@@ -369,25 +433,27 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         const id = asStr(input.folder_id)
         const folders = ctx.readFolders()
         if (!folders.some((f) => f.id === id)) return fail(`No folder with id ${id}`)
-        ctx.writeFolders(folders.map((f) => f.id === id ? { ...f, name: asStr(input.name).trim() || f.name } : f))
+        await ctx.writeFolders(folders.map((f) => f.id === id ? { ...f, name: asStr(input.name).trim() || f.name } : f))
         return ok(`Renamed folder`)
       }
 
       case 'delete_note': {
         const dir = findNoteDir(ctx, asStr(input.note_id))
-        if (!dir) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!dir) return noteNotFound(ctx, asStr(input.note_id))
+        // Resolve the title before deleting so the summary names what was removed (catches wrong-target deletes).
+        const title = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`)?.title || asStr(input.note_id)
         ctx.deleteNoteDir(dir)
-        return ok(`Deleted note`)
+        return ok(`Deleted note "${title}"`)
       }
 
       case 'delete_section': {
         const found = loadNote(ctx, asStr(input.note_id))
-        if (!found) return fail(`No note with id ${asStr(input.note_id)}`)
+        if (!found) return noteNotFound(ctx, asStr(input.note_id))
         if (found.note.encryption) return fail('Cannot edit an encrypted note.')
         const sid = asStr(input.section_id)
-        if (!found.note.sections.some((s) => s.id === sid)) return fail(`No section ${sid} in that note.`)
+        if (!found.note.sections.some((s) => s.id === sid)) return sectionNotFound(found.note, sid)
         const after: DiskNote = { ...found.note, sections: found.note.sections.filter((s) => s.id !== sid) }
-        writeNoteRecord(ctx, found.dir, found.note, after)
+        await writeNoteRecord(ctx, found.dir, found.note, after)
         return ok(`Deleted section`)
       }
 
@@ -399,10 +465,10 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
           const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`)
           if (!note || note.group !== id) continue
-          writeNoteRecord(ctx, dir, note, { ...note, group: undefined, folder: undefined })
+          await writeNoteRecord(ctx, dir, note, { ...note, group: undefined, folder: undefined })
         }
-        ctx.writeGroups(groups.filter((g) => g.id !== id))
-        ctx.writeFolders(ctx.readFolders().filter((f) => f.groupId !== id))
+        await ctx.writeGroups(groups.filter((g) => g.id !== id))
+        await ctx.writeFolders(ctx.readFolders().filter((f) => f.groupId !== id))
         return ok(`Deleted group`)
       }
 
@@ -413,9 +479,9 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
         for (const dir of noteFormat.listNoteDirs(ctx.notesDir)) {
           const note = noteFormat.parseNoteDir(`${ctx.notesDir}/${dir}`)
           if (!note || note.folder !== id) continue
-          writeNoteRecord(ctx, dir, note, { ...note, folder: undefined })
+          await writeNoteRecord(ctx, dir, note, { ...note, folder: undefined })
         }
-        ctx.writeFolders(folders.filter((f) => f.id !== id))
+        await ctx.writeFolders(folders.filter((f) => f.id !== id))
         return ok(`Deleted folder`)
       }
 

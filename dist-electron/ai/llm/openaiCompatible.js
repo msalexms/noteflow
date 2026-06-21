@@ -10,7 +10,20 @@ function toOpenAiMessages(system, messages) {
         out.push({ role: 'system', content: system });
     for (const m of messages) {
         if (m.role === 'user') {
-            out.push({ role: 'user', content: m.content });
+            // Only images are sent natively here (PDFs aren't offered for OpenAI-compatible providers).
+            const images = (m.attachments ?? []).filter((a) => a.kind === 'image');
+            if (images.length) {
+                const parts = [];
+                if (m.content)
+                    parts.push({ type: 'text', text: m.content });
+                for (const img of images) {
+                    parts.push({ type: 'image_url', image_url: { url: `data:${img.mediaType};base64,${img.data}` } });
+                }
+                out.push({ role: 'user', content: parts });
+            }
+            else {
+                out.push({ role: 'user', content: m.content });
+            }
         }
         else if (m.role === 'assistant') {
             const msg = { role: 'assistant', content: m.content || '' };
@@ -57,6 +70,14 @@ class OpenAiCompatibleProvider {
         const messages = opts.messages
             .filter((m) => m.role !== 'system')
             .map((m) => ({ role: m.role, content: m.content }));
+        if (opts.attachments?.length) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].role === 'user') {
+                    messages[i].attachments = opts.attachments;
+                    break;
+                }
+            }
+        }
         await this.streamTurn({ system: opts.system, messages, signal: opts.signal, maxTokens: opts.maxTokens }, onDelta);
     }
     async streamTurn(opts, onDelta) {

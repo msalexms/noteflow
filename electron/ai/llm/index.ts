@@ -1,15 +1,15 @@
 // LLM provider factory + config resolution. main.ts owns persistence (settings.aiLlm);
 // this module turns a stored config into a runnable provider and a renderer-safe public view.
 // Each preset keeps its own baseUrl/model/key, so switching providers never mixes credentials.
-import type { LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider } from './types'
-import { presetOf } from './presets'
+import type { LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ProviderCapabilities } from './types'
+import { presetOf, type LlmPreset } from './presets'
 import { decryptSecret } from './secret'
 import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
 
 export type {
   LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ChatMessage,
-  ToolSchema, ToolCall, ToolResult, AgentMessage, AgentTurnResult,
+  ToolSchema, ToolCall, ToolResult, AgentMessage, AgentTurnResult, Attachment, ProviderCapabilities,
 } from './types'
 export { PRESETS } from './presets'
 export type { LlmPreset } from './presets'
@@ -40,6 +40,14 @@ export function resolveConfig(cfg: LlmConfigStored): ResolvedLlmConfig {
   }
 }
 
+/** Native attachment support per preset (the app never extracts text itself). */
+export function providerCapabilities(preset: LlmPreset): ProviderCapabilities {
+  // PDF is only reliable on Anthropic (native document blocks). Images (vision) are model-dependent,
+  // so each preset declares a default via `images`: text-only providers (DeepSeek, MiniMax, Moonshot's
+  // suggested models) set it to false; vision-capable/flexible ones default to true.
+  return { images: preset.images ?? true, pdf: preset.impl === 'anthropic' }
+}
+
 /** Renderer-safe projection of the ACTIVE preset: no key, plus a `configured` flag the UI gates on. */
 export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
   const preset = presetOf(cfg.active)
@@ -52,6 +60,7 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
     baseUrl: effectiveBaseUrl(cfg),
     hasKey,
     configured: (!preset.needsKey || hasKey) && !!model,
+    capabilities: providerCapabilities(preset),
   }
 }
 

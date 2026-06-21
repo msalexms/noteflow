@@ -17,6 +17,8 @@ function check(name, cond) {
   else { fail++; console.error(`  ✗ ${name}`) }
 }
 
+let lastChatBody = null
+
 // ── Mock OpenAI-compatible server ──
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.endsWith('/models')) {
@@ -30,6 +32,7 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       let parsed = {}
       try { parsed = JSON.parse(body) } catch { /* ignore */ }
+      lastChatBody = parsed
       const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0
       const alreadyRanTool = (parsed.messages || []).some((m) => m.role === 'tool')
 
@@ -117,6 +120,16 @@ async function main() {
   }, (d) => { finalText += d })
   check('follow-up turn streams final text', finalText === 'Created.')
   check('follow-up turn has no tool calls', r2.toolCalls.length === 0)
+
+  // 7) image attachment → user message content becomes a parts array with an image_url
+  await provider.chat({
+    messages: [{ role: 'user', content: 'describe this' }],
+    attachments: [{ kind: 'image', mediaType: 'image/png', data: 'AAAA' }],
+  }, () => {})
+  const userMsg = (lastChatBody.messages || []).find((m) => m.role === 'user')
+  check('attachment makes user content an array', Array.isArray(userMsg?.content))
+  check('attachment carries a text part', Array.isArray(userMsg?.content) && userMsg.content.some((p) => p.type === 'text' && p.text === 'describe this'))
+  check('attachment carries a base64 image_url part', Array.isArray(userMsg?.content) && userMsg.content.some((p) => p.type === 'image_url' && p.image_url.url === 'data:image/png;base64,AAAA'))
 
   server.close()
   console.log(`\n${pass} passed, ${fail} failed`)

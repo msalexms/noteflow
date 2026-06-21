@@ -9,9 +9,14 @@ function trimSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+// User content may be a plain string or, when images are attached, an array of multimodal parts.
+type OpenAiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 interface OpenAiMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | OpenAiContentPart[]
   tool_call_id?: string
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
 }
@@ -21,7 +26,18 @@ function toOpenAiMessages(system: string | undefined, messages: AgentMessage[]):
   if (system) out.push({ role: 'system', content: system })
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ role: 'user', content: m.content })
+      // Only images are sent natively here (PDFs aren't offered for OpenAI-compatible providers).
+      const images = (m.attachments ?? []).filter((a) => a.kind === 'image')
+      if (images.length) {
+        const parts: OpenAiContentPart[] = []
+        if (m.content) parts.push({ type: 'text', text: m.content })
+        for (const img of images) {
+          parts.push({ type: 'image_url', image_url: { url: `data:${img.mediaType};base64,${img.data}` } })
+        }
+        out.push({ role: 'user', content: parts })
+      } else {
+        out.push({ role: 'user', content: m.content })
+      }
     } else if (m.role === 'assistant') {
       const msg: OpenAiMessage = { role: 'assistant', content: m.content || '' }
       if (m.toolCalls?.length) {
@@ -65,6 +81,11 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     const messages = opts.messages
       .filter((m) => m.role !== 'system')
       .map((m): AgentMessage => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    if (opts.attachments?.length) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') { (messages[i] as { attachments?: typeof opts.attachments }).attachments = opts.attachments; break }
+      }
+    }
     await this.streamTurn({ system: opts.system, messages, signal: opts.signal, maxTokens: opts.maxTokens }, onDelta)
   }
 
