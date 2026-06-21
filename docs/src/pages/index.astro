@@ -1,0 +1,962 @@
+---
+import Base from '../layouts/Base.astro';
+import { asset } from '../lib/url';
+
+const RELEASES = 'https://github.com/yagoid/noteflow/releases';
+// Showcase clip: an in-app screen recording, one per theme. The poster (static PNG) shows
+// while the video loads and is the fallback if autoplay is blocked.
+const VID_DARK = asset('/video/demo-dark.mp4');
+const VID_DARK_WEBM = asset('/video/demo-dark.webm');
+const VID_LIGHT = asset('/video/demo-light.mp4');
+const VID_LIGHT_WEBM = asset('/video/demo-light.webm');
+const SHOT_DARK = asset('/screenshots/app-main-midnightblue.png');
+const SHOT_LIGHT = asset('/screenshots/app-main-articday.png');
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'NoteFlow',
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'Windows, Linux',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  url: 'https://yagoid.github.io/noteflow/',
+  downloadUrl: 'https://github.com/yagoid/noteflow/releases',
+  description:
+    'A local-first second brain for developers: markdown notes, a 3D neural graph, agentic AI chat, a headless CLI, and private GitHub sync.',
+};
+
+// Reusable inline style fragments (kept verbatim from the design for a faithful port).
+const label =
+  "font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-faint);";
+const cardP = 'margin:0;font-size:17px;line-height:1.5;color:var(--ink-dim);';
+
+// ── Notes section: the feature set drawn as a synaptic constellation ──
+// `tok` is a palette token (rgb triplet); `x`/`y` are stage percentages. The hub
+// (capture) sits in the centre; the rest ring around it. Links are wired in the
+// page script. Keeping the copy here means it ships in the static HTML for SEO.
+const synFeatures = [
+  { id: 'capture', tok: 'accent', glyph: '⌘', x: 50, y: 51, hub: true, name: 'Capture',
+    title: 'Always a keystroke away',
+    desc: 'Summon NoteFlow from the tray — anywhere, even when the window is hidden.',
+    chip: 'Ctrl+Shift+Space' },
+  { id: 'markdown', tok: 'accent-2', glyph: '▤', x: 19, y: 21, hub: false, name: 'Markdown',
+    title: 'Plain Markdown, on your disk',
+    desc: 'Every note is a portable .md file in a folder you choose. No lock-in, ever.',
+    chip: '~/noteflow-notes' },
+  { id: 'sections', tok: 'purple', glyph: '⊟', x: 81, y: 21, hub: false, name: 'Sections',
+    title: 'Sections, like tabs',
+    desc: 'Split one note into Note · Tasks · Questions. Each becomes a node in the brain.',
+    chip: 'Ctrl+T' },
+  { id: 'groups', tok: 'orange', glyph: '▦', x: 87, y: 70, hub: false, name: 'Groups',
+    title: 'Groups, folders, favorites',
+    desc: 'Color-coded groups with nested folders. Drag to reorder, star to pin.',
+    chip: 'drag & drop' },
+  { id: 'encrypted', tok: 'red', glyph: '⏱', x: 50, y: 90, hub: false, name: 'Security',
+    title: 'Temporary & encrypted',
+    desc: 'Notes that self-destruct in 24h, or lock any note with AES-256.',
+    chip: 'Ctrl+Shift+N' },
+  { id: 'cli', tok: 'cyan', glyph: '❯_', x: 13, y: 70, hub: false, name: 'CLI',
+    title: 'Command palette + CLI',
+    desc: 'Jump anywhere in a keystroke — or drive it headless from a terminal.',
+    chip: 'Ctrl+P' },
+];
+const synHub = synFeatures.find((f) => f.hub)!;
+---
+
+<Base jsonLd={jsonLd}>
+  <div data-root style="position:relative;width:100%;background:var(--bg);">
+    <nf-netbg style="position:fixed;inset:0;z-index:0;pointer-events:none;"></nf-netbg>
+
+    <!-- Vertical neuron rail -->
+    <nav
+      class="nf-rail"
+      data-labels
+      style="position:fixed;top:0;left:0;bottom:0;z-index:60;width:80px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:26px 0;background:var(--nav-bg, transparent);border-right:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"
+    >
+      <span
+        style="position:absolute;left:50%;top:96px;bottom:96px;width:1px;transform:translateX(-.5px);background:linear-gradient(180deg,transparent,var(--line-2) 14%,var(--line-2) 86%,transparent);"
+      ></span>
+
+      <a href="#top" data-nav="home" class="nf-neuron" style="--c:var(--ink-strong);display:flex;align-items:center;justify-content:center;width:100%;height:52px;color:var(--c);">
+        <svg class="nf-soma" width="30" height="30" viewBox="-15 -15 30 30" fill="none" stroke="currentColor" stroke-linecap="round">
+          <circle cx="0" cy="0" r="8" stroke-width="1.5" opacity=".5"></circle>
+          <circle class="nf-fill" cx="0" cy="0" r="3.4" fill="currentColor" stroke="none" opacity=".78"></circle>
+        </svg>
+        <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);"><b style="font-weight:600;letter-spacing:.04em;">NoteFlow</b> · home</span>
+      </a>
+
+      <div style="display:flex;flex-direction:column;align-items:center;gap:30px;">
+        <a href="#brain" data-nav="brain" class="nf-neuron" style="--c:rgb(var(--purple));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
+          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
+            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
+            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".72"></circle>
+          </svg>
+          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">The Brain</span>
+        </a>
+        <a href="#notes" data-nav="notes" class="nf-neuron" style="--c:rgb(var(--accent));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
+          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
+            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
+            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".72"></circle>
+          </svg>
+          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">Notes</span>
+        </a>
+        <a href="#profile" data-nav="profile" class="nf-neuron" style="--c:rgb(var(--orange));display:flex;align-items:center;justify-content:center;width:100%;height:34px;color:var(--c);">
+          <svg class="nf-soma" width="26" height="26" viewBox="-13 -13 26 26" fill="none" stroke="currentColor" stroke-linecap="round">
+            <circle cx="0" cy="0" r="7" stroke-width="1.4" opacity=".5"></circle>
+            <circle class="nf-fill" cx="0" cy="0" r="3" fill="currentColor" stroke="none" opacity=".72"></circle>
+          </svg>
+          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">Profile</span>
+        </a>
+      </div>
+
+      <div style="display:flex;flex-direction:column;align-items:center;gap:22px;">
+        <a href="#get" data-nav="download" class="nf-neuron" style="--c:rgb(var(--accent-2));display:flex;align-items:center;justify-content:center;width:100%;height:40px;color:var(--c);">
+          <svg class="nf-soma" width="30" height="30" viewBox="-15 -15 30 30" fill="none" stroke="currentColor" stroke-linecap="round">
+            <circle cx="0" cy="0" r="8" stroke-width="1.5" opacity=".5"></circle>
+            <circle class="nf-fill" cx="0" cy="0" r="3.4" fill="currentColor" stroke="none" opacity=".78"></circle>
+          </svg>
+          <span class="nf-label" style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink);text-shadow:0 1px 12px var(--bg),0 0 4px var(--bg);">Download</span>
+        </a>
+        <button data-theme-toggle aria-label="Toggle theme" class="nf-neuron nf-theme-btn" style="--c:var(--ink-dim);display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--line-2);background:transparent;color:var(--ink);cursor:pointer;font-size:14px;font-family:'JetBrains Mono',monospace;">
+          <span class="nf-theme-icon">☀</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <header id="top" style="position:relative;min-height:100svh;display:flex;align-items:center;overflow:hidden;background:var(--hero-bg);">
+      <noteflow-brain id="heroBrain" class="nf-brain-hero" data-ambient data-content-edges="true" data-cam="1.9" data-rotate-speed="0.4" data-shift-x="0.08" data-target-y="-0.04" style="position:absolute;inset:0;width:100%;height:100%;opacity:.82;"></noteflow-brain>
+      <div style="position:absolute;inset:0;pointer-events:none;background:var(--hero-scrim);"></div>
+      <div style="position:absolute;inset:0;pointer-events:none;background:linear-gradient(0deg,var(--bg) 0%,transparent 26%);"></div>
+
+      <div style="position:relative;z-index:3;max-width:1320px;margin:0 auto;padding:96px clamp(22px,5vw,64px) 0;width:100%;">
+        <div class="nf-hero-copy" style="max-width:600px;">
+          <div style={`display:flex;align-items:center;gap:13px;font-size:11.5px;letter-spacing:.28em;text-transform:uppercase;font-family:'JetBrains Mono',monospace;color:var(--ink-faint);animation:riseIn .8s .05s both;`}>
+            <span style="width:22px;height:1px;background:var(--detail);display:inline-block;"></span>NoteFlow · The Brain
+          </div>
+          <h1 class="nf-hero-title" style="margin:26px 0 0;font-size:clamp(56px,8.4vw,120px);line-height:.96;letter-spacing:-.022em;font-weight:500;color:var(--ink-strong);animation:riseIn .9s .12s both;">Notes with<br />a <em style="font-style:italic;font-weight:500;">brain.</em></h1>
+          <span style="display:block;width:76px;height:3px;margin-top:24px;background:var(--detail);border-radius:2px;animation:riseIn .9s .2s both;"></span>
+          <p style="margin:28px 0 0;font-style:italic;font-size:clamp(20px,1.8vw,27px);line-height:1.4;color:var(--ink-faint);animation:riseIn .9s .3s both;">Our niche is people with taste.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:40px;animation:riseIn .9s .38s both;">
+            <a href="#brain" data-nav="brain" class="nf-ghost" style="display:inline-flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:15px 24px;border-radius:5px;">Explore the brain ↓</a>
+          </div>
+        </div>
+      </div>
+
+      <div style="position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:3;display:flex;flex-direction:column;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink-faint);">
+        <span>Scroll</span>
+        <span style="width:1px;height:32px;background:linear-gradient(var(--ink-faint),transparent);animation:bob 2.1s ease-in-out infinite;"></span>
+      </div>
+    </header>
+
+    <main style="position:relative;z-index:2;background:transparent;">
+      <!-- Notes -->
+      <section id="notes" style="max-width:1240px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);">
+        <div data-reveal style="max-width:760px;">
+          <div style={`display:flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:rgb(var(--accent));"></span>What is NoteFlow</div>
+          <h2 style="margin:0;font-size:clamp(34px,5vw,60px);line-height:1.05;letter-spacing:-.015em;font-weight:500;color:var(--ink-strong);">Quick notes. Zero friction.</h2>
+          <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.62;color:var(--ink-dim);">A dark-first desktop notebook for developers. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.</p>
+        </div>
+
+        <!-- Synaptic feature constellation: the app's features as a small neural web -->
+        <div class="nf-syn" data-reveal>
+          <div class="nf-syn-stage" data-syn-stage>
+            <svg class="nf-syn-svg" data-syn-svg aria-hidden="true"></svg>
+            {synFeatures.map((f) => (
+              <button
+                type="button"
+                class={`nf-syn-node${f.hub ? ' is-hub' : ''}`}
+                data-syn-node={f.id}
+                data-name={f.name}
+                data-title={f.title}
+                data-desc={f.desc}
+                data-chip={f.chip}
+                aria-label={`${f.title} — ${f.chip}`}
+                style={`--c:var(--${f.tok});left:${f.x}%;top:${f.y}%;`}
+              >
+                <span class="nf-syn-soma"><span class="nf-syn-glyph">{f.glyph}</span></span>
+                <span class="nf-syn-name">{f.name}</span>
+              </button>
+            ))}
+          </div>
+
+          <aside class="nf-syn-panel" data-syn-panel style={`--pc:var(--${synHub.tok});`}>
+            <div class="nf-syn-panel-tag"><span class="nf-syn-panel-dot"></span><span data-syn-eyebrow>{synHub.name}</span></div>
+            <h3 data-syn-title>{synHub.title}</h3>
+            <p data-syn-desc>{synHub.desc}</p>
+            <span class="nf-syn-panel-chip" data-syn-chip>{synHub.chip}</span>
+            <div class="nf-syn-panel-foot">Hover a neuron · the synapses fire</div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Showcase -->
+      <section style="position:relative;background:transparent;border-top:1px solid var(--line);border-bottom:1px solid var(--line);overflow:hidden;">
+        <div style="max-width:1240px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);">
+          <div data-reveal style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:28px;">
+            <div style="max-width:660px;">
+              <div style={`display:flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:rgb(var(--pink));"></span>Dark-first · 12 themes</div>
+              <h2 style="margin:0;font-size:clamp(34px,5vw,60px);line-height:1.05;letter-spacing:-.015em;font-weight:500;color:var(--ink-strong);">The magic is in <em style="font-style:italic;">the small details.</em></h2>
+              <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.6;color:var(--ink-dim);">Twelve hand-tuned themes — Carbon, Tokyo Night, Dracula, Parchment and more. Flip the switch and the whole app follows.</p>
+            </div>
+            <button data-theme-toggle class="nf-edge" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.04em;color:var(--ink);background:var(--card);border:1px solid var(--line-2);border-radius:5px;padding:12px 16px;cursor:pointer;">
+              <span style="width:9px;height:9px;border-radius:50%;background:var(--detail);box-shadow:0 0 12px var(--detail);"></span>Toggle theme <span class="nf-theme-icon">☀</span>
+            </button>
+          </div>
+
+          <div data-reveal style="position:relative;margin-top:clamp(46px,6vw,72px);">
+            <div style="position:absolute;inset:-8% -4% -14%;background:radial-gradient(60% 60% at 50% 40%,rgb(var(--accent)/.16),transparent 70%);filter:blur(30px);pointer-events:none;"></div>
+            <div style="position:relative;border:1px solid var(--line-2);border-radius:14px;overflow:hidden;box-shadow:0 40px 100px -30px rgba(0,0,0,.5);background:var(--card);">
+              <video data-shot
+                data-shot-dark={VID_DARK} data-shot-dark-webm={VID_DARK_WEBM} data-shot-dark-poster={SHOT_DARK}
+                data-shot-light={VID_LIGHT} data-shot-light-webm={VID_LIGHT_WEBM} data-shot-light-poster={SHOT_LIGHT}
+                poster={SHOT_DARK} autoplay muted loop playsinline preload="metadata"
+                aria-label="NoteFlow desktop app demo" width="1279" height="820"
+                style="display:block;width:100%;height:auto;">
+                <source data-shot-webm src={VID_DARK_WEBM} type="video/webm" />
+                <source data-shot-mp4 src={VID_DARK} type="video/mp4" />
+              </video>
+            </div>
+          </div>
+
+          <div data-reveal style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);">
+            <span style="letter-spacing:.04em;">Themes</span>
+            <div style="display:flex;gap:7px;align-items:center;">
+              <span style="width:14px;height:14px;border-radius:5px;background:var(--bg);border:1px solid var(--line-2);"></span>
+              <span style="width:14px;height:14px;border-radius:5px;background:rgb(var(--accent));"></span>
+              <span style="width:14px;height:14px;border-radius:5px;background:rgb(var(--purple));"></span>
+              <span style="width:14px;height:14px;border-radius:5px;background:rgb(var(--accent-2));"></span>
+              <span style="width:14px;height:14px;border-radius:5px;background:rgb(var(--pink));"></span>
+              <span style="width:14px;height:14px;border-radius:5px;background:#f1ead7;border:1px solid var(--line-2);"></span>
+            </div>
+            <span style="color:var(--ink-dim);">Carbon · Tokyo Night · Midnight · Dracula · Synthwave · Parchment …</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- The Brain -->
+      <section id="brain" style="position:relative;background:transparent;border-bottom:1px solid var(--line);overflow:hidden;">
+        <div style="max-width:1300px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);">
+          <div data-reveal style="max-width:780px;">
+            <div style={`display:flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:rgb(var(--purple));"></span>The Brain · Local AI</div>
+            <h2 style="margin:0;font-size:clamp(34px,5vw,60px);line-height:1.05;letter-spacing:-.015em;font-weight:500;color:var(--ink-strong);">Every note becomes <em style="font-style:italic;">a neuron.</em></h2>
+            <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.6;color:var(--ink-dim);">A semantic index turns your notes into a living graph. Structure you built is wired in solid lines; relationships the AI found light up as synapses through the core. Ask a question and the notes it used <span style="color:var(--ink-strong);">glow</span>.</p>
+          </div>
+
+          <div data-reveal style="display:flex;flex-wrap:wrap;gap:20px;margin-top:clamp(46px,6vw,64px);align-items:stretch;">
+            <div style="flex:1 1 440px;position:relative;border:1px solid var(--line-2);border-radius:16px;overflow:hidden;background:var(--bg);min-height:540px;">
+              <noteflow-brain class="nf-brain-panel" data-controls data-labels data-content-edges="true" data-cam="1.95" data-rotate-speed="0.3" data-target-y="0.03" style="position:absolute;inset:0;"></noteflow-brain>
+              <div style="position:absolute;top:14px;left:14px;display:flex;gap:8px;z-index:4;pointer-events:auto;">
+                <button data-content-toggle class="nf-edge" style="display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink);background:var(--card-2);backdrop-filter:blur(8px);border:1px solid var(--line-2);border-radius:5px;padding:8px 11px;cursor:pointer;"><span style="width:8px;height:8px;border-radius:50%;background:var(--detail);box-shadow:0 0 8px var(--detail);"></span><span data-content-label>Content layer · on</span></button>
+              </div>
+              <div style="position:absolute;bottom:14px;left:14px;z-index:4;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);pointer-events:none;">drag · scroll to zoom · hover a note</div>
+            </div>
+
+            <div style="flex:1 1 320px;display:flex;flex-direction:column;border:1px solid var(--line-2);border-radius:16px;background:var(--card);overflow:hidden;height:540px;max-height:540px;">
+              <div style="display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);">
+                <span style="width:9px;height:9px;border-radius:50%;background:var(--detail);box-shadow:0 0 12px var(--detail);"></span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink);letter-spacing:.02em;">Chat — grounded in your notes</span>
+              </div>
+              <div data-chat-log style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;padding:18px;overflow-y:auto;">
+                <div data-chat-hint style="margin:auto 0;text-align:center;color:var(--ink-faint);font-size:17px;line-height:1.6;padding:8px;font-style:italic;">Ask a question below.<br />Watch the brain light up the notes it reads from.</div>
+              </div>
+              <div style="padding:14px 16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px;">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);">Try asking</div>
+                <button data-ask="0" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">How do RAG and agents connect in my notes?</button>
+                <button data-ask="1" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">Summarize what I know about the frontend.</button>
+                <button data-ask="2" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">What should I write about next?</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:40px;">
+            <div data-reveal style="padding-top:22px;border-top:1px solid var(--line-2);">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;color:rgb(var(--accent));margin-bottom:10px;">01 / GRAPH</div>
+              <h3 style="margin:0 0 8px;font-size:22px;font-weight:600;color:var(--ink-strong);">Two layers of connections</h3>
+              <p style={cardP}>Solid lines are the hierarchy you built. Faint synapses are what the AI noticed — even across different groups.</p>
+            </div>
+            <div data-reveal style="padding-top:22px;border-top:1px solid var(--line-2);">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;color:rgb(var(--accent-2));margin-bottom:10px;">02 / CHAT</div>
+              <h3 style="margin:0 0 8px;font-size:22px;font-weight:600;color:var(--ink-strong);">Chat with your notes</h3>
+              <p style={cardP}>RAG answers stream with clickable citations — and the agent can create, move and organize notes for you.</p>
+            </div>
+            <div data-reveal style="padding-top:22px;border-top:1px solid var(--line-2);">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;color:rgb(var(--purple));margin-bottom:10px;">03 / PRIVATE</div>
+              <h3 style="margin:0 0 8px;font-size:22px;font-weight:600;color:var(--ink-strong);">100% local &amp; yours</h3>
+              <p style={cardP}>The semantic index never leaves your machine. Bring your own model key — Anthropic, OpenAI, Ollama, anything.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Profile -->
+      <section id="profile" style="background:transparent;">
+        <div style="max-width:1240px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);">
+          <div data-reveal style="max-width:780px;">
+            <div style={`display:flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:rgb(var(--orange));"></span>Profile · The second brain</div>
+            <h2 style="margin:0;font-size:clamp(34px,5vw,60px);line-height:1.05;letter-spacing:-.015em;font-weight:500;color:var(--ink-strong);">An AI that <em style="font-style:italic;">actually knows you.</em></h2>
+            <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.6;color:var(--ink-dim);">No essay about yourself. NoteFlow asks the easy stuff — a few favorites, some this-or-that — and infers who you are from what those choices <span style="color:var(--ink-strong);">tend to mean</span>. Then it writes your profile as an editable note.</p>
+          </div>
+
+          <div data-reveal style="display:flex;flex-wrap:wrap;align-items:stretch;gap:18px;margin-top:clamp(46px,6vw,68px);">
+            <div style="flex:1 1 320px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:18px;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);">Low-friction signal</div>
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="font-size:17px;color:var(--ink-dim);">Weekends</span><span style="display:inline-flex;border:1px solid var(--line-2);border-radius:9px;overflow:hidden;font-size:12px;font-family:'JetBrains Mono',monospace;"><span style="padding:7px 12px;background:rgb(var(--orange)/.18);color:rgb(var(--orange));">Planned</span><span style="padding:7px 12px;color:var(--ink-faint);">Improvised</span></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="font-size:17px;color:var(--ink-dim);">Recharge</span><span style="display:inline-flex;border:1px solid var(--line-2);border-radius:9px;overflow:hidden;font-size:12px;font-family:'JetBrains Mono',monospace;"><span style="padding:7px 12px;color:var(--ink-faint);">With people</span><span style="padding:7px 12px;background:rgb(var(--orange)/.18);color:rgb(var(--orange));">Solo</span></span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="font-size:17px;color:var(--ink-dim);">Deadlines</span><span style="display:inline-flex;border:1px solid var(--line-2);border-radius:9px;overflow:hidden;font-size:12px;font-family:'JetBrains Mono',monospace;"><span style="padding:7px 12px;background:rgb(var(--orange)/.18);color:rgb(var(--orange));">Early</span><span style="padding:7px 12px;color:var(--ink-faint);">Last minute</span></span></div>
+              </div>
+              <div style="height:1px;background:var(--line);"></div>
+              <div style="display:flex;flex-direction:column;gap:9px;">
+                <div style="display:flex;align-items:center;gap:10px;background:var(--card-2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);width:64px;">Albums</span><span style="font-size:16px;color:var(--ink-dim);">3 added</span></div>
+                <div style="display:flex;align-items:center;gap:10px;background:var(--card-2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);width:64px;">Dream trip</span><span style="font-size:16px;color:var(--ink-dim);">Patagonia, slow</span></div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <span style="display:inline-flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-dim);background:var(--card-2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;">CV.pdf</span>
+                <span style="display:inline-flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-dim);background:var(--card-2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;">linkedin.com/in/…</span>
+              </div>
+            </div>
+
+            <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;min-width:120px;">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+                <div style="display:inline-flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:12.5px;letter-spacing:.02em;color:var(--bg);background:rgb(var(--orange));padding:11px 18px;border-radius:5px;box-shadow:0 10px 30px rgb(var(--orange)/.3);">✦ Generate profile</div>
+                <span style="font-size:24px;color:rgb(var(--orange));">→</span>
+              </div>
+            </div>
+
+            <div style="flex:1 1 320px;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;">
+              <div style="display:flex;align-items:center;gap:9px;padding:13px 18px;border-bottom:1px solid var(--line);">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:rgb(var(--orange));background:rgb(var(--orange)/.16);border-radius:6px;padding:3px 8px;">Profile</span>
+                <span style="font-size:17px;font-weight:600;color:var(--ink-strong);">Who you are</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-faint);">06/2026</span>
+              </div>
+              <div style="padding:22px;display:flex;flex-direction:column;gap:14px;font-size:17px;line-height:1.55;">
+                <div><span style="font-weight:600;color:var(--ink-strong);">How you work</span><div style="margin-top:7px;color:var(--ink-dim);">You think in systems and reach for depth over breadth. A planned runway beats improvisation; you ship early, then refine.</div></div>
+                <div><span style="font-weight:600;color:var(--ink-strong);">How to talk to you</span><div style="margin-top:7px;color:var(--ink-dim);">Direct and concise. Skip the warm-up — lead with the answer, then the reasoning.</div></div>
+                <div style="margin-top:2px;padding-top:14px;border-top:1px dashed var(--line-2);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-faint);">inferred from 6 answers · 2 documents · editable like any note</div>
+              </div>
+            </div>
+          </div>
+
+          <p data-reveal style="margin:28px 0 0;max-width:720px;font-size:16px;line-height:1.6;color:var(--ink-faint);">Described in abstract traits — never by the exact titles you gave. Favorites stay in a low-relevance section the AI is told <span style="color:var(--ink-dim);">not</span> to bring up unprompted. The model reads your documents directly; NoteFlow never stores them on a server.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Download -->
+    <footer id="get" style="position:relative;background:transparent;overflow:hidden;border-top:1px solid var(--line);">
+      <noteflow-brain data-ambient data-transparent data-content-edges="true" data-cam="2.6" data-rotate-speed="0.3" data-shift-x="0.12" data-target-y="0.24" style="position:absolute;inset:0;width:100%;height:100%;opacity:.6;"></noteflow-brain>
+      <div style="position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 0%,transparent 45%,rgba(0,0,0,0) 100%);pointer-events:none;"></div>
+      <div style="position:relative;z-index:2;max-width:900px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);text-align:center;">
+        <div data-reveal>
+          <div style={`display:inline-flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:var(--detail);"></span>Free · Open · Private</div>
+          <h2 style="margin:0;font-size:clamp(40px,6vw,82px);line-height:1.02;letter-spacing:-.018em;font-weight:500;color:var(--ink-strong);">Give your notes <em style="font-style:italic;">a brain.</em></h2>
+          <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:42px;">
+            <a href={RELEASES} target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">Download for Windows</a>
+            <a href={RELEASES} target="_blank" rel="noopener" class="nf-ghost" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:16px 28px;border-radius:5px;">Download for Linux</a>
+          </div>
+          <p style="margin:30px auto 0;max-width:460px;font-size:17px;line-height:1.6;color:var(--ink-faint);">Your notes stay on your machine as plain <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> files. Sync is your own private GitHub repo. Bring your own model key. No servers, no telemetry.</p>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-top:clamp(60px,9vw,110px);padding-top:28px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);">
+          <div style="display:flex;align-items:center;gap:10px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--detail);"></span>NoteFlow</div>
+          <div style="display:flex;gap:22px;flex-wrap:wrap;"><a href="#brain" data-nav="brain">The Brain</a><a href="#notes" data-nav="notes">Notes</a><a href={RELEASES} target="_blank" rel="noopener">Source</a><a href={asset('/mobile-privacy-policy.html')}>Privacy</a></div>
+          <div>© 2026 · Made for developers</div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <style is:global>
+    /* ── Notes · synaptic feature constellation ───────────────────────────── */
+    .nf-syn {
+      display: flex;
+      flex-wrap: wrap;
+      gap: clamp(20px, 3vw, 34px);
+      margin-top: clamp(46px, 6vw, 72px);
+      align-items: stretch;
+    }
+    .nf-syn-stage {
+      position: relative;
+      flex: 1 1 460px;
+      min-height: clamp(390px, 44vw, 470px);
+    }
+    .nf-syn-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .nf-syn-fiber {
+      fill: none;
+      stroke: var(--line-2);
+      stroke-width: 1.2;
+      opacity: 0.65;
+      transition: stroke 0.3s, opacity 0.3s, stroke-width 0.3s;
+    }
+    .nf-syn-fiber.is-lit {
+      stroke: var(--lc, var(--detail));
+      stroke-width: 1.7;
+      opacity: 1;
+      stroke-dasharray: 5 9;
+      animation: nf-flow 0.6s linear infinite;
+      filter: drop-shadow(0 0 4px var(--lc, var(--detail)));
+    }
+    @keyframes nf-flow { to { stroke-dashoffset: -14; } }
+
+    .nf-syn-node {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 9px;
+      z-index: 1;
+      padding: 0;
+      background: none;
+      border: 0;
+      cursor: pointer;
+      transition: opacity 0.3s;
+    }
+    .nf-syn-soma {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      display: grid;
+      place-items: center;
+      border-radius: 15px;
+      background: var(--card);
+      border: 1px solid rgb(var(--c) / 0.45);
+      transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.25s, box-shadow 0.25s;
+    }
+    .nf-syn-glyph {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 19px;
+      line-height: 1;
+      color: rgb(var(--c));
+    }
+    .nf-syn-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      text-shadow: 0 1px 10px var(--bg), 0 0 4px var(--bg);
+      transition: color 0.25s;
+    }
+    .nf-syn-node.is-hub .nf-syn-soma {
+      width: 66px;
+      height: 66px;
+      border-radius: 18px;
+      border-color: rgb(var(--c) / 0.7);
+      box-shadow: 0 0 0 5px rgb(var(--c) / 0.06), 0 0 26px rgb(var(--c) / 0.18);
+    }
+    .nf-syn-node.is-hub .nf-syn-glyph { font-size: 25px; }
+    .nf-syn-node.is-hub .nf-syn-soma::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      border: 1px solid rgb(var(--c) / 0.5);
+      animation: nf-soma-pulse 2.6s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes nf-soma-pulse {
+      0%, 100% { opacity: 0.15; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.14); }
+    }
+    .nf-syn-node:hover .nf-syn-soma,
+    .nf-syn-node:focus-visible .nf-syn-soma,
+    .nf-syn-node.is-active .nf-syn-soma {
+      transform: scale(1.09);
+      border-color: rgb(var(--c));
+      box-shadow: 0 0 0 5px rgb(var(--c) / 0.10), 0 0 32px rgb(var(--c) / 0.42);
+    }
+    .nf-syn-node:hover .nf-syn-name,
+    .nf-syn-node:focus-visible .nf-syn-name,
+    .nf-syn-node.is-active .nf-syn-name { color: rgb(var(--c)); }
+    .nf-syn-node:focus-visible { outline: none; }
+    .nf-syn-stage.is-dim .nf-syn-node:not(.is-active) { opacity: 0.42; }
+
+    .nf-syn-panel {
+      flex: 1 1 290px;
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 26px;
+    }
+    .nf-syn-panel-tag {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .nf-syn-panel-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: rgb(var(--pc, var(--accent)));
+      box-shadow: 0 0 12px rgb(var(--pc, var(--accent)));
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .nf-syn-panel h3 {
+      margin: 0;
+      font-size: 23px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--ink-strong);
+    }
+    .nf-syn-panel p {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.55;
+      color: var(--ink-dim);
+    }
+    .nf-syn-panel-chip {
+      align-self: flex-start;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      color: var(--ink);
+      background: var(--card-2);
+      border: 1px solid rgb(var(--pc, var(--accent)) / 0.35);
+      border-radius: 7px;
+      padding: 6px 10px;
+    }
+    .nf-syn-panel-foot {
+      margin-top: auto;
+      padding-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+
+    @media (max-width: 520px) {
+      .nf-syn-soma { width: 46px; height: 46px; border-radius: 13px; }
+      .nf-syn-glyph { font-size: 16px; }
+      .nf-syn-node.is-hub .nf-syn-soma { width: 56px; height: 56px; }
+      .nf-syn-node.is-hub .nf-syn-glyph { font-size: 21px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .nf-syn-fiber.is-lit { animation: none; }
+      .nf-syn-node.is-hub .nf-syn-soma::after { animation: none; opacity: 0.4; }
+    }
+  </style>
+
+  <script>
+    // ── NoteFlow marketing controller ──────────────────────────────────────────
+    // Vanilla port of the design's DCLogic component: theme toggle, scroll reveals,
+    // nav→brain hover synapses, the content-layer toggle, and the chat mock.
+    type Brain = HTMLElement & {
+      setHighlight?: (s: Set<string>) => void;
+      setThinking?: (b: boolean) => void;
+      setContentEdges?: (b: boolean) => void;
+      setScroll?: (p: number) => void;
+      _rebuildAll?: () => void;
+    };
+
+    const THEME_KEY = 'noteflow:web-theme';
+    const root = document.documentElement;
+
+    const PRESETS = [
+      {
+        a: 'Your “RAG architectures” note links tightly to “Agentic loops” — retrieval feeds the agent’s context, and both point back to your “LLM evaluation” work. The thread even reaches your “Blog: second brain” draft.',
+        q: 'How do RAG and agents connect in my notes?',
+        cites: ['rag', 'agents', 'eval', 'blog-brain'],
+        citeLabels: ['RAG architectures', 'Agentic loops', 'LLM evaluation'],
+      },
+      {
+        a: 'Two notes carry it: “React patterns” (hooks, performance, state) and “CSS architecture”. They’re strongly related — your performance notes lean on the same structure ideas as your CSS layering.',
+        q: 'Summarize what I know about the frontend.',
+        cites: ['react-patterns', 'css-arch'],
+        citeLabels: ['React patterns', 'CSS architecture'],
+      },
+      {
+        a: 'Your “Random ideas” and “Newsletter ideas” both circle the “Blog: second brain” draft — that cluster is the densest unfinished thread in your brain. Start there.',
+        q: 'What should I write about next?',
+        cites: ['ideas', 'newsletter', 'blog-brain'],
+        citeLabels: ['Random ideas', 'Newsletter ideas', 'Blog: second brain'],
+      },
+    ];
+
+    const NAV_BRAIN: Record<string, string[]> = {
+      home: ['reading', 'quotes', 'daily', 'ideas'],
+      brain: ['rag', 'agents', 'eval', 'embeddings'],
+      notes: ['react-patterns', 'postgres', 'css-arch', 'k8s'],
+      profile: ['reading', 'quotes', 'daily', 'ideas'],
+      download: ['blog-brain', 'newsletter', 'roadmap', 'rag'],
+    };
+    const NAV_COLORS: Record<string, string> = {
+      home: 'var(--ink-strong)', brain: 'rgb(var(--purple))', notes: 'rgb(var(--accent))',
+      profile: 'rgb(var(--orange))', download: 'rgb(var(--accent-2))',
+    };
+
+    // ── brain handles ──
+    let controlsBrain: Brain | null = null;
+    let ambientBrains: Brain[] = [];
+    const grabBrains = () => {
+      controlsBrain = document.querySelector('noteflow-brain[data-controls]');
+      ambientBrains = Array.from(document.querySelectorAll('noteflow-brain[data-ambient]')) as Brain[];
+    };
+    grabBrains();
+    window.addEventListener('nf-brain-ready', grabBrains);
+
+    // ── hero scroll → the brain swells / dives in ──
+    const heroBrainEl = document.getElementById('heroBrain') as Brain | null;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let heroTick = false;
+    const onHeroScroll = () => {
+      heroTick = false;
+      // Progress over the first viewport of scrolling (0 at the top → 1 a screen down).
+      const p = Math.min(1, Math.max(0, window.scrollY / (window.innerHeight || 1)));
+      heroBrainEl?.setScroll?.(p);
+    };
+    if (!reduceMotion) {
+      window.addEventListener('scroll', () => { if (!heroTick) { heroTick = true; requestAnimationFrame(onHeroScroll); } }, { passive: true });
+      window.addEventListener('nf-brain-ready', onHeroScroll);
+      onHeroScroll();
+    }
+
+    // ── theme ──
+    const themeIcons = Array.from(document.querySelectorAll('.nf-theme-icon'));
+    const syncThemeIcon = () => {
+      const dark = root.getAttribute('data-theme') !== 'light';
+      themeIcons.forEach((el) => (el.textContent = dark ? '☀' : '☾'));
+      const shot = document.querySelector('video[data-shot]') as HTMLVideoElement | null;
+      if (shot) {
+        const mp4 = dark ? shot.dataset.shotDark! : shot.dataset.shotLight!;
+        const webm = dark ? shot.dataset.shotDarkWebm! : shot.dataset.shotLightWebm!;
+        const poster = dark ? shot.dataset.shotDarkPoster! : shot.dataset.shotLightPoster!;
+        const srcMp4 = shot.querySelector('source[data-shot-mp4]') as HTMLSourceElement | null;
+        const srcWebm = shot.querySelector('source[data-shot-webm]') as HTMLSourceElement | null;
+        // only reload if the clip actually changed (avoids restarting on every icon sync)
+        if (srcMp4 && srcMp4.getAttribute('src') !== mp4) {
+          if (srcWebm) srcWebm.src = webm;
+          srcMp4.src = mp4;
+          shot.poster = poster;
+          shot.load();
+          shot.play().catch(() => {});
+        }
+      }
+    };
+    syncThemeIcon();
+
+    const toggleTheme = () => {
+      const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem(THEME_KEY, next); } catch {}
+      syncThemeIcon();
+      // Re-read palette + rebuild every brain so the wireframe recolours for the new theme.
+      requestAnimationFrame(() => {
+        document.querySelectorAll('noteflow-brain').forEach((b) => {
+          const brain = b as Brain;
+          if (brain._rebuildAll) brain._rebuildAll();
+        });
+        setTimeout(grabBrains, 60);
+      });
+    };
+    document.querySelectorAll('[data-theme-toggle]').forEach((b) => b.addEventListener('click', toggleTheme));
+
+    // ── content-layer toggle ──
+    let contentOn = true;
+    const contentLabel = document.querySelector('[data-content-label]');
+    document.querySelector('[data-content-toggle]')?.addEventListener('click', () => {
+      contentOn = !contentOn;
+      if (contentLabel) contentLabel.textContent = contentOn ? 'Content layer · on' : 'Content layer · off';
+      if (controlsBrain?.setContentEdges) controlsBrain.setContentEdges(contentOn);
+    });
+
+    // ── smooth-scroll nav + anchors ──
+    const go = (id: string) => {
+      const el = document.getElementById(id);
+      if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 8, behavior: 'smooth' });
+    };
+    document.querySelectorAll('a[href^="#"]').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        const id = (a.getAttribute('href') || '').slice(1);
+        if (id && document.getElementById(id)) { e.preventDefault(); go(id); }
+      });
+    });
+
+    // ── nav → brain hover synapse overlay ──
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:55;pointer-events:none;overflow:visible;';
+    const NS = 'http://www.w3.org/2000/svg';
+    const esvg = document.createElementNS(NS, 'svg');
+    esvg.setAttribute('width', '100%'); esvg.setAttribute('height', '100%');
+    esvg.style.cssText = 'position:absolute;inset:0;overflow:visible;';
+    ov.appendChild(esvg); document.body.appendChild(ov);
+
+    let edgeRaf = 0; let edgeClear = 0; let navClear = 0;
+    const drawNavEdge = (key: string, btn: HTMLElement) => {
+      cancelAnimationFrame(edgeRaf); clearTimeout(edgeClear);
+      esvg.style.transition = ''; esvg.style.opacity = '1'; esvg.innerHTML = '';
+      const r = btn.getBoundingClientRect();
+      const x1 = r.right - 4, y1 = r.top + r.height / 2;
+      // Land on the visible wireframe (roughly centre of the brain canvas).
+      const tx = window.innerWidth * 0.5, ty = window.innerHeight * 0.42;
+      const col = NAV_COLORS[key] || 'var(--detail)';
+
+      // Build a polyline of straight segments that "passes through" a few nodes,
+      // echoing the wireframe — no curves. Mid-nodes get a perpendicular jitter
+      // (zero at the ends) so the path zig-zags through them like neural fibre.
+      const dx = tx - x1, dy = ty - y1;
+      const nlen = Math.hypot(dx, dy) || 1;
+      const px = -dy / nlen, py = dx / nlen; // unit perpendicular
+      const segs = 3;
+      const pts: [number, number][] = [[x1, y1]];
+      for (let i = 1; i < segs; i++) {
+        const f = i / segs;
+        const j = (Math.random() - 0.5) * 84 * Math.sin(Math.PI * f);
+        pts.push([x1 + dx * f + px * j, y1 + dy * f + py * j]);
+      }
+      pts.push([tx, ty]);
+
+      // Cumulative length at each vertex (for lighting nodes as the pulse passes).
+      const cum: number[] = [0];
+      for (let i = 1; i < pts.length; i++) {
+        const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        cum.push(cum[i - 1] + l);
+      }
+      const len = cum[cum.length - 1] || 1;
+
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', 'M ' + pts.map((p) => p[0] + ' ' + p[1]).join(' L '));
+      path.setAttribute('fill', 'none'); path.setAttribute('stroke', col);
+      path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-linejoin', 'round');
+      path.style.filter = `drop-shadow(0 0 4px ${col})`;
+      path.style.strokeDasharray = String(len); path.style.strokeDashoffset = String(len);
+      esvg.appendChild(path);
+
+      // A node sits at every vertex (start excluded), hidden until the pulse reaches it.
+      const nodes = pts.slice(1).map((p, i) => {
+        const last = i === pts.length - 2;
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('cx', String(p[0])); c.setAttribute('cy', String(p[1]));
+        c.setAttribute('r', String(last ? 3 : 2.4));
+        c.setAttribute('fill', col); c.style.filter = `drop-shadow(0 0 6px ${col})`;
+        c.style.opacity = '0';
+        esvg.appendChild(c);
+        return { el: c, at: cum[i + 1] };
+      });
+
+      // Travelling pulse dot.
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('r', '3'); dot.setAttribute('fill', col);
+      dot.style.filter = `drop-shadow(0 0 7px ${col})`;
+      esvg.appendChild(dot);
+
+      // Landing ring that blooms where the fibre meets the wireframe.
+      const landing = document.createElementNS(NS, 'circle');
+      landing.setAttribute('cx', String(tx)); landing.setAttribute('cy', String(ty)); landing.setAttribute('r', '0');
+      landing.setAttribute('fill', 'none'); landing.setAttribute('stroke', col); landing.setAttribute('stroke-width', '1.4');
+      landing.style.filter = `drop-shadow(0 0 8px ${col})`; landing.style.opacity = '0';
+      esvg.appendChild(landing);
+
+      const t0 = performance.now(), dur = 480;
+      const step = (now: number) => {
+        const f = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - f, 3);
+        const trav = len * e;
+        path.style.strokeDashoffset = String(len - trav);
+        const pt = path.getPointAtLength(trav);
+        dot.setAttribute('cx', String(pt.x)); dot.setAttribute('cy', String(pt.y));
+        dot.style.opacity = f < 0.96 ? '1' : '0';
+        for (const n of nodes) n.el.style.opacity = trav >= n.at - 1 ? '0.95' : '0';
+        if (f >= 0.62) { const g = (f - 0.62) / 0.38; landing.setAttribute('r', String(6 + g * 12)); landing.style.opacity = String((1 - g) * 0.85); }
+        if (f < 1) edgeRaf = requestAnimationFrame(step);
+      };
+      edgeRaf = requestAnimationFrame(step);
+    };
+    const clearNavEdge = () => {
+      cancelAnimationFrame(edgeRaf);
+      esvg.style.transition = 'opacity .35s ease'; esvg.style.opacity = '0';
+      clearTimeout(edgeClear);
+      edgeClear = window.setTimeout(() => { esvg.innerHTML = ''; }, 380);
+    };
+    const navEnter = (key: string, btn: HTMLElement) => {
+      drawNavEdge(key, btn);
+      clearTimeout(navClear);
+      const set = new Set(NAV_BRAIN[key] || []);
+      ambientBrains.forEach((b) => { b.setHighlight?.(set); b.setThinking?.(true); });
+    };
+    const navLeave = () => {
+      clearNavEdge();
+      ambientBrains.forEach((b) => b.setThinking?.(false));
+      clearTimeout(navClear);
+      navClear = window.setTimeout(() => ambientBrains.forEach((b) => b.setHighlight?.(new Set())), 1100);
+    };
+    document.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
+      const key = el.dataset.nav!;
+      el.addEventListener('mouseenter', () => navEnter(key, el));
+      el.addEventListener('mouseleave', navLeave);
+    });
+
+    // ── chat mock ──
+    const log = document.querySelector('[data-chat-log]') as HTMLElement | null;
+    const hint = document.querySelector('[data-chat-hint]') as HTMLElement | null;
+    let streaming = false; let tw = 0; let litClear = 0;
+    const bubble = (user: boolean) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `display:flex;justify-content:${user ? 'flex-end' : 'flex-start'}`;
+      const b = document.createElement('div');
+      b.style.cssText =
+        `max-width:86%;padding:11px 15px;border-radius:${user ? '14px 14px 4px 14px' : '14px 14px 14px 4px'};` +
+        `font-size:16px;line-height:1.55;background:${user ? 'var(--card-2)' : 'transparent'};` +
+        `border:1px solid ${user ? 'var(--line-2)' : 'var(--line)'};color:var(--ink);`;
+      wrap.appendChild(b);
+      log?.appendChild(wrap);
+      return b;
+    };
+    const ask = (i: number) => {
+      if (streaming || !log) return;
+      const p = PRESETS[i];
+      hint?.remove();
+      bubble(true).textContent = p.q;
+      const ai = bubble(false);
+      streaming = true;
+      log.scrollTop = log.scrollHeight;
+      if (controlsBrain) { controlsBrain.setThinking?.(true); controlsBrain.setHighlight?.(new Set(p.cites)); }
+      let k = 0;
+      clearInterval(tw);
+      tw = window.setInterval(() => {
+        k += 2;
+        ai.textContent = p.a.slice(0, k);
+        log.scrollTop = log.scrollHeight;
+        if (k >= p.a.length) {
+          clearInterval(tw);
+          streaming = false;
+          ai.textContent = p.a;
+          const cites = document.createElement('div');
+          cites.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;';
+          p.citeLabels.forEach((c) => {
+            const tag = document.createElement('span');
+            tag.style.cssText =
+              "display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-dim);background:var(--card-2);border:1px solid var(--line-2);border-radius:7px;padding:4px 8px;";
+            tag.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--detail);"></span>' + c;
+            cites.appendChild(tag);
+          });
+          ai.appendChild(cites);
+          if (controlsBrain) controlsBrain.setThinking?.(false);
+          clearTimeout(litClear);
+          litClear = window.setTimeout(() => controlsBrain?.setHighlight?.(new Set()), 4500);
+        }
+      }, 22);
+    };
+    document.querySelectorAll<HTMLElement>('[data-ask]').forEach((b) =>
+      b.addEventListener('click', () => ask(Number(b.dataset.ask)))
+    );
+
+    // ── synaptic feature constellation ──
+    (() => {
+      const stage = document.querySelector('[data-syn-stage]') as HTMLElement | null;
+      const svg = document.querySelector('[data-syn-svg]') as SVGSVGElement | null;
+      const panel = document.querySelector('[data-syn-panel]') as HTMLElement | null;
+      if (!stage || !svg || !panel) return;
+
+      const nodes = Array.from(stage.querySelectorAll<HTMLElement>('[data-syn-node]'));
+      // Palette token per feature — kept in sync with synFeatures in the frontmatter.
+      const TOK: Record<string, string> = {
+        capture: 'accent', markdown: 'accent-2', sections: 'purple',
+        groups: 'orange', encrypted: 'red', cli: 'cyan',
+      };
+      // Hub → every feature, plus a ring tying the satellites together = a small web.
+      const LINKS: [string, string][] = [
+        ['capture', 'markdown'], ['capture', 'sections'], ['capture', 'groups'],
+        ['capture', 'encrypted'], ['capture', 'cli'],
+        ['markdown', 'sections'], ['sections', 'groups'], ['groups', 'encrypted'],
+        ['encrypted', 'cli'], ['cli', 'markdown'],
+      ];
+      const SVGNS = 'http://www.w3.org/2000/svg';
+      const fibers = LINKS.map(([a, b]) => {
+        const ln = document.createElementNS(SVGNS, 'line');
+        ln.setAttribute('class', 'nf-syn-fiber');
+        svg.appendChild(ln);
+        return { el: ln, a, b };
+      });
+
+      const somaCenter = (n: HTMLElement): [number, number] => {
+        const soma = n.querySelector('.nf-syn-soma') as HTMLElement;
+        const r = soma.getBoundingClientRect();
+        const s = stage.getBoundingClientRect();
+        return [r.left + r.width / 2 - s.left, r.top + r.height / 2 - s.top];
+      };
+      const layout = () => {
+        const w = stage.clientWidth, h = stage.clientHeight;
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        const c: Record<string, [number, number]> = {};
+        nodes.forEach((n) => { c[n.dataset.synNode!] = somaCenter(n); });
+        fibers.forEach(({ el, a, b }) => {
+          const p = c[a], q = c[b];
+          if (!p || !q) return;
+          el.setAttribute('x1', String(p[0])); el.setAttribute('y1', String(p[1]));
+          el.setAttribute('x2', String(q[0])); el.setAttribute('y2', String(q[1]));
+        });
+      };
+
+      const setPanel = (n: HTMLElement) => {
+        const tok = TOK[n.dataset.synNode!] || 'accent';
+        panel.style.setProperty('--pc', `var(--${tok})`);
+        (panel.querySelector('[data-syn-eyebrow]') as HTMLElement).textContent = n.dataset.name!;
+        (panel.querySelector('[data-syn-title]') as HTMLElement).textContent = n.dataset.title!;
+        (panel.querySelector('[data-syn-desc]') as HTMLElement).textContent = n.dataset.desc!;
+        (panel.querySelector('[data-syn-chip]') as HTMLElement).textContent = n.dataset.chip!;
+      };
+      const activate = (n: HTMLElement) => {
+        const id = n.dataset.synNode!, tok = TOK[id] || 'accent';
+        nodes.forEach((m) => m.classList.toggle('is-active', m === n));
+        stage.classList.add('is-dim');
+        fibers.forEach(({ el, a, b }) => {
+          const lit = a === id || b === id;
+          el.classList.toggle('is-lit', lit);
+          if (lit) el.style.setProperty('--lc', `rgb(var(--${tok}))`);
+        });
+        setPanel(n);
+      };
+      const hub = nodes.find((n) => n.classList.contains('is-hub')) || nodes[0];
+      const reset = () => {
+        nodes.forEach((m) => m.classList.remove('is-active'));
+        stage.classList.remove('is-dim');
+        fibers.forEach(({ el }) => el.classList.remove('is-lit'));
+        if (hub) setPanel(hub);
+      };
+
+      nodes.forEach((n) => {
+        n.addEventListener('mouseenter', () => activate(n));
+        n.addEventListener('focus', () => activate(n));
+        n.addEventListener('click', () => activate(n));
+      });
+      stage.addEventListener('mouseleave', reset);
+
+      reset();
+      layout();
+      if ('ResizeObserver' in window) new ResizeObserver(layout).observe(stage);
+      window.addEventListener('resize', layout);
+      window.addEventListener('nf-brain-ready', layout);
+      setTimeout(layout, 200); // re-measure once the mono font has loaded
+    })();
+
+    // ── scroll reveals ──
+    const reveals = Array.from(document.querySelectorAll('[data-reveal]')) as HTMLElement[];
+    const show = (el: HTMLElement) => { el.style.animation = 'riseIn .8s cubic-bezier(.2,.7,.2,1) both'; };
+    if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const io = new IntersectionObserver((ents) => {
+        ents.forEach((e) => { if (e.isIntersecting) { show(e.target as HTMLElement); io.unobserve(e.target); } });
+      }, { threshold: 0.12, rootMargin: '0px 0px -7% 0px' });
+      reveals.forEach((el) => io.observe(el));
+      setTimeout(() => reveals.forEach(show), 2600); // safety
+    } else {
+      reveals.forEach((el) => (el.style.opacity = '1'));
+    }
+  </script>
+</Base>

@@ -1,0 +1,36 @@
+---
+// A static snapshot of the AI panel chat: a question, a streamed-looking answer, and the notes it
+// cited (which "light up" in the brain). Purely presentational for the AI pillar / /ia page.
+const sources = ['RAG architectures', 'Embeddings', 'Agentic loops'];
+---
+
+<div class="term">
+  <div class="term-bar">
+    <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+    <span class="ml-2 text-[0.7rem] text-text-muted">second brain · chat</span>
+  </div>
+  <div class="space-y-4 p-4 font-body text-sm">
+    <!-- user -->
+    <div class="flex justify-end">
+      <p class="max-w-[80%] rounded-2xl rounded-br-sm bg-surface-3 px-3.5 py-2 text-text">
+        What did I conclude about reranking in my research notes?
+      </p>
+    </div>
+    <!-- assistant -->
+    <div class="flex justify-start">
+      <div class="max-w-[88%] rounded-2xl rounded-bl-sm border border-border bg-surface-1 px-3.5 py-2.5 text-text-muted">
+        <p>
+          Across your notes, reranking consistently beat raw vector recall — you flagged
+          <span class="text-text">cross-encoders</span> as the best quality/latency trade-off and
+          linked it to your <span class="text-text">agentic retrieval</span> loop.<span class="caret ml-0.5"></span>
+        </p>
+        <div class="mt-3 flex flex-wrap items-center gap-1.5">
+          <span class="kicker !text-[0.62rem]">cited</span>
+          {sources.map((s) => (
+            <span class="rounded-md border border-purple/40 bg-purple/10 px-2 py-0.5 font-mono text-[0.7rem] text-purple">{s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

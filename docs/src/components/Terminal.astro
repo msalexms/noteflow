@@ -1,0 +1,37 @@
+---
+// A small static terminal mock. `lines` render with prompt/command/output/comment styling; the
+// last command line gets a blinking caret. Used by the CLI and Sync pillars and the /cli page.
+interface Line {
+  kind: string; // 'cmd' | 'out' | 'comment'
+  text: string;
+}
+interface Props {
+  title?: string;
+  lines: readonly Line[];
+  caret?: boolean;
+}
+const { title = 'noteflow', lines, caret = true } = Astro.props;
+const lastCmd = caret ? lines.map((l) => l.kind).lastIndexOf('cmd') : -1;
+---
+
+<div class="term">
+  <div class="term-bar">
+    <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+    <span class="ml-2 text-[0.7rem] text-text-muted">{title}</span>
+  </div>
+  <div class="px-4 py-4">
+    {lines.map((l, i) => (
+      <div class="whitespace-pre-wrap break-words">
+        {l.kind === 'cmd' && (
+          <span>
+            <span class="text-accent-2">$</span>{' '}
+            <span class="text-text">{l.text}</span>
+            {i === lastCmd && <span class="caret ml-0.5"></span>}
+          </span>
+        )}
+        {l.kind === 'out' && <span class="text-text-muted">{l.text}</span>}
+        {l.kind === 'comment' && <span class="text-text-muted/70 italic">{l.text}</span>}
+      </div>
+    ))}
+  </div>
+</div>

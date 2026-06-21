@@ -149,3 +149,7 @@ release/
 
 # Local-only AI handoff/notes (not part of the repo)
 docs-ai/
+
+# Astro marketing site (docs/) — build output and cache
+docs/dist/
+docs/.astro/

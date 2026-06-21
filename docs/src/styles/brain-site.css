@@ -1,0 +1,108 @@
+/* NoteFlow marketing site — "The Brain" design system.
+   Dark-first palette with a parchment light theme. All colours are exposed as CSS variables
+   so the 3D brain (<noteflow-brain>) and the background network (<nf-netbg>) recolour with the
+   theme by reading --brain-bg / --brain-text and the accent triples. */
+
+:root {
+  --accent: 96 166 150; --accent-2: 122 176 122; --purple: 158 138 222;
+  --orange: 212 156 92; --cyan: 116 192 200; --pink: 206 132 166; --red: 210 120 110;
+  --text: 236 234 224;
+  --brain-bg: 12 12 17; --brain-text: 236 234 224;
+  --bg: #0c0c11; --bg-soft: #101017; --card: #15151c; --card-2: #1b1b23;
+  --ink: #ECEAE0; --ink-strong: #F6F4EC; --ink-dim: #a6a39a; --ink-faint: #6f6d64;
+  --line: rgba(237, 234, 224, .10); --line-2: rgba(237, 234, 224, .18);
+  --panel: radial-gradient(120% 90% at 50% 0%, #16161e 0%, #0c0c12 60%);
+  --hero-bg: radial-gradient(120% 95% at 52% 32%, #16161e 0%, #0c0c12 56%, #08080c 100%);
+  --hero-scrim: radial-gradient(60% 70% at 33% 47%, rgba(10, 10, 15, .84), rgba(10, 10, 15, .34) 58%, transparent 80%);
+  /* detailAccent — Amber */
+  --detail: #f5a623;
+}
+
+[data-theme="light"] {
+  --text: 46 40 30; --brain-bg: 232 224 205; --brain-text: 46 40 30;
+  --bg: #E7DFCC; --bg-soft: #EFE8D8; --card: #F5EFE0; --card-2: #EBE3D0;
+  --ink: #2a2620; --ink-strong: #15110a; --ink-dim: #6c6656; --ink-faint: #968f7d;
+  --line: rgba(40, 34, 24, .13); --line-2: rgba(40, 34, 24, .22);
+  --panel: radial-gradient(120% 90% at 50% 0%, #EFE8D6 0%, #E4DBC6 60%);
+  --hero-bg: radial-gradient(120% 95% at 52% 32%, #F3ECDB 0%, #E9E0CC 56%, #E2D8C1 100%);
+  --hero-scrim: radial-gradient(60% 70% at 33% 47%, rgba(238, 230, 212, .88), rgba(238, 230, 212, .42) 58%, transparent 82%);
+  /* detailAccent — Amber (deeper for contrast on the parchment light theme) */
+  --detail: #b87514;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 17px;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background .55s ease, color .55s ease;
+}
+::selection { background: rgb(var(--accent) / .30); }
+a { color: inherit; text-decoration: none; }
+
+@keyframes riseIn { from { opacity: .4; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@keyframes bob { 0%, 100% { transform: translateY(0); opacity: .5; } 50% { transform: translateY(7px); opacity: 1; } }
+@keyframes glowpulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes somapulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+
+/* Reveal-on-scroll: elements start hidden, the controller animates them in with riseIn. */
+[data-reveal] { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { [data-reveal] { opacity: 1 !important; } }
+
+/* Vertical neuron rail */
+@media (min-width: 880px) { [data-root] { padding-left: 80px; } }
+@media (max-width: 879px) {
+  .nf-rail { width: 60px !important; }
+  [data-root] { padding-left: 60px; }
+  /* On phones the rail is icon-only — drop the label text entirely. */
+  .nf-neuron .nf-label { display: none !important; }
+}
+.nf-neuron { position: relative; }
+.nf-neuron .nf-label {
+  position: absolute; left: 60px; top: 50%;
+  transform: translateY(-50%) translateX(-7px);
+  opacity: 0; white-space: nowrap;
+  transition: opacity .26s ease, transform .26s ease;
+  pointer-events: none; z-index: 5;
+}
+.nf-neuron:hover .nf-label, .nf-rail[data-labels] .nf-neuron .nf-label {
+  opacity: 1; transform: translateY(-50%) translateX(0); pointer-events: auto; cursor: pointer;
+}
+.nf-soma { transition: transform .32s cubic-bezier(.2, .7, .2, 1), filter .32s ease; filter: drop-shadow(0 0 0 transparent); }
+.nf-neuron:hover .nf-soma { transform: scale(1.16); filter: drop-shadow(0 0 9px var(--c)); }
+.nf-fill { transition: opacity .3s ease; }
+.nf-neuron:hover .nf-fill { opacity: .95; }
+
+/* Hover helpers (replace the design's runtime-applied inline style-hover) */
+.nf-lift { transition: transform .2s ease, box-shadow .2s ease, border-color .25s ease, background .25s ease; }
+.nf-lift:hover { transform: translateY(-2px); box-shadow: 0 18px 44px rgba(0, 0, 0, .4); }
+.nf-ghost { transition: border-color .25s ease, background .25s ease; }
+.nf-ghost:hover { border-color: var(--detail); background: rgb(var(--accent) / .06); }
+.nf-edge { transition: border-color .2s ease, transform .2s ease; }
+.nf-edge:hover { border-color: var(--detail); }
+.nf-suggest { transition: border-color .2s ease, background .2s ease; }
+.nf-suggest:hover { border-color: var(--detail); }
+.nf-theme-btn { transition: border-color .25s ease, color .25s ease, transform .2s ease; }
+.nf-theme-btn:hover { border-color: var(--detail); color: var(--ink-strong); transform: translateY(-1px); }
+
+/* Dark mode: dial the wireframe glow back a touch — additive blending makes it read
+   too bright on the near-black background. Light theme keeps the inline opacity. */
+[data-theme="dark"] .nf-brain-hero { opacity: .72 !important; }
+[data-theme="dark"] .nf-brain-panel { opacity: .62 !important; }
+
+/* Hero title — on very large screens (≥1700px / 2K) cap the size and widen the
+   copy column so more of the headline fits per line instead of ballooning. */
+@media (min-width: 1700px) {
+  .nf-hero-copy { max-width: 760px !important; }
+  .nf-hero-title { font-size: 104px !important; }
+}
+@media (min-width: 2400px) {
+  .nf-hero-copy { max-width: 880px !important; }
+  .nf-hero-title { font-size: 116px !important; }
+}

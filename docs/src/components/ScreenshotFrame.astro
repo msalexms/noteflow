@@ -1,0 +1,18 @@
+---
+// A screenshot in a wireframe frame that swaps per theme: the dark image shows in dark mode,
+// the light one in light mode (via the [data-show] CSS rule in global.css).
+import { asset } from '../lib/url';
+
+interface Props {
+  dark: string; // path under /public, e.g. '/screenshots/app-main-midnightblue.png'
+  light: string;
+  alt: string;
+  class?: string;
+}
+const { dark, light, alt, class: klass = '' } = Astro.props;
+---
+
+<div class={`frame ${klass}`}>
+  <img data-show="dark" src={asset(dark)} alt={alt} loading="lazy" decoding="async" class="block w-full" />
+  <img data-show="light" src={asset(light)} alt={alt} loading="lazy" decoding="async" class="block w-full" />
+</div>

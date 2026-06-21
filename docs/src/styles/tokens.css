@@ -1,0 +1,76 @@
+/*
+ * NoteFlow web — design tokens.
+ * Colors are RGB triples (no #, space-separated) consumed as rgb(var(--x) / a),
+ * exactly like the app (src/lib/themes.ts) so the Brain render and Tailwind
+ * utilities behave identically.
+ *
+ * Dark is the default (Carbon base + Midnight Blue accents). Light is Arctic Day.
+ * Theme is selected by data-theme on <html>; an inline script in Base.astro sets
+ * it before paint to avoid a flash.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces — Carbon */
+  --bg-0: 9 9 9;
+  --bg-1: 17 17 17;
+  --bg-2: 26 26 26;
+  --bg-3: 38 38 38;
+  --bg-editor: 20 20 20;
+  --border: 42 42 42;
+
+  /* Ink */
+  --text: 212 212 212;
+  --text-muted: 140 140 140;
+
+  /* Signal accents — Midnight Blue / Carbon palette (the 8 tag colors).
+     Maxed saturation so the brain nodes/synapses read as vivid against Carbon dark. */
+  --accent: 30 144 255;
+  --accent-2: 16 224 176;
+  --accent-3: 255 160 20;
+  --red: 255 56 56;
+  --cyan: 32 200 255;
+  --purple: 200 96 240;
+  --orange: 255 112 16;
+  --pink: 255 48 152;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-synapse: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur: 320ms;
+  --dur-slow: 680ms;
+
+  /* Layout */
+  --nav-h: 64px;
+  --glow: 0 0 0 1px rgb(var(--accent) / 0.4), 0 0 24px -4px rgb(var(--accent) / 0.45);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surfaces — Arctic Day */
+  --bg-0: 220 230 242;
+  --bg-1: 237 243 252;
+  --bg-2: 226 234 247;
+  --bg-3: 208 220 238;
+  --bg-editor: 237 243 252;
+  --border: 176 196 220;
+
+  /* Ink */
+  --text: 26 38 64;
+  --text-muted: 74 94 122;
+
+  /* Signal accents — Arctic Day. Same hues as dark, pushed notably darker/deeper so
+     they stand out against the light surfaces instead of washing out. */
+  --accent: 14 78 168;
+  --accent-2: 8 120 95;
+  --accent-3: 150 96 4;
+  --red: 184 28 36;
+  --cyan: 10 110 152;
+  --purple: 112 36 150;
+  --orange: 156 58 2;
+  --pink: 156 18 96;
+}

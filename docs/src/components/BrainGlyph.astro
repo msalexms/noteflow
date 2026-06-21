@@ -1,0 +1,48 @@
+---
+// A small abstract node-graph with synapses firing along a couple of edges (SMIL). Stands in for
+// the brain on the home pillar (the real 3D one lives in the hero and on /cerebro).
+---
+
+<div class="frame grid place-items-center bg-surface-1/40 p-6">
+  <svg viewBox="0 0 440 300" class="w-full max-w-[460px]" role="img" aria-label="A neural graph of connected notes">
+    <!-- static edges -->
+    <g stroke="rgb(var(--border))" stroke-width="1.2" fill="none" opacity="0.8">
+      <path d="M95 90 L160 70 M95 90 L130 145 M160 70 L130 145" />
+      <path d="M330 95 L360 160 M330 95 L300 150 M360 160 L300 150" />
+      <path d="M165 235 L245 255 M165 235 L115 200 M245 255 L300 150" />
+      <path d="M130 145 L230 160 M230 160 L300 150 M230 160 L165 235" />
+    </g>
+
+    <!-- firing synapses -->
+    <path id="syn1" d="M130 145 L230 160 L300 150" stroke="rgb(var(--accent))" stroke-width="1.6" fill="none" opacity="0.5" />
+    <path id="syn2" d="M230 160 L165 235" stroke="rgb(var(--accent-2))" stroke-width="1.6" fill="none" opacity="0.5" />
+
+    <!-- traveling charges -->
+    <circle r="3.5" fill="rgb(var(--accent))">
+      <animateMotion dur="2.4s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+        <mpath href="#syn1" />
+      </animateMotion>
+      <animate attributeName="opacity" values="0;1;1;0" dur="2.4s" repeatCount="indefinite" />
+    </circle>
+    <circle r="3" fill="rgb(var(--accent-2))">
+      <animateMotion dur="1.8s" begin="0.6s" repeatCount="indefinite">
+        <mpath href="#syn2" />
+      </animateMotion>
+      <animate attributeName="opacity" values="0;1;1;0" dur="1.8s" begin="0.6s" repeatCount="indefinite" />
+    </circle>
+
+    <!-- nodes: cluster A (accent), B (purple), C (accent-2), hub -->
+    <g>
+      <circle cx="95" cy="90" r="6" fill="rgb(var(--accent))" />
+      <circle cx="160" cy="70" r="4.5" fill="rgb(var(--accent))" />
+      <circle cx="130" cy="145" r="5" fill="rgb(var(--accent))" />
+      <circle cx="330" cy="95" r="6" fill="rgb(var(--purple))" />
+      <circle cx="360" cy="160" r="4.5" fill="rgb(var(--purple))" />
+      <circle cx="300" cy="150" r="5" fill="rgb(var(--purple))" />
+      <circle cx="165" cy="235" r="6" fill="rgb(var(--accent-2))" />
+      <circle cx="245" cy="255" r="4.5" fill="rgb(var(--accent-2))" />
+      <circle cx="115" cy="200" r="4" fill="rgb(var(--accent-2))" />
+      <circle cx="230" cy="160" r="7" fill="rgb(var(--text))" opacity="0.85" />
+    </g>
+  </svg>
+</div>
