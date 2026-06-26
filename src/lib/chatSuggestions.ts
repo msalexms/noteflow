@@ -39,9 +39,109 @@ export function splitSuggestions(content: string): { visible: string; suggestion
   return { visible, suggestions }
 }
 
-/** Static starters shown when the chat is empty (UI text is English). */
+/** Static starters shown when the chat is empty and there are no usable notes (UI text is English). */
 export const GENERIC_SUGGESTIONS: string[] = [
-  'Summarize my recent notes',
-  'What have I been working on lately?',
-  'Find notes about a topic',
+  'Summarize recent notes',
+  'What am I working on?',
+  'Find a topic',
 ]
+
+// ── Personalized starters ──────────────────────────────────────────────────────
+// When the chat is empty we build randomized starter chips from the user's own note
+// and section names (e.g. "Reorganize \"Project ideas\"") so the empty state feels
+// alive and varies each time the view is opened. Falls back to GENERIC_SUGGESTIONS.
+
+type StarterNote = {
+  title: string
+  sections: { name: string; aiHidden?: boolean }[]
+  encryption?: unknown
+  archived?: boolean
+  expiresAt?: string
+}
+
+type Template = (name: string) => string
+
+// Quote a name for a chip, trimming over-long titles so the button stays compact.
+function quoteName(name: string): string {
+  const t = name.trim()
+  const short = t.length > 28 ? `${t.slice(0, 27)}…` : t
+  return `“${short}”`
+}
+
+const NOTE_TEMPLATES: Template[] = [
+  (n) => `Summarize ${quoteName(n)}`,
+  (n) => `Reorganize ${quoteName(n)}`,
+  (n) => `Improve ${quoteName(n)}`,
+  (n) => `Find notes like ${quoteName(n)}`,
+  (n) => `What's in ${quoteName(n)}?`,
+  (n) => `Turn ${quoteName(n)} into tasks`,
+]
+
+const SECTION_TEMPLATES: Template[] = [
+  (s) => `Expand the ${quoteName(s)} section`,
+  (s) => `Clean up ${quoteName(s)}`,
+]
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+/**
+ * Build randomized starter suggestions personalized with the user's own note and
+ * section names. Meant to be recomputed each time the empty chat is shown so the
+ * chips vary. Falls back to GENERIC_SUGGESTIONS when there are no usable notes.
+ */
+export function buildStarterSuggestions(notes: StarterNote[], count = MAX_SUGGESTIONS): string[] {
+  // Only notes the AI can actually act on: skip encrypted (unreadable), archived and
+  // temporary notes, plus untitled ones.
+  const usable = notes.filter(
+    (n) => !n.encryption && !n.archived && !n.expiresAt && n.title.trim().length > 0,
+  )
+  if (usable.length === 0) return shuffle(GENERIC_SUGGESTIONS).slice(0, count)
+
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (s: string) => {
+    if (s && !seen.has(s)) { seen.add(s); out.push(s) }
+  }
+
+  const notePool = shuffle(usable)
+  // Section names the AI can see (aiHidden sections are off-limits everywhere).
+  const sectionNames = shuffle(
+    usable
+      .flatMap((n) => n.sections)
+      .filter((s) => !s.aiHidden && s.name.trim().length > 0)
+      .map((s) => s.name),
+  )
+
+  let ni = 0
+  let si = 0
+  // Mix in a section-based chip roughly 1 in 3; the rest use note titles.
+  while (out.length < count && (ni < notePool.length || si < sectionNames.length)) {
+    const useSection =
+      si < sectionNames.length && (ni >= notePool.length || Math.random() < 0.34)
+    if (useSection) {
+      push(pick(SECTION_TEMPLATES)(sectionNames[si++]))
+    } else if (ni < notePool.length) {
+      push(pick(NOTE_TEMPLATES)(notePool[ni++].title))
+    } else {
+      break
+    }
+  }
+
+  // Top up with generic starters if we produced too few (e.g. dedupe collisions).
+  for (const g of shuffle(GENERIC_SUGGESTIONS)) {
+    if (out.length >= count) break
+    push(g)
+  }
+  return out.slice(0, count)
+}

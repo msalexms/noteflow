@@ -153,7 +153,7 @@ const api = {
     aiProfileRemoveFile: (id) => electron_1.ipcRenderer.invoke('ai:profile-remove-file', id),
     aiProfileGenerate: (req) => electron_1.ipcRenderer.invoke('ai:profile-generate', req),
     aiProfileGetStatus: () => electron_1.ipcRenderer.invoke('ai:profile-get-status'),
-    aiProfileSetCompleted: () => electron_1.ipcRenderer.invoke('ai:profile-set-completed'),
+    aiProfileSetCompleted: (noteId) => electron_1.ipcRenderer.invoke('ai:profile-set-completed', noteId),
     // Events from main → renderer
     onNewNote: (cb) => {
         electron_1.ipcRenderer.on('new-note', cb);

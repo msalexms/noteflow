@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
-description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas y grupos, sincronizar con GitHub, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.5.0
+description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub, o integrar NoteFlow en scripts y flujos automatizados.
+version: 1.7.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -92,7 +92,8 @@ Añade texto a la nota diaria de hoy (título `DD-MM-YYYY`). Si no existe, la cr
 | `--title <título>` | Escribir en una nota con ese título en lugar de la del día |
 | `--section <nombre>` | Sección/pestaña destino. La crea si no existe. Default: `Note` |
 | `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
-| `--group <nombre>` | Asigna la nota a un grupo (solo al crear) |
+| `--group <nombre>` | Asigna la nota a un grupo |
+| `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
 | `--rich` | La sección nueva se crea en modo rich text |
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
@@ -116,6 +117,7 @@ noteflow new <título> [opciones]
 |---|---|
 | `--section <nombre>` | Nombre de la primera sección. Default: `Note` |
 | `--group <nombre>` | Asignar a un grupo |
+| `--folder <nombre>` | Colocar en una carpeta de ese grupo (requiere `--group`) |
 | `--json` | Devuelve `{ id, title, dirname }` en JSON |
 
 ```bash
@@ -138,10 +140,11 @@ Muestra notas ordenadas por `updated` desc. Por defecto excluye archivadas.
 |---|---|
 | `--tag <tag>` | Filtrar por tag |
 | `--group <nombre>` | Filtrar por grupo |
+| `--folder <nombre>` | Filtrar por carpeta (desambigua con `--group` si el nombre se repite) |
 | `--archived` | Incluir notas archivadas |
 | `--json` | Array JSON con metadata completa de cada nota |
 
-Cada elemento del JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `favorited`, `sections` (array de nombres), `dirname`.
+Cada elemento del JSON incluye: `id`, `title`, `tags`, `group`, `folder`, `created`, `updated`, `archived`, `favorited`, `sections` (array de nombres), `dirname`.
 
 ```bash
 noteflow list
@@ -165,12 +168,69 @@ El título puede ser parcial — si hay varios matches, muestra la lista y pide 
 | `--section <nombre>` | Mostrar solo esta sección |
 | `--json` | JSON completo con todas las secciones y su contenido |
 
-El JSON incluye: `id`, `title`, `tags`, `group`, `created`, `updated`, `archived`, `favorited`, `sections[]` (con `id`, `name`, `content`, `isRawMode`), `dirname`.
+El JSON incluye: `id`, `title`, `tags`, `group`, `folder`, `created`, `updated`, `archived`, `favorited`, `sections[]` (con `id`, `name`, `content`, `isRawMode`), `dirname`.
 
 ```bash
 noteflow get "Proyecto Alpha"
 noteflow get "Proyecto Alpha" --section Tasks
 noteflow get "31-03" --json
+```
+
+---
+
+### `read` — Leer contenido RAW (para pipes / agentes)
+
+```bash
+noteflow read <título> [sección]
+```
+
+Imprime el contenido **tal cual** en stdout, **sin indentar ni decorar** — a
+diferencia de `get`, es apto para pipe y para que un agente lo consuma directo.
+Es la forma recomendada de **leer** una sección concreta.
+
+| Forma | Resultado |
+|---|---|
+| `noteflow read "Proyecto Alpha"` | Nota entera como markdown limpio (`# título`, `## sección` + cuerpo) |
+| `noteflow read "Proyecto Alpha" "Tasks"` | Solo el cuerpo de esa sección (verbatim) |
+| `noteflow read "Proyecto Alpha" --section Tasks` | Igual, forma con flag (útil con títulos multi-palabra) |
+| `noteflow read "Proyecto Alpha" --json` | JSON con todas las secciones (o solo una si se indica) |
+
+- El título puede ser parcial. Si hay varios matches, error pidiendo precisión.
+- **Nombres de sección duplicados:** apunta a uno con un sufijo 1-based, p. ej.
+  `"Tasks#2"`. Si hay ambigüedad sin sufijo, el error te dice exactamente qué escribir.
+
+```bash
+noteflow read "Proyecto Alpha" Tasks
+noteflow read "Proyecto Alpha" "Tasks#2"
+noteflow read "Proyecto Alpha" --json | jq '.sections[].name'
+```
+
+---
+
+### `set` — Sobrescribir (o crear) una sección
+
+```bash
+noteflow set <título> <sección> [fuente de contenido] [--rich]
+```
+
+**Reemplaza** el contenido de una sección (la crea si no existe). Es el complemento
+de `add`, que solo **añade al final**. Es la forma recomendada de **editar** una sección.
+
+| Fuente (gana la primera presente) | Descripción |
+|---|---|
+| `--text "<contenido>"` | Texto inline |
+| `--file <ruta>` | Lee el contenido de un archivo |
+| `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
+| `--rich` | Si crea la sección, la crea en modo rich text (default: raw) |
+
+- Si la sección no existe, se crea (mensaje `Created section "X"`).
+- Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Ante ambigüedad sin sufijo,
+  `set` **falla** en vez de adivinar.
+
+```bash
+noteflow set "Proyecto Alpha" Tasks --text "- [ ] deploy"
+cat todo.md | noteflow set "Proyecto Alpha" Tasks --stdin
+noteflow set "Proyecto Alpha" Notas --file ./notas.txt
 ```
 
 ---
@@ -188,6 +248,36 @@ noteflow sections "Proyecto Alpha"
 # Secciones de "Proyecto Alpha":
 #   Note  (3 lines, raw/markdown)
 #   Tasks  (5 lines, raw/markdown)
+```
+
+---
+
+### `section` — Gestionar secciones (por nombre)
+
+```bash
+noteflow section list   <título>
+noteflow section add    <título> <nombre> [--rich]
+noteflow section rename <título> <viejo> <nuevo>
+noteflow section delete <título> <nombre> [--yes]
+```
+
+Gestiona las secciones de una nota **por nombre**, sin necesidad de ids.
+
+| Subcomando | Descripción |
+|---|---|
+| `list` | Alias de `noteflow sections <título>` |
+| `add` | Crea una sección vacía (raw por defecto; `--rich` para rich text) |
+| `rename` | Renombra una sección (la carpeta/archivo no cambia — va por id) |
+| `delete` | Borra una sección (confirm salvo `--yes`). **Rechaza borrar la última** |
+
+- Los nombres de sección **no son únicos**: desambigua duplicados con un sufijo
+  1-based, p. ej. `"Tasks#2"`. Entrecomilla los nombres con espacios.
+
+```bash
+noteflow section add "Proyecto Alpha" "Meeting Notes"
+noteflow section rename "Proyecto Alpha" Tasks To-do
+noteflow section delete "Proyecto Alpha" Scratch --yes
+noteflow section delete "Proyecto Alpha" "Tasks#2"   # la 2ª sección llamada "Tasks"
 ```
 
 ---
@@ -216,6 +306,29 @@ Actualiza el campo `title` de `note.md`. El nombre de la carpeta no cambia (cont
 
 ```bash
 noteflow rename "Reunión" "Reunión con cliente - Q2"
+```
+
+---
+
+### `move` — Mover una nota a un grupo/carpeta
+
+```bash
+noteflow move <título> --group <grupo> [--folder <carpeta>]
+noteflow move <título> --ungroup
+```
+
+Mueve una nota entre grupos y carpetas (equivalente al drag-and-drop de la app).
+
+| Forma | Resultado |
+|---|---|
+| `--group <g>` | Mueve la nota a la raíz del grupo (limpia la carpeta) |
+| `--group <g> --folder <f>` | Mueve la nota a esa carpeta (la carpeta debe existir en el grupo) |
+| `--ungroup` | Saca la nota del grupo y la carpeta (queda sin agrupar) |
+
+```bash
+noteflow move "Sprint 14" --group backend --folder Planning
+noteflow move "Sprint 14" --group backend          # a la raíz del grupo
+noteflow move "Sprint 14" --ungroup
 ```
 
 ---
@@ -269,7 +382,72 @@ noteflow group create "Proyectos cliente" --color orange
 noteflow group delete <nombre> [--yes]
 ```
 
-Las notas del grupo quedan sin grupo (no se eliminan).
+Las notas del grupo quedan sin grupo (no se eliminan). **También se borran las
+carpetas de ese grupo** (las carpetas solo existen dentro de un grupo).
+
+---
+
+## Carpetas
+
+Las carpetas son **un único nivel de anidación dentro de un grupo**
+(grupo → carpeta → nota). Viven en `folders.json` como
+`{ id, name, groupId, order }`. Una nota con `folder` **siempre** tiene también
+`group`. Los nombres de carpeta pueden repetirse entre grupos distintos.
+
+### `folders` — Listar carpetas
+
+```bash
+noteflow folders [--group <grupo>] [--json]
+```
+
+Sin `--group` lista todas, agrupadas por grupo. Con `--group` solo las de ese grupo.
+
+### `folder create` — Crear carpeta
+
+```bash
+noteflow folder create <nombre> --group <grupo>
+```
+
+`--group` es **obligatorio** (una carpeta no existe fuera de un grupo).
+
+```bash
+noteflow folder create Planning --group backend
+```
+
+### `folder rename` — Renombrar carpeta
+
+```bash
+noteflow folder rename <nombre> <nuevo-nombre> [--group <grupo>]
+```
+
+Usa `--group` para desambiguar si el nombre se repite en varios grupos.
+
+### `folder delete` — Eliminar carpeta
+
+```bash
+noteflow folder delete <nombre> [--group <grupo>] [--yes]
+```
+
+Las notas de la carpeta **caen a la raíz del grupo** (conservan el grupo, pierden
+la carpeta). No se eliminan.
+
+```bash
+noteflow folder delete Planning --group backend --yes
+```
+
+### Asignar notas a carpetas
+
+```bash
+# Al crear:
+noteflow new "Sprint 14" --group backend --folder Planning
+noteflow add "texto" --title "Sprint 14" --group backend --folder Planning
+
+# Mover una existente:
+noteflow move "Sprint 14" --group backend --folder Planning
+
+# Filtrar / listar:
+noteflow list --group backend --folder Planning
+```
 
 ---
 
@@ -357,9 +535,15 @@ JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }
 
 | Flag | Aplica a | Descripción |
 |---|---|---|
-| `--json` | `list`, `get`, `new`, `groups`, `status` | Salida JSON machine-readable |
-| `--yes` | `delete`, `group delete` | Salta confirmación interactiva |
+| `--json` | `list`, `get`, `read`, `new`, `groups`, `folders`, `status` | Salida JSON machine-readable |
+| `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva |
 | `--archived` | `list` | Incluye notas archivadas |
+| `--section <nombre>` | `read`, `get`, `add`, `set` | Apunta a una sección por nombre |
+| `--group <nombre>` | `add`, `new`, `move`, `list`, `folders`, `folder *` | Apunta a/filtra por un grupo |
+| `--folder <nombre>` | `add`, `new`, `move`, `list` | Apunta a/filtra por una carpeta (requiere grupo) |
+| `--ungroup` | `move` | Saca la nota del grupo y la carpeta |
+| `--text` / `--file` / `--stdin` | `set` | Fuente del contenido a escribir |
+| `--rich` | `add`, `set`, `section add` | Sección nueva en modo rich text (default: raw) |
 
 ---
 
@@ -385,19 +569,34 @@ El CLI escribe en stdout y los errores en stderr, con exit code 0 en éxito y 1 
 
 ### Flujo típico para un agente
 
+Todo se direcciona **por nombre** (título de nota + nombre de sección). No necesitas
+tocar ids nunca.
+
 ```bash
-# 1. Ver qué notas existen
+# 1. Descubrir notas y nombres de sección
 noteflow list --json
 
-# 2. Leer una nota completa con todas sus secciones
-noteflow get "título" --json
+# 2. Leer una sección concreta RAW (apto para pipe — usa 'read', no 'get')
+noteflow read "título" "Sección"
 
-# 3. Añadir información a una sección específica
-noteflow add "contenido nuevo" --title "título" --section "Sección"
+# 3a. Sobrescribir una sección (la crea si no existe)
+noteflow set "título" "Sección" --text "contenido nuevo"
+#    …o desde stdin:
+echo "contenido" | noteflow set "título" "Sección" --stdin
 
-# 4. Sincronizar
+# 3b. …o añadir al final en vez de sobrescribir
+noteflow add "más contenido" --title "título" --section "Sección"
+
+# 4. Gestionar la estructura de secciones si hace falta
+noteflow section rename "título" "Sección" "Nuevo nombre"
+
+# 5. Sincronizar
 noteflow push
 ```
+
+> **`read` vs `get`:** `get` es para humanos (indenta y decora); `read` emite el
+> contenido verbatim — úsalo siempre que vayas a procesar el texto.
+> **`set` vs `add`:** `set` **reemplaza** la sección; `add` **añade al final**.
 
 ---
 

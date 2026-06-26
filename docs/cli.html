@@ -193,7 +193,10 @@
               <li><a href="#cmd-new" class="docs__toc-link docs__toc-link--sub">new</a></li>
               <li><a href="#cmd-list" class="docs__toc-link docs__toc-link--sub">list</a></li>
               <li><a href="#cmd-get" class="docs__toc-link docs__toc-link--sub">get</a></li>
+              <li><a href="#cmd-read" class="docs__toc-link docs__toc-link--sub">read</a></li>
+              <li><a href="#cmd-set" class="docs__toc-link docs__toc-link--sub">set</a></li>
               <li><a href="#cmd-sections" class="docs__toc-link docs__toc-link--sub">sections</a></li>
+              <li><a href="#cmd-section" class="docs__toc-link docs__toc-link--sub">section</a></li>
               <li><a href="#cmd-delete" class="docs__toc-link docs__toc-link--sub">delete</a></li>
               <li><a href="#cmd-rename" class="docs__toc-link docs__toc-link--sub">rename</a></li>
               <li><a href="#cmd-pin" class="docs__toc-link docs__toc-link--sub">pin</a></li>
@@ -249,24 +252,27 @@
           </div>
 
           <h3>Typical agent flow</h3>
-          <p>Every read command supports <code>--json</code> for machine-readable output. stdout carries data, stderr carries errors, exit code is <code>0</code> on success and <code>1</code> on failure — a standard Unix contract that plays well with shell pipelines, cron jobs, and LLM tool-use loops.</p>
+          <p>Everything is addressed <strong>by name</strong> (note title + section name) — agents never need to handle ids. Read commands support <code>--json</code>; stdout carries data, stderr carries errors, exit code is <code>0</code> on success and <code>1</code> on failure — a standard Unix contract that plays well with shell pipelines, cron jobs, and LLM tool-use loops.</p>
           <div class="docs__cmd">
             <div class="docs__cmd-header">
               <span>typical agent flow</span>
               <button class="docs__copy-btn" type="button">copy</button>
             </div>
-            <pre><code># 1. Survey what notes exist
+            <pre><code># 1. Discover notes and section names
 noteflow list --json
 
-# 2. Read a full note with all its sections
-noteflow get "title" --json
+# 2. Read one section RAW (pipe-friendly — use 'read', not 'get')
+noteflow read "title" "Section"
 
-# 3. Append information to a specific section
-noteflow add "new content" --title "title" --section "Section"
+# 3. Overwrite a section (creates it if missing) …
+noteflow set "title" "Section" --text "new content"
+#    … or append instead of overwriting
+noteflow add "more content" --title "title" --section "Section"
 
 # 4. Sync
 noteflow push</code></pre>
           </div>
+          <p><code>read</code> vs <code>get</code>: <code>get</code> is for humans (it indents and decorates); <code>read</code> emits content verbatim. <code>set</code> <strong>replaces</strong> a section; <code>add</code> <strong>appends</strong>.</p>
         </section>
 
         <section id="notes-directory">
@@ -382,6 +388,30 @@ noteflow get "Project Alpha" --section Tasks
 noteflow get "31-03" --json</code></pre>
           </div>
 
+          <h3 id="cmd-read"><code>read</code> — Print content RAW (for pipes / agents)</h3>
+          <p>Prints content <strong>verbatim</strong> to stdout — no indentation, no decoration — unlike <code>get</code>. This is the recommended way for scripts and AI agents to <strong>read</strong> a section. Pass a section name as a second argument (or via <code>--section</code>); omit it to print the whole note as clean markdown. Duplicate section names are disambiguated with a 1-based suffix such as <code>"Tasks#2"</code>.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow read "Project Alpha"            # whole note as markdown
+noteflow read "Project Alpha" "Tasks"    # just that section, verbatim
+noteflow read "Project Alpha" --json     # JSON with every section</code></pre>
+          </div>
+
+          <h3 id="cmd-set"><code>set</code> — Overwrite (or create) a section</h3>
+          <p><strong>Replaces</strong> a section's content (creating the section if it doesn't exist) — the counterpart of <code>add</code>, which only appends. Content comes from <code>--text</code>, <code>--file</code>, or stdin (<code>--stdin</code>, also used automatically when piped). This is the recommended way to <strong>edit</strong> a section.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
+cat todo.md | noteflow set "Project Alpha" Tasks --stdin
+noteflow set "Project Alpha" Notes --file ./notes.txt</code></pre>
+          </div>
+
           <h3 id="cmd-sections"><code>sections</code> — List sections of a note</h3>
           <div class="docs__cmd">
             <div class="docs__cmd-header">
@@ -392,6 +422,18 @@ noteflow get "31-03" --json</code></pre>
 # Sections of "Project Alpha":
 #   Note   (3 lines, raw/markdown)
 #   Tasks  (5 lines, raw/markdown)</code></pre>
+          </div>
+
+          <h3 id="cmd-section"><code>section</code> — Manage sections by name</h3>
+          <p>Add, rename, or delete a note's sections — all addressed <strong>by name</strong>, no ids. Section names are not unique; disambiguate duplicates with a 1-based suffix such as <code>"Tasks#2"</code>. <code>delete</code> refuses to remove the last remaining section.</p>
+          <div class="docs__cmd">
+            <div class="docs__cmd-header">
+              <span>bash</span>
+              <button class="docs__copy-btn" type="button">copy</button>
+            </div>
+            <pre><code>noteflow section add "Project Alpha" "Meeting Notes"
+noteflow section rename "Project Alpha" Tasks To-do
+noteflow section delete "Project Alpha" Scratch --yes</code></pre>
           </div>
 
           <h3 id="cmd-delete"><code>delete</code> — Delete a note</h3>
@@ -501,9 +543,12 @@ noteflow logout    # disconnect</code></pre>
               <tr><th>Flag</th><th>Applies to</th><th>Description</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>--json</code></td><td><code>list</code>, <code>get</code>, <code>new</code>, <code>groups</code>, <code>status</code></td><td>Machine-readable JSON output</td></tr>
-              <tr><td><code>--yes</code></td><td><code>delete</code>, <code>group delete</code></td><td>Skip interactive confirmation</td></tr>
+              <tr><td><code>--json</code></td><td><code>list</code>, <code>get</code>, <code>read</code>, <code>new</code>, <code>groups</code>, <code>status</code></td><td>Machine-readable JSON output</td></tr>
+              <tr><td><code>--yes</code></td><td><code>delete</code>, <code>group delete</code>, <code>section delete</code></td><td>Skip interactive confirmation</td></tr>
               <tr><td><code>--archived</code></td><td><code>list</code></td><td>Include archived notes</td></tr>
+              <tr><td><code>--section</code></td><td><code>read</code>, <code>get</code>, <code>add</code>, <code>set</code></td><td>Target a section by name</td></tr>
+              <tr><td><code>--text</code> / <code>--file</code> / <code>--stdin</code></td><td><code>set</code></td><td>Source of the content to write</td></tr>
+              <tr><td><code>--rich</code></td><td><code>add</code>, <code>set</code>, <code>section add</code></td><td>Create the new section in rich-text mode (default: raw)</td></tr>
             </tbody>
           </table>
         </section>

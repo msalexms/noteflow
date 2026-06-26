@@ -222,6 +222,16 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     }
   }, [activeSection?.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Sync title draft with external store updates ──────────────────────────
+  // The per-note init effect only runs on note.id change, so a title updated in the
+  // store for the SAME note (e.g. AI profile generation) wouldn't refresh the draft,
+  // and a later blur could write the stale draft back over it. Mirror the raw-buffer
+  // guard: only re-sync when the title input isn't focused.
+  useEffect(() => {
+    if (titleRef.current === document.activeElement) return
+    if (note && note.title !== titleDraft) setTitleDraft(note.title)
+  }, [note?.title]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Keep a ref to note so handlers always see the latest value
   const noteRef = useRef(note)
   useEffect(() => { noteRef.current = note })
@@ -230,15 +240,20 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const rawContentRef = useRef(rawContent)
   useEffect(() => { rawContentRef.current = rawContent }, [rawContent])
 
-  // Focus rename input when it appears
+  // Focus rename input when it appears. We also depend on the section actually
+  // being present in the rendered list: for a brand-new section, updateNote is
+  // async (it awaits the disk write before the store updates), so the tab — and
+  // thus the input — mounts a render later than when renamingId is set. Reacting
+  // to its presence ensures we focus once the input is really in the DOM.
+  const renamingSectionPresent = renamingId != null && note?.sections.some((s) => s.id === renamingId)
   useEffect(() => {
-    if (renamingId) {
+    if (renamingId && renamingSectionPresent) {
       setTimeout(() => {
         renameRef.current?.focus()
         renameRef.current?.select()
       }, 0)
     }
-  }, [renamingId])
+  }, [renamingId, renamingSectionPresent])
 
   // Stable ref for activeSectionId (for use inside event handlers)
   const activeSectionIdRef = useRef(activeSectionId)
@@ -704,6 +719,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       })
     }
     setRenamingId(null)
+    // The editor isn't remounted on commit (its key is unchanged), so move focus
+    // into it explicitly for a smooth "+ → name it → start writing" flow.
+    requestAnimationFrame(() => editorRef.current?.editor?.commands.focus())
   }
 
   const handleRenameKeyDown = (e: React.KeyboardEvent) => {
@@ -1253,7 +1271,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   fontSize: `${fontSize}px`,
                   fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
                 }}
-                className={`h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed ${readableWidth ? 'block w-full max-w-[87ch] mx-auto' : 'w-full'}`}
+                className={`h-full p-4 bg-transparent text-text placeholder-text-muted/30 border-none outline-none resize-none caret-text leading-relaxed w-full ${readableWidth ? 'raw-readable' : ''}`}
                 spellCheck={false}
               />
               {searchOpen && (
@@ -1273,6 +1291,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 onChange={handleSectionContentChange}
                 placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
                 fontSize={fontSize}
+                autoFocus={renamingId === null}
+                currentSectionId={activeSection?.id ?? null}
               />
               {searchOpen && (
                 <InNoteSearchBar

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertTriangle, ArrowUp, Check, FileText, History, Image as ImageIcon, Loader2, Paperclip, Plus, RefreshCw, Settings, Square, Trash2, Wrench, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
+import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
-import { GENERIC_SUGGESTIONS, splitSuggestions } from '../../lib/chatSuggestions'
+import { buildStarterSuggestions, splitSuggestions } from '../../lib/chatSuggestions'
 import { Card } from './ui'
 import type { ChatAttachment, ChatToolActivity } from '../../types'
 
@@ -44,7 +45,7 @@ const CONFIRM_LABELS: Record<string, string> = {
 }
 
 function ToolActivityRow({ a }: { a: ChatToolActivity }) {
-  const label = a.summary || RUNNING_LABELS[a.name] || a.name
+  const label = a.summary || a.runningLabel || RUNNING_LABELS[a.name] || a.name
   const icon =
     a.status === 'running' ? <Loader2 size={11} className="animate-spin text-text-muted" />
     : a.status === 'error' ? <AlertTriangle size={11} className="text-red-300" />
@@ -100,8 +101,10 @@ export function ChatView({
   const setLlmConfig = useAiChatStore((s) => s.setLlmConfig)
   const messages = useAiChatStore((s) => s.messages)
   const streaming = useAiChatStore((s) => s.streaming)
+  const awaitingModelText = useAiChatStore((s) => s.awaitingModelText)
   const activeSources = useAiChatStore((s) => s.activeSources)
   const suggestions = useAiChatStore((s) => s.suggestions)
+  const notes = useNotesStore((s) => s.notes)
   const sendMessage = useAiChatStore((s) => s.sendMessage)
   const cancel = useAiChatStore((s) => s.cancel)
   const pendingConfirm = useAiChatStore((s) => s.pendingConfirm)
@@ -168,15 +171,26 @@ export function ChatView({
     sendMessage(pendingPrompt)
   }, [pendingPrompt, configured, streaming, sendMessage])
 
-  // The assistant turn is always the last message; while streaming with no text yet,
-  // surface an explicit "Thinking…" row so the wait doesn't read as a finished reply.
+  // The assistant turn is always the last message. Show an explicit "Thinking…" row whenever the
+  // model is working but not currently emitting text and no tool is running — this covers both the
+  // initial think AND the gap between agent steps (e.g. composing the final answer after a tool
+  // ran). `awaitingModelText` is event-driven (see the store) so a mid-turn pause with earlier
+  // preamble text on screen no longer reads as a finished reply.
   const lastMsg = messages[messages.length - 1]
   const toolRunning = lastMsg?.actions?.some((a) => a.status === 'running') ?? false
-  const thinking = streaming && lastMsg?.role === 'assistant' && lastMsg.content.length === 0 && !toolRunning
+  const thinking = streaming && lastMsg?.role === 'assistant' && awaitingModelText && !toolRunning && !pendingConfirm
 
-  // Prompt suggestions above the composer: generic starters on an empty chat, or the
+  // Personalized starter chips for the empty chat, randomized from the user's own note
+  // and section names. Recomputed once notes are loaded (and on each view re-entry, since
+  // BrainView remounts ChatView) so the chips vary; intentionally NOT re-rolled on every
+  // note edit to avoid flicker — hence the notes-loaded boolean as the only dep.
+  const notesLoaded = notes.length > 0
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const starterSuggestions = useMemo(() => buildStarterSuggestions(notes), [notesLoaded])
+
+  // Prompt suggestions above the composer: personalized starters on an empty chat, or the
   // model's parsed next-actions once there's a conversation. Hidden while streaming.
-  const shownSuggestions = streaming ? [] : messages.length === 0 ? GENERIC_SUGGESTIONS : suggestions
+  const shownSuggestions = streaming ? [] : messages.length === 0 ? starterSuggestions : suggestions
 
   const canSend = (draft.trim().length > 0 || pendingAttachments.length > 0) && !streaming
   const submit = () => {

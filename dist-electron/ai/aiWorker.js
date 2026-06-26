@@ -621,8 +621,9 @@ let currentModelId = '';
 let currentCacheDir = '';
 // Once the model has finished its embedding work, hold it this long with no further embed activity
 // before releasing it back to dormant (~70 MB). A short grace avoids reload thrash if the user
-// reindexes twice in a row or keeps editing right after.
-const MODEL_IDLE_UNLOAD_MS = 30000;
+// reindexes twice in a row or keeps editing right after — kept tight so the heavy ~1 GB of weights
+// drops back quickly after a one-off chat query (the main process kills the whole worker later).
+const MODEL_IDLE_UNLOAD_MS = 10000;
 let unloadTimer = null;
 function cancelModelUnload() {
     if (unloadTimer) {
@@ -663,6 +664,12 @@ function stripNoise(text) {
 function chunkTextFor(s) {
     return stripNoise(`${s.name}\n${s.content}`).trim();
 }
+// A section is "empty" when its body is blank after stripping noise (base64 images, etc.).
+// Such a section carries no semantic signal — only the (often default) section name — so it must
+// NOT be embedded: otherwise every blank note would cluster together by sharing the name "Note".
+function hasIndexableContent(s) {
+    return stripNoise(s.content).trim().length > 0;
+}
 async function handleIndexNote(dirPath) {
     if (!index)
         throw new Error('Index not initialised');
@@ -677,6 +684,7 @@ async function handleIndexNote(dirPath) {
     }
     const desired = parsed.sections
         .filter((s) => !s.aiHidden) // sections hidden from the AI never enter the index
+        .filter(hasIndexableContent) // empty sections carry no semantic signal → never relate them
         .map((s) => ({ sectionId: s.id, sectionName: s.name, text: chunkTextFor(s) }))
         .filter((d) => d.text.length > 0)
         .map((d) => ({ ...d, hash: fnv1a(d.text) }));
@@ -719,6 +727,8 @@ async function handleReindexAll(notesDir) {
         for (const s of parsed.sections) {
             if (s.aiHidden)
                 continue; // sections hidden from the AI never enter the index
+            if (!hasIndexableContent(s))
+                continue; // empty sections carry no semantic signal → never relate them
             const text = chunkTextFor(s);
             if (!text)
                 continue;

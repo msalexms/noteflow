@@ -504,7 +504,12 @@ export function App() {
             <GroupOverview groupId={groupViewId} onClose={() => setGroupView(null)} />
           ) : noteViewId ? (
             <NoteOverview noteId={noteViewId} onClose={() => setNoteView(null)} />
-          ) : isLoading ? (
+          ) : isLoading && notes.length === 0 ? (
+            // Only show the full-screen spinner on the very first load (nothing to
+            // show yet). A background reload triggered by sync keeps the previous
+            // notes in memory until it finishes, so we must NOT unmount the editor
+            // here — doing so remounts a fresh TipTap instance and resets scroll +
+            // focus to the top, which is the "the note resets when it syncs" bug.
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-5 h-5 border-2 border-text/20 border-t-text rounded-full animate-spin" />
               <div className="text-xs font-mono text-text-muted">Loading notes...</div>

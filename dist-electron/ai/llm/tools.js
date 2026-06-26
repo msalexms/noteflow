@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TOOLS = exports.DESTRUCTIVE_TOOLS = void 0;
 exports.describeTarget = describeTarget;
+exports.describeAction = describeAction;
 exports.executeTool = executeTool;
 // Agentic tools — the catalog the chat model can call, plus a provider-neutral executor.
 // Runs in the MAIN process. The executor is decoupled from main.ts via an injected ToolContext
@@ -265,6 +266,50 @@ function describeTarget(name, rawInput, ctx) {
         }
         default:
             return name;
+    }
+}
+/** Present-tense, human label for a tool call WHILE it runs — surfaced in the chat's live activity
+ *  row so the user sees not just "an agent ran" but WHAT it's doing and on which note/group. Resolves
+ *  ids→titles from the live store; falls back to a generic verb when the target can't be named. */
+function describeAction(name, rawInput, ctx) {
+    const input = (rawInput && typeof rawInput === 'object' ? rawInput : {});
+    const noteTitle = (id) => loadNote(ctx, id)?.note.title?.trim() || 'note';
+    const groupName = (id) => ctx.readGroups().find((g) => g.id === id)?.name?.trim() || 'group';
+    const folderName = (id) => ctx.readFolders().find((f) => f.id === id)?.name?.trim() || 'folder';
+    switch (name) {
+        case 'list_notes': return 'Listing notes…';
+        case 'get_note': return `Reading "${noteTitle(asStr(input.note_id))}"…`;
+        case 'list_groups': return 'Listing groups…';
+        case 'search_notes': {
+            const q = asStr(input.query).trim();
+            return q ? `Searching for "${q}"…` : 'Searching notes…';
+        }
+        case 'create_note': {
+            const t = asStr(input.title).trim();
+            return t ? `Creating note "${t}"…` : 'Creating note…';
+        }
+        case 'update_note': return `Updating "${noteTitle(asStr(input.note_id))}"…`;
+        case 'add_section': {
+            const n = asStr(input.name).trim();
+            return n ? `Adding section "${n}"…` : 'Adding section…';
+        }
+        case 'update_section': return `Editing section of "${noteTitle(asStr(input.note_id))}"…`;
+        case 'rename_section': return `Renaming section of "${noteTitle(asStr(input.note_id))}"…`;
+        case 'create_group': {
+            const n = asStr(input.name).trim();
+            return n ? `Creating group "${n}"…` : 'Creating group…';
+        }
+        case 'create_folder': {
+            const n = asStr(input.name).trim();
+            return n ? `Creating folder "${n}"…` : 'Creating folder…';
+        }
+        case 'rename_group': return `Renaming group "${groupName(asStr(input.group_id))}"…`;
+        case 'rename_folder': return `Renaming folder "${folderName(asStr(input.folder_id))}"…`;
+        case 'delete_note': return `Deleting "${noteTitle(asStr(input.note_id))}"…`;
+        case 'delete_section': return `Deleting section of "${noteTitle(asStr(input.note_id))}"…`;
+        case 'delete_group': return `Deleting group "${groupName(asStr(input.group_id))}"…`;
+        case 'delete_folder': return `Deleting folder "${folderName(asStr(input.folder_id))}"…`;
+        default: return name;
     }
 }
 async function executeTool(name, rawInput, ctx) {

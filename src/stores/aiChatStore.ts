@@ -15,6 +15,23 @@ export interface ChatTurn {
 /** Tabs of the AI panel — shared so the command palette can route to one. */
 export type PanelTab = 'chat' | 'related' | 'profile' | 'settings'
 
+export interface ProfilePickedFile { id: string; name: string; kind: 'pdf' | 'image' | 'text'; sizeBytes: number }
+
+/**
+ * The profile wizard's in-progress answers. Lifted out of ProfileFlow's local state so they
+ * survive the component unmounting when the user switches tabs (e.g. hops to Settings to fix the
+ * provider after a failed generate, then comes back). Session-scoped on purpose: the attached
+ * files' bytes live in main's cache, which is itself cleared on app restart.
+ */
+export interface ProfileDraft {
+  values: Record<string, string | string[]>
+  files: ProfilePickedFile[]
+  urls: string[]
+  urlInput: string
+}
+
+const EMPTY_PROFILE_DRAFT: ProfileDraft = { values: {}, files: [], urls: [], urlInput: '' }
+
 interface LlmConfigPatch {
   active?: string
   model?: string
@@ -43,6 +60,10 @@ interface AiChatState {
   removeAttachment: (id: string) => void
   messages: ChatTurn[]
   streaming: boolean
+  // True while the model is working but not currently emitting text and no tool is running —
+  // i.e. the initial think AND the gaps between agent steps (e.g. composing the final answer
+  // after a tool ran). Drives the "Thinking…" row so a mid-turn pause never reads as "done".
+  awaitingModelText: boolean
   currentRequestId: string | null
   activeSources: ChatSource[]
   pendingConfirm: ChatPendingConfirm | null
@@ -58,6 +79,11 @@ interface AiChatState {
   newChat: () => void
   openSession: (id: string) => void
   deleteSession: (id: string) => void
+
+  // ── Profile wizard draft (session-scoped; survives tab switches, not app restart) ──
+  profileDraft: ProfileDraft
+  setProfileDraft: (updater: (prev: ProfileDraft) => ProfileDraft) => void
+  resetProfileDraft: () => void
 
   // ── AI panel routing (driven by the command palette) ──
   panelTab: PanelTab | null      // requested initial tab — consumed by AiPanel
@@ -124,6 +150,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
   messages: [],
   streaming: false,
+  awaitingModelText: false,
   currentRequestId: null,
   activeSources: [],
   pendingConfirm: null,
@@ -140,6 +167,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     set({
       messages: [...history, userTurn, assistantTurn],
       streaming: true,
+      awaitingModelText: true,
       currentRequestId: requestId,
       activeSources: [],
       suggestions: [],
@@ -156,7 +184,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   cancel: () => {
     const id = get().currentRequestId
     if (id) window.noteflow.aiChatCancel(id)
-    set({ streaming: false, currentRequestId: null, pendingConfirm: null })
+    set({ streaming: false, awaitingModelText: false, currentRequestId: null, pendingConfirm: null })
   },
 
   confirmAction: (approved) => {
@@ -182,14 +210,14 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   newChat: () => {
     if (get().streaming) get().cancel()
     for (const a of get().pendingAttachments) void window.noteflow.aiChatRemoveFile(a.id)
-    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null, pendingAttachments: [], suggestions: [] })
+    set({ messages: [], activeSources: [], activeSessionId: null, pendingConfirm: null, pendingAttachments: [], suggestions: [], awaitingModelText: false })
   },
 
   openSession: (id) => {
     if (get().streaming) get().cancel()
     const s = get().sessions.find((x) => x.id === id)
     if (!s) return
-    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [], suggestions: [] })
+    set({ messages: s.messages.map((m) => ({ ...m })), activeSessionId: id, activeSources: [], suggestions: [], awaitingModelText: false })
   },
 
   deleteSession: (id) => {
@@ -201,6 +229,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
   // ── AI panel routing ──
   panelTab: null,
   pendingPrompt: null,
+
+  profileDraft: EMPTY_PROFILE_DRAFT,
+  setProfileDraft: (updater) => set((s) => ({ profileDraft: updater(s.profileDraft) })),
+  resetProfileDraft: () => set({ profileDraft: EMPTY_PROFILE_DRAFT }),
 
   openAiPanel: (tab, prompt) => {
     const trimmed = prompt?.trim()
@@ -255,6 +287,8 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
     const offDelta = window.noteflow.onAiChatDelta((p) => {
       if (p.requestId !== get().currentRequestId) return
+      // Text is now flowing for this step — the bubble itself is the feedback, drop "Thinking…".
+      if (get().awaitingModelText) set({ awaitingModelText: false })
       appendToAssistant(p.delta)
     })
     const offSources = window.noteflow.onAiChatSources((p) => {
@@ -263,13 +297,19 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     })
     const offToolCall = window.noteflow.onAiChatToolCall((p) => {
       if (p.requestId !== get().currentRequestId) return
+      // A tool is running now: its activity row carries the feedback, so hide "Thinking…".
+      set({ awaitingModelText: false })
       updateActions((actions) =>
         actions.some((a) => a.toolCallId === p.toolCallId)
           ? actions
-          : [...actions, { toolCallId: p.toolCallId, name: p.name, status: 'running' }])
+          : [...actions, { toolCallId: p.toolCallId, name: p.name, status: 'running', runningLabel: p.label }])
     })
     const offToolResult = window.noteflow.onAiChatToolResult((p) => {
       if (p.requestId !== get().currentRequestId) return
+      // Tool finished; the model is about to think again (e.g. compose the final answer). Re-arm
+      // "Thinking…" so the inter-step gap doesn't read as a finished reply. The `!toolRunning`
+      // guard in ChatView keeps it hidden if another tool in the same step is still going.
+      set({ awaitingModelText: true })
       updateActions((actions) =>
         actions.map((a) => a.toolCallId === p.toolCallId ? { ...a, status: p.status, summary: p.summary } : a))
     })
@@ -290,7 +330,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
           suggestions = split.suggestions
           if (split.visible !== last.content) msgs[msgs.length - 1] = { ...last, content: split.visible }
         }
-        return { messages: msgs, streaming: false, currentRequestId: null, pendingConfirm: null, suggestions }
+        return { messages: msgs, streaming: false, awaitingModelText: false, currentRequestId: null, pendingConfirm: null, suggestions }
       })
       persist()
     })
@@ -300,7 +340,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         const msgs = s.messages.slice()
         const last = msgs[msgs.length - 1]
         if (last && last.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content || `⚠ ${p.error}`, error: true }
-        return { messages: msgs, streaming: false, currentRequestId: null, pendingConfirm: null, suggestions: [] }
+        return { messages: msgs, streaming: false, awaitingModelText: false, currentRequestId: null, pendingConfirm: null, suggestions: [] }
       })
       persist()
     })

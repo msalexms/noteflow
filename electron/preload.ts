@@ -181,8 +181,8 @@ const api = {
   aiChatCancel: (requestId: string) => ipcRenderer.send('ai:chat-cancel', requestId),
   aiChatConfirm: (toolCallId: string, approved: boolean) =>
     ipcRenderer.send('ai:chat-confirm', { toolCallId, approved }),
-  onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => {
-    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown }) => cb(p)
+  onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => {
+    const wrapper = (_event: any, p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => cb(p)
     ipcRenderer.on('ai:chat-tool-call', wrapper)
     return () => ipcRenderer.removeListener('ai:chat-tool-call', wrapper)
   },
@@ -221,7 +221,7 @@ const api = {
   aiProfileGenerate: (req: { fields: Array<{ label: string; value: string; section?: string }>; fileIds: string[]; urls: string[]; locale?: string }) =>
     ipcRenderer.invoke('ai:profile-generate', req),
   aiProfileGetStatus: () => ipcRenderer.invoke('ai:profile-get-status'),
-  aiProfileSetCompleted: () => ipcRenderer.invoke('ai:profile-set-completed'),
+  aiProfileSetCompleted: (noteId?: string) => ipcRenderer.invoke('ai:profile-set-completed', noteId),
 
   // Events from main → renderer
   onNewNote: (cb: () => void) => {

@@ -14,6 +14,7 @@ import {
 } from '../lib/noteUtils'
 import { encryptSections, decryptSections, type EncryptionOptions } from '../lib/cryptoUtils'
 import { collectAlarms } from '../lib/alarmUtils'
+import { getNoteSearchIndex } from '../lib/searchUtils'
 
 /**
  * Serializes `next`, computes the minimal multi-file diff against `prev`
@@ -23,7 +24,11 @@ import { collectAlarms } from '../lib/alarmUtils'
 async function writeNoteToDisk(prev: Note | null, next: Note): Promise<void> {
   const payload = buildNoteWritePayload(prev, next)
   next.raw = payload.files[NOTE_MD] ?? next.raw
-  await window.noteflow.writeNote(payload)
+  // The IPC handler swallows FS errors into { ok:false } rather than throwing across
+  // the bridge. Surface that here so callers don't silently update memory while disk
+  // keeps the old (e.g. empty) note — which would resurface on the next reload.
+  const res = await window.noteflow.writeNote(payload)
+  if (!res.ok) throw new Error(res.error || 'Failed to write note to disk')
 }
 
 /** Normalize a string: lowercase + strip diacritical marks (accents) */
@@ -67,12 +72,18 @@ interface NotesState {
   // Actions
   loadNotes: () => Promise<void>
   createNote: () => Promise<Note>
+  // Creates a note already populated with title/sections (and optional group/folder) in a
+  // single disk write — no empty intermediate. Used by AI generation so the editor never
+  // mounts a blank, date-titled note whose stale title draft could clobber the real one.
+  createPopulatedNote: (data: { title: string; sections: NoteSection[]; group?: string; folder?: string; activate?: boolean }) => Promise<Note>
   createTempNote: () => Promise<Note>
   duplicateNote: (id: string) => Promise<Note>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'sections' | 'tags' | 'favorited' | 'group' | 'folder'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   archiveNote: (id: string) => Promise<void>
   setActiveNote: (id: string | null) => void
+  /** Navigate to a specific section of a note (same note or another), closing any full-area view. */
+  navigateToSection: (noteId: string, sectionId: string) => void
   setOpenNoteIds: (ids: string[]) => void
   setGroupView: (id: string | null) => void
   setNoteView: (id: string | null) => void
@@ -254,6 +265,33 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     return note
   },
 
+  createPopulatedNote: async ({ title, sections, group, folder, activate = true }) => {
+    const draft = createEmptyNote()
+    const dir = get().notesDir
+    const allContent = sections.map((s) => s.content).join('\n')
+    const note: Note = {
+      ...draft,
+      title,
+      sections,
+      tags: extractTags(allContent),
+      ...(group ? { group } : {}),
+      ...(folder ? { folder } : {}),
+      filePath: `${dir}/${noteDirname(draft.id, title)}`,
+      raw: '',
+    }
+
+    await writeNoteToDisk(null, note)
+    set((s) => ({
+      notes: [note, ...s.notes],
+      // Deliberately NOT setting newlyCreatedNoteId: we don't want the editor to auto-focus
+      // and select the title field, which is what let a stale title draft overwrite this one.
+      ...(activate
+        ? { activeNoteId: note.id, openNoteIds: [note.id], groupViewId: null, noteViewId: null, brainViewOpen: false }
+        : {}),
+    }))
+    return note
+  },
+
   createTempNote: async () => {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     const draft = { ...createEmptyNote(), expiresAt }
@@ -407,6 +445,24 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       return { activeNoteId: id, openNoteIds: [id], groupViewId: null, noteViewId: null, brainViewOpen: false }
     })
     if (id) window.noteflow.setUiState({ activeNoteId: id })
+  },
+  navigateToSection: (noteId, sectionId) => {
+    const target = get().notes.find((n) => n.id === noteId)
+    if (!target || !target.sections.some((s) => s.id === sectionId)) return
+    // Stash the requested section so the editor lands on it on (re)mount, then
+    // re-dispatch on the next tick: when a full-area view (group/note/brain) is
+    // open the editor is unmounted and only starts listening after setActiveNote
+    // closes the view. Same mechanism used by the overviews and the brain.
+    set({ pendingInitialSectionId: sectionId })
+    get().setActiveNote(noteId)
+    window.dispatchEvent(
+      new CustomEvent('noteflow:request-section', { detail: { noteId, sectionId } }),
+    )
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('noteflow:request-section', { detail: { noteId, sectionId } }),
+      )
+    }, 0)
   },
   // Group overview, note overview and brain view are mutually exclusive full-area views: opening one closes the others.
   setGroupView: (id) => set({ groupViewId: id, noteViewId: null, brainViewOpen: false }),
@@ -574,10 +630,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       .filter((n) => {
         if (!searchQuery.trim()) return true
         const q = normalize(searchQuery)
+        const idx = getNoteSearchIndex(n)
         return (
-          normalize(n.title).includes(q) ||
-          n.sections.some((s) => normalize(s.content).includes(q) || normalize(s.name).includes(q)) ||
-          n.tags.some((t) => normalize(t).includes(q))
+          idx.title.includes(q) ||
+          idx.sectionContents.some((c) => c.includes(q)) ||
+          idx.sectionNames.some((s) => s.includes(q)) ||
+          idx.tags.some((t) => t.includes(q))
         )
       })
       .sort((a, b) => {

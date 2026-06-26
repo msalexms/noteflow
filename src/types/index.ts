@@ -217,6 +217,7 @@ export interface ChatToolActivity {
   name: string
   status: 'running' | 'done' | 'error' | 'cancelled'
   summary?: string
+  runningLabel?: string // present-tense "what it's doing" label, shown while status === 'running'
 }
 
 // A destructive tool call awaiting the user's confirmation
@@ -339,7 +340,7 @@ declare global {
       aiChatRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiChatCancel: (requestId: string) => void
       aiChatConfirm: (toolCallId: string, approved: boolean) => void
-      onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown }) => void) => () => void
+      onAiChatToolCall: (cb: (p: { requestId: string; toolCallId: string; name: string; input: unknown; label: string }) => void) => () => void
       onAiChatToolResult: (cb: (p: { requestId: string; toolCallId: string; status: ChatToolActivity['status']; summary: string }) => void) => () => void
       onAiChatConfirmRequest: (cb: (p: ChatPendingConfirm) => void) => () => void
       onAiChatDelta: (cb: (p: { requestId: string; delta: string }) => void) => () => void
@@ -349,8 +350,8 @@ declare global {
       aiProfilePickFiles: () => Promise<{ ok: boolean; canceled?: boolean; files?: Array<{ id: string; name: string; kind: 'pdf' | 'image' | 'text'; sizeBytes: number }>; errors?: string[] }>
       aiProfileRemoveFile: (id: string) => Promise<{ ok: boolean }>
       aiProfileGenerate: (req: { fields: Array<{ label: string; value: string; section?: string }>; fileIds: string[]; urls: string[]; locale?: string }) => Promise<{ ok: boolean; error?: string } & Partial<GeneratedProfile>>
-      aiProfileGetStatus: () => Promise<{ completedAt: string | null }>
-      aiProfileSetCompleted: () => Promise<{ ok: boolean }>
+      aiProfileGetStatus: () => Promise<{ completedAt: string | null; noteId: string | null }>
+      aiProfileSetCompleted: (noteId?: string) => Promise<{ ok: boolean }>
     }
   }
 }

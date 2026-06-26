@@ -4,6 +4,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useAiStore } from '../../stores/aiStore'
 import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
+import { extractSectionRelations } from '../../lib/sectionRelations'
 
 // Two-layer brain graph model. Node ids are prefixed so groups, folders, notes and sections never
 // collide: `g:<groupId>`, `f:<folderId>`, `n:<noteId>`, `s:<sectionId>`.
@@ -22,11 +23,15 @@ export interface BrainNode {
 
 export interface BrainStructureEdge { source: string; target: string }
 export interface BrainContentEdge { source: string; target: string; score: number }
+// Explicit user-made section→section relation (from inline `noteflow://` links).
+// Independent of the AI index, so it shows even with embeddings disabled.
+export interface BrainRelationEdge { source: string; target: string }
 
 export interface BrainGraphModel {
   nodes: BrainNode[]
   structureEdges: BrainStructureEdge[]
   contentEdges: BrainContentEdge[]
+  relationEdges: BrainRelationEdge[]
 }
 
 /**
@@ -52,6 +57,9 @@ export function useBrainGraph(): BrainGraphModel {
     const nodes: BrainNode[] = []
     const structureEdges: BrainStructureEdge[] = []
     const noteNodeIds = new Set<string>()
+    // Resolves a section id to the node that represents it: its own `s:` dendrite when the note
+    // has 2+ sections, otherwise the collapsed `n:` soma. Used to anchor user relation edges.
+    const sectionNodeId = new Map<string, string>()
 
     const addNote = (note: Note, colorVar: GroupColor): string => {
       const id = `n:${note.id}`
@@ -67,7 +75,10 @@ export function useBrainGraph(): BrainGraphModel {
       // section as its click target (preview + navigation), so we skip the redundant dendrite.
       // With two or more sections, every section becomes a dendrite hanging off the soma —
       // including the first one, which the soma also keeps as its own click target.
-      if (note.sections.length < 2) return id
+      if (note.sections.length < 2) {
+        if (note.sections[0]) sectionNodeId.set(note.sections[0].id, id)
+        return id
+      }
       for (let i = 0; i < note.sections.length; i++) {
         const sec = note.sections[i]
         const sid = `s:${sec.id}`
@@ -78,6 +89,7 @@ export function useBrainGraph(): BrainGraphModel {
           sectionId: sec.id, favorited: note.favorited,
         })
         structureEdges.push({ source: id, target: sid })
+        sectionNodeId.set(sec.id, sid)
       }
       return id
     }
@@ -127,6 +139,29 @@ export function useBrainGraph(): BrainGraphModel {
       contentEdges.push({ source: `n:${e.a}`, target: `n:${e.b}`, score: e.score })
     }
 
-    return { nodes, structureEdges, contentEdges }
-  }, [items, graphEdges])
+    // Explicit user relations: parsed from each visible section's inline `noteflow://` links.
+    // The source is the section that holds the link; the target is the linked section (its `s:`
+    // dendrite, or the `n:` soma if the note collapsed / the section id no longer exists). This
+    // layer is derived purely from note content in memory — no AI index involved.
+    const relationEdges: BrainRelationEdge[] = []
+    const seenRel = new Set<string>()
+    for (const note of visibleNotes) {
+      for (const sec of note.sections) {
+        const source = sectionNodeId.get(sec.id)
+        if (!source) continue
+        for (const rel of extractSectionRelations(sec.content)) {
+          const target =
+            sectionNodeId.get(rel.targetSectionId) ??
+            (noteNodeIds.has(rel.targetNoteId) ? `n:${rel.targetNoteId}` : null)
+          if (!target || target === source) continue
+          const key = `${source}->${target}`
+          if (seenRel.has(key)) continue
+          seenRel.add(key)
+          relationEdges.push({ source, target })
+        }
+      }
+    }
+
+    return { nodes, structureEdges, contentEdges, relationEdges }
+  }, [items, graphEdges, visibleNotes])
 }

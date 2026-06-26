@@ -10,7 +10,7 @@ import { adaptiveDetail, buildBrainMesh, normalizeShape, rotateAround, type Brai
 import { assignVertices } from './assignVertices'
 import { BrainTuner } from './BrainTuner'
 import { type LookParams, DEFAULT_LOOK, loadTuner, saveTuner, type SculptSettings, DEFAULT_SCULPT } from './tunerState'
-import type { BrainGraphModel, BrainNodeKind } from './useBrainGraph'
+import type { BrainContentEdge, BrainGraphModel, BrainNodeKind } from './useBrainGraph'
 
 interface Props {
   model: BrainGraphModel
@@ -254,12 +254,13 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
     brainGroup.add(dataGroup)
     const structureGroup = new THREE.Group() // routes group→folder→note along the scaffold
     const synapseGroup = new THREE.Group()   // content edges note↔note (routed through the interior)
+    const relationGroup = new THREE.Group()  // explicit user relations (always visible, same style)
     const dendriteGroup = new THREE.Group()  // note→section
     const nodeGroup = new THREE.Group()      // orbs + rings
     const hoverGroup = new THREE.Group() // bright incident synapses + marker for the hovered node
     const thinkGroup = new THREE.Group() // several concurrent relation-sweeps while the chat thinks
     const litGroup = new THREE.Group()   // pulsing halos over notes cited by the latest chat answer
-    dataGroup.add(structureGroup, synapseGroup, dendriteGroup, nodeGroup, hoverGroup, thinkGroup, litGroup)
+    dataGroup.add(structureGroup, synapseGroup, relationGroup, dendriteGroup, nodeGroup, hoverGroup, thinkGroup, litGroup)
 
     // Pick + label bookkeeping, refreshed on each rebuildData.
     interface PlacedInfo {
@@ -293,7 +294,7 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
       for (const child of [...g.children]) { g.remove(child); disposeObj(child) }
     }
     const removeObj = (g: THREE.Group, obj: THREE.Object3D) => { g.remove(obj); disposeObj(obj) }
-    const disposeData = () => [structureGroup, synapseGroup, dendriteGroup, nodeGroup].forEach(clearGroup)
+    const disposeData = () => [structureGroup, synapseGroup, relationGroup, dendriteGroup, nodeGroup].forEach(clearGroup)
 
     const lineGeo = (lp: number[], lc: number[]) => {
       const g = new THREE.BufferGeometry()
@@ -334,11 +335,19 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         })
       }
 
-      // Batch-route every content edge at once (strongest relations first, so they win the directest
+      // Synapse layer = AI content edges + explicit user relations (`relationEdges`), drawn with the
+      // SAME faint style. User relations are given the top score so they win the directest path; they
+      // also render with the AI index off (they're derived from note content, not embeddings).
+      const synapseEdges: BrainContentEdge[] = [
+        ...m.contentEdges,
+        ...m.relationEdges.map((e) => ({ source: e.source, target: e.target, score: 1 })),
+      ]
+
+      // Batch-route every synapse edge at once (strongest relations first, so they win the directest
       // path and weaker ones detour around them). Used by both the static synapse lines below and the
       // hover/thinking sweeps, via routeContent.
       const routePairs: Array<readonly [number, number]> = []
-      for (const e of [...m.contentEdges].sort((x, y) => y.score - x.score)) {
+      for (const e of [...synapseEdges].sort((x, y) => y.score - x.score)) {
         const a = assignment.get(e.source), b = assignment.get(e.target)
         if (a != null && b != null) routePairs.push([a, b])
       }
@@ -460,43 +469,43 @@ export function BrainScene({ model, showContentEdges, onOpenNote, onOpenGroup, h
         // relation threads read as soft, muted lines instead of bright white cords — while staying a
         // notch brighter than the lattice they cross.
         const syn = colorOf('--text').clone().lerp(bg, isDark ? 0.34 : 0.24)
-        const lp: number[] = [], lc: number[] = []
-        // Draw each lattice segment a relation traverses AT MOST ONCE. Many relations sharing a
-        // corridor used to push their faint white line onto the very same segment N times; even with
-        // NormalBlending the repeated over-compositing crept toward solid white, so a group edge
-        // crossed by lots of relations bleached out — and the more relations, the whiter. Deduping
-        // makes a corridor look identical whether 2 or 50 relations run through it, so the group
-        // colour underneath always keeps its hue regardless of traffic.
-        const drawnSeg = new Set<number>()
-        for (const e of m.contentEdges) {
-          const a = assignment.get(e.source), b = assignment.get(e.target)
-          if (a == null || b == null) continue
-          const seq = routeContent(a, b)
-          for (let i = 0; i < seq.length - 1; i++) {
-            const u = seq[i], w = seq[i + 1]
-            const key = u < w ? u * mesh.vertexCount + w : w * mesh.vertexCount + u
-            if (drawnSeg.has(key)) continue
-            drawnSeg.add(key)
-            lp.push(p[u * 3], p[u * 3 + 1], p[u * 3 + 2], p[w * 3], p[w * 3 + 1], p[w * 3 + 2])
-            lc.push(syn.r, syn.g, syn.b, syn.r, syn.g, syn.b)
+        // Build content and relation segments separately so user relations can live in their OWN
+        // always-visible group (content edges hide when showContentEdges is off; relations don't).
+        // Each uses its own dedup set; both share the same faint neutral look.
+        const synMaterial = () => new THREE.LineBasicMaterial({
+          // White neutral threads. NormalBlending (not additive): overlapping relations no longer
+          // SUM to pure white and bleed (via bloom) over the group-coloured edges/orbs they cross —
+          // each stays a faint white line, and the group colours underneath keep their hue. The
+          // "brighter when related" cue now lives only in the hover/thinking sweeps. Opacity is
+          // pushed up a bit since there's no additive stacking to make busy corridors read.
+          vertexColors: true, transparent: true, opacity: isDark ? 0.18 : 0.5, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
+        })
+        const buildSegments = (edges: BrainContentEdge[], group: THREE.Group) => {
+          const lp: number[] = [], lc: number[] = []
+          const drawnSeg = new Set<number>()
+          for (const e of edges) {
+            const a = assignment.get(e.source), b = assignment.get(e.target)
+            if (a == null || b == null) continue
+            const seq = routeContent(a, b)
+            for (let i = 0; i < seq.length - 1; i++) {
+              const u = seq[i], w = seq[i + 1]
+              const key = u < w ? u * mesh.vertexCount + w : w * mesh.vertexCount + u
+              if (drawnSeg.has(key)) continue
+              drawnSeg.add(key)
+              lp.push(p[u * 3], p[u * 3 + 1], p[u * 3 + 2], p[w * 3], p[w * 3 + 1], p[w * 3 + 2])
+              lc.push(syn.r, syn.g, syn.b, syn.r, syn.g, syn.b)
+            }
           }
+          if (lp.length) group.add(new THREE.LineSegments(lineGeo(lp, lc), synMaterial()))
         }
-        if (lp.length) {
-          synapseGroup.add(new THREE.LineSegments(lineGeo(lp, lc), new THREE.LineBasicMaterial({
-            // White neutral threads. NormalBlending (not additive): overlapping relations no longer
-            // SUM to pure white and bleed (via bloom) over the group-coloured edges/orbs they cross —
-            // each stays a faint white line, and the group colours underneath keep their hue. The
-            // "brighter when related" cue now lives only in the hover/thinking sweeps. Opacity is
-            // pushed up a bit since there's no additive stacking to make busy corridors read.
-            vertexColors: true, transparent: true, opacity: isDark ? 0.18 : 0.5, depthWrite: false, blending: THREE.NormalBlending, toneMapped: false,
-          })))
-        }
+        buildSegments(m.contentEdges, synapseGroup)
+        buildSegments(m.relationEdges.map((e) => ({ source: e.source, target: e.target, score: 1 })), relationGroup)
       }
 
       // Pool of placed notes that take part in at least one content edge — what the thinking sweep
       // visits (so it only ever lights nodes that actually have relations to reveal).
       const conn = new Set<string>()
-      for (const e of m.contentEdges) {
+      for (const e of synapseEdges) {
         if (placedNodes.has(e.source)) conn.add(e.source)
         if (placedNodes.has(e.target)) conn.add(e.target)
       }

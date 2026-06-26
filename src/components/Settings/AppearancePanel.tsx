@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check, ChevronDown, Minus, Plus, RotateCcw } from 'lucide-react'
 import { THEMES, APP_FONTS } from '../../lib/themes'
 import { useThemeStore } from '../../stores/themeStore'
+import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { UI_SCALES } from '../../stores/themeStore'
 import type { HeadingLevel } from '../../stores/themeStore'
 import type { Theme } from '../../lib/themes'
@@ -54,6 +55,8 @@ export function AppearancePanel() {
   const resetHeadingOverrides = useThemeStore((s) => s.resetHeadingOverrides)
   const uiScale = useThemeStore((s) => s.uiScale)
   const changeUiScale = useThemeStore((s) => s.changeUiScale)
+  const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
+  const setPrefer3D = useBrainSettingsStore((s) => s.setPrefer3D)
 
   const [showAllThemes, setShowAllThemes] = useState(false)
 
@@ -311,6 +314,37 @@ export function AppearancePanel() {
               <Plus size={14} />
             </button>
           </div>
+        </section>
+
+        {/* Brain view */}
+        <section>
+          <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Brain view</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {([
+              { value: true, label: '3D', desc: 'Immersive' },
+              { value: false, label: '2D', desc: 'Lightweight' },
+            ] as const).map((opt) => {
+              const selected = prefer3D === opt.value
+              return (
+                <button
+                  key={opt.label}
+                  onClick={() => setPrefer3D(opt.value)}
+                  className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                    selected ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm font-mono ${selected ? 'text-accent' : 'text-text'}`}>{opt.label}</span>
+                    {selected && <Check size={12} className="text-accent flex-shrink-0" />}
+                  </div>
+                  <div className="text-[10px] text-text-muted">{opt.desc}</div>
+                </button>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-text-muted/80">
+            3D looks better but uses more resources. If the brain feels slow, switch to 2D.
+          </p>
         </section>
       </div>
 

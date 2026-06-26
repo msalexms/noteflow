@@ -628,8 +628,9 @@ let currentCacheDir = ''
 
 // Once the model has finished its embedding work, hold it this long with no further embed activity
 // before releasing it back to dormant (~70 MB). A short grace avoids reload thrash if the user
-// reindexes twice in a row or keeps editing right after.
-const MODEL_IDLE_UNLOAD_MS = 30_000
+// reindexes twice in a row or keeps editing right after — kept tight so the heavy ~1 GB of weights
+// drops back quickly after a one-off chat query (the main process kills the whole worker later).
+const MODEL_IDLE_UNLOAD_MS = 10_000
 let unloadTimer: ReturnType<typeof setTimeout> | null = null
 
 function cancelModelUnload(): void {
@@ -669,6 +670,13 @@ function chunkTextFor(s: ParsedSection): string {
   return stripNoise(`${s.name}\n${s.content}`).trim()
 }
 
+// A section is "empty" when its body is blank after stripping noise (base64 images, etc.).
+// Such a section carries no semantic signal — only the (often default) section name — so it must
+// NOT be embedded: otherwise every blank note would cluster together by sharing the name "Note".
+function hasIndexableContent(s: ParsedSection): boolean {
+  return stripNoise(s.content).trim().length > 0
+}
+
 async function handleIndexNote(dirPath: string): Promise<{ ok: boolean; skipped?: boolean }> {
   if (!index) throw new Error('Index not initialised')
   // Dormant (model not loaded): don't auto-load it just to index an edit. The next explicit
@@ -681,7 +689,8 @@ async function handleIndexNote(dirPath: string): Promise<{ ok: boolean; skipped?
   }
 
   const desired = parsed.sections
-    .filter((s) => !s.aiHidden) // sections hidden from the AI never enter the index
+    .filter((s) => !s.aiHidden)          // sections hidden from the AI never enter the index
+    .filter(hasIndexableContent)         // empty sections carry no semantic signal → never relate them
     .map((s) => ({ sectionId: s.id, sectionName: s.name, text: chunkTextFor(s) }))
     .filter((d) => d.text.length > 0)
     .map((d) => ({ ...d, hash: fnv1a(d.text) }))
@@ -726,7 +735,8 @@ async function handleReindexAll(notesDir: string): Promise<{ ok: boolean; indexe
     const parsed = readNoteFolder(dirPath)
     if (!parsed || !parsed.noteId || parsed.encrypted) continue
     for (const s of parsed.sections) {
-      if (s.aiHidden) continue // sections hidden from the AI never enter the index
+      if (s.aiHidden) continue          // sections hidden from the AI never enter the index
+      if (!hasIndexableContent(s)) continue // empty sections carry no semantic signal → never relate them
       const text = chunkTextFor(s)
       if (!text) continue
       rows.push({ noteId: parsed.noteId, filePath: dirPath, title: parsed.title, sectionId: s.id, sectionName: s.name, text, hash: fnv1a(text) })

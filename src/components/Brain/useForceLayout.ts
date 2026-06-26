@@ -42,9 +42,11 @@ export function useForceLayout(model: BrainGraphModel, width: number, height: nu
     const structureLinks: SimLink[] = model.structureEdges
       .filter((e) => byId.has(e.source) && byId.has(e.target))
       .map((e) => ({ source: e.source, target: e.target }))
-    const contentLinks: SimLink[] = model.contentEdges
-      .filter((e) => byId.has(e.source) && byId.has(e.target))
-      .map((e) => ({ source: e.source, target: e.target, score: e.score }))
+    const contentLinks: SimLink[] = [
+      ...model.contentEdges.map((e) => ({ source: e.source, target: e.target, score: e.score })),
+      // User relations pull related sections together too (top strength, like a strong content edge).
+      ...model.relationEdges.map((e) => ({ source: e.source, target: e.target, score: 1 })),
+    ].filter((e) => byId.has(e.source) && byId.has(e.target))
 
     const { width: w, height: h } = sizeRef.current
     const sim = forceSimulation<SimNode, SimLink>(nodes)

@@ -1464,10 +1464,11 @@ const CHAT_SYSTEM_BASE = "You are NoteFlow's assistant — a second brain over t
     'NEXT-ACTION SUGGESTIONS. At the very end of your FINAL answer (never in an intermediate turn that ' +
     'still calls tools), if there are genuinely useful follow-ups, append the literal marker ' +
     '"<!--SUGGESTIONS-->" on its own line, then 1 or 2 short, actionable next things the user might want ' +
-    'to ask, one per line prefixed with "- ". Phrase each as an imperative from the USER\'s point of view, ' +
-    'in the same language as your answer (e.g. "- Reorganize the note into sections"). Keep them concrete ' +
-    'and grounded in this conversation. If nothing useful applies, omit the marker entirely. Never mention ' +
-    'the marker or these suggestions in the visible part of your answer.';
+    'to ask, one per line prefixed with "- ". Phrase each as a brief imperative from the USER\'s point of ' +
+    'view, in the same language as your answer. Keep each suggestion VERY short so it fits on a small button: ' +
+    'aim for 2-5 words, 6 words maximum, no trailing period (e.g. "- Reorganize into sections", "- Add a ' +
+    'summary"). Keep them concrete and grounded in this conversation. If nothing useful applies, omit the ' +
+    'marker entirely. Never mention the marker or these suggestions in the visible part of your answer.';
 const chatAborts = new Map();
 function stripBase64(text) {
     return text.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image]');
@@ -1622,7 +1623,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
             convo.push({ role: 'assistant', content: text, toolCalls });
             const results = [];
             for (const call of toolCalls) {
-                send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input });
+                send('ai:chat-tool-call', { requestId, toolCallId: call.id, name: call.name, input: call.input, label: agentTools.describeAction(call.name, call.input, ctx) });
                 if (agentTools.DESTRUCTIVE_TOOLS.has(call.name)) {
                     const target = agentTools.describeTarget(call.name, call.input, ctx);
                     send('ai:chat-confirm-request', { requestId, toolCallId: call.id, name: call.name, input: call.input, target });
@@ -1826,62 +1827,112 @@ function htmlToText(html) {
         .trim();
 }
 /** Download a page and reduce it to readable text. https only; bounded time + size. */
-async function fetchReadableText(rawUrl) {
+function fetchReadableText(rawUrl) {
     const url = parseHttpsUrl(rawUrl);
     if (!url)
-        return { ok: false, error: 'Only https URLs are allowed' };
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-        const response = await electron_1.net.fetch(url.toString(), {
-            signal: controller.signal,
-            headers: { 'user-agent': 'Mozilla/5.0 (compatible; NoteFlow profile reader)' },
-        });
-        if (!response.ok)
-            return { ok: false, error: `HTTP ${response.status}` };
-        const ctype = (response.headers.get('content-type') ?? '').toLowerCase();
-        if (!ctype.includes('text/html') && !ctype.includes('text/plain') && !ctype.includes('xhtml')) {
-            return { ok: false, error: `unsupported content type${ctype ? ` (${ctype.split(';')[0]})` : ''}` };
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let html = '';
+        return Promise.resolve({ ok: false, error: 'Only https URLs are allowed' });
+    // NOTE: deliberately net.request (not net.fetch). net.fetch wraps the response in an
+    // undici Response, whose constructor throws RangeError for any status outside 200-599
+    // (e.g. LinkedIn's anti-bot 999). That throw happens inside the ClientRequest 'response'
+    // handler, escaping any try/catch, and crashes the whole main process. net.request exposes
+    // statusCode as a plain number, so a weird status is just handled as an error here.
+    return new Promise((resolve) => {
         const MAX_HTML = 1500000;
-        while (html.length < MAX_HTML) {
-            const { done, value } = await reader.read();
-            if (done)
-                break;
-            html += decoder.decode(value, { stream: true });
-        }
-        reader.cancel().catch(() => { });
-        const text = htmlToText(html).slice(0, 6000);
-        return text ? { ok: true, text } : { ok: false, error: 'no readable text found' };
-    }
-    catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-    finally {
-        clearTimeout(timer);
-    }
+        let settled = false;
+        const finish = (result) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(result);
+        };
+        const request = electron_1.net.request({ url: url.toString(), redirect: 'follow' });
+        request.setHeader('user-agent', 'Mozilla/5.0 (compatible; NoteFlow profile reader)');
+        const timer = setTimeout(() => {
+            finish({ ok: false, error: 'request timed out' });
+            try {
+                request.abort();
+            }
+            catch { /* ignore */ }
+        }, 8000);
+        request.on('response', (response) => {
+            const status = response.statusCode;
+            if (status < 200 || status >= 300) {
+                finish({ ok: false, error: `HTTP ${status}` });
+                try {
+                    request.abort();
+                }
+                catch { /* ignore */ }
+                return;
+            }
+            const ctypeHeader = response.headers['content-type'];
+            const ctype = (Array.isArray(ctypeHeader) ? ctypeHeader[0] : ctypeHeader ?? '').toLowerCase();
+            if (!ctype.includes('text/html') && !ctype.includes('text/plain') && !ctype.includes('xhtml')) {
+                finish({ ok: false, error: `unsupported content type${ctype ? ` (${ctype.split(';')[0]})` : ''}` });
+                try {
+                    request.abort();
+                }
+                catch { /* ignore */ }
+                return;
+            }
+            const decoder = new TextDecoder();
+            let html = '';
+            response.on('data', (chunk) => {
+                if (html.length >= MAX_HTML)
+                    return;
+                html += decoder.decode(chunk, { stream: true });
+                if (html.length >= MAX_HTML) {
+                    try {
+                        request.abort();
+                    }
+                    catch { /* ignore */ }
+                }
+            });
+            response.on('end', () => {
+                const text = htmlToText(html).slice(0, 6000);
+                finish(text ? { ok: true, text } : { ok: false, error: 'no readable text found' });
+            });
+            response.on('error', (err) => finish({ ok: false, error: err.message }));
+        });
+        request.on('error', (err) => finish({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        request.end();
+    });
+}
+function validateProfileShape(obj) {
+    if (typeof obj.title !== 'string' || !Array.isArray(obj.sections))
+        return null;
+    const sections = obj.sections
+        .filter((s) => !!s && typeof s.name === 'string' && typeof s.content === 'string');
+    if (sections.length === 0)
+        return null;
+    return { title: obj.title, sections };
 }
 function extractJson(text) {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start < 0 || end <= start)
-        return null;
-    try {
-        const obj = JSON.parse(text.slice(start, end + 1));
-        if (typeof obj.title !== 'string' || !Array.isArray(obj.sections))
-            return null;
-        const sections = obj.sections
-            .filter((s) => !!s && typeof s.name === 'string' && typeof s.content === 'string');
-        if (sections.length === 0)
-            return null;
-        return { title: obj.title, sections };
+    // Try a few candidate strings, most-specific first, so prose or markdown fences around
+    // the JSON don't cause a parse failure (which previously meant the whole generation was lost).
+    const candidates = [];
+    const trimmed = text.trim();
+    candidates.push(trimmed);
+    // ```json ... ``` (or plain ``` ... ```) fenced block
+    const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence?.[1])
+        candidates.push(fence[1].trim());
+    // First "{" to last "}" — tolerant of leading/trailing prose
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start >= 0 && end > start)
+        candidates.push(trimmed.slice(start, end + 1));
+    for (const c of candidates) {
+        try {
+            const valid = validateProfileShape(JSON.parse(c));
+            if (valid)
+                return valid;
+        }
+        catch {
+            // try the next candidate
+        }
     }
-    catch {
-        return null;
-    }
+    return null;
 }
 electron_1.ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, 'Add files to your profile'));
 electron_1.ipcMain.handle('ai:profile-remove-file', (_event, id) => {
@@ -1985,7 +2036,9 @@ electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
     try {
         let text = '';
         const userText = parts.join('\n\n') || 'Build my profile from the attached files.';
-        await provider.chat({ system, messages: [{ role: 'user', content: userText }], maxTokens: 3072, attachments }, (d) => { text += d; });
+        // A multi-section profile in the user's language can run long; 3072 left some models
+        // truncating mid-JSON, which then failed to parse and lost the whole generation.
+        await provider.chat({ system, messages: [{ role: 'user', content: userText }], maxTokens: 6144, attachments }, (d) => { text += d; });
         const parsed = extractJson(text);
         if (!parsed)
             return { ok: false, error: 'Could not parse the model output' };
@@ -1999,11 +2052,11 @@ electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
 });
 electron_1.ipcMain.handle('ai:profile-get-status', () => {
     const profile = (readSettings().aiProfile ?? {});
-    return { completedAt: profile.completedAt ?? null };
+    return { completedAt: profile.completedAt ?? null, noteId: profile.noteId ?? null };
 });
-electron_1.ipcMain.handle('ai:profile-set-completed', () => {
+electron_1.ipcMain.handle('ai:profile-set-completed', (_event, noteId) => {
     const settings = readSettings();
-    settings.aiProfile = { completedAt: new Date().toISOString() };
+    settings.aiProfile = { completedAt: new Date().toISOString(), ...(noteId ? { noteId } : {}) };
     writeSettings(settings);
     return { ok: true };
 });

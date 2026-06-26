@@ -222,6 +222,16 @@ button {
   margin-right: auto;
 }
 
+/* Raw (markdown source) mode readable column. Mirrors .editor-readable: the
+   textarea stays full-width so its scrollbar is pinned to the far edge — exactly
+   where the rich editor's scrollbar sits — while the text is centered into the
+   same reading column via horizontal padding (instead of a centered max-width,
+   which would drag the scrollbar next to the text). */
+.editor-readable .raw-readable {
+  padding-left: max(1rem, calc((100% - var(--readable-col)) / 2));
+  padding-right: max(1rem, calc((100% - var(--readable-col)) / 2));
+}
+
 .prose-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: rgb(var(--text-muted));
@@ -682,3 +692,63 @@ button {
   float: left;
   height: 0;
 }
+
+/* ── Section relations (inline cross-section links) ──────────────────────────
+   Styled by attribute so they look identical in the editor (interactive NodeView)
+   and in read-only previews (htmlFromMarkdown emits the bare span). */
+.prose-editor .ProseMirror span[data-type="section-relation"],
+.section-relation-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: 5px;
+  font-size: 0.92em;
+  line-height: 1.45;
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.12);
+  border: 1px solid rgb(var(--accent) / 0.25);
+  white-space: nowrap;
+  vertical-align: baseline;
+  text-decoration: none;
+}
+.section-relation-pill { cursor: pointer; transition: background 0.12s; }
+.section-relation-pill:hover { background: rgb(var(--accent) / 0.22); }
+.section-relation-icon { width: 0.85em; height: 0.85em; flex-shrink: 0; }
+.section-relation-pill[data-broken="true"] {
+  color: rgb(var(--text-muted));
+  background: rgb(var(--text-muted) / 0.12);
+  border-color: rgb(var(--text-muted) / 0.25);
+  cursor: default;
+  text-decoration: line-through;
+}
+.section-relation-wrapper { white-space: nowrap; }
+
+/* ── Slash command menu (typing "/") ─────────────────────────────────────── */
+.slash-menu {
+  min-width: 220px;
+  max-width: 280px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--text) / 0.15);
+  background: rgb(var(--bg-1));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  overflow: hidden;
+}
+.slash-menu-empty { padding: 8px 10px; font-size: 13px; color: rgb(var(--text-muted)); }
+.slash-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+.slash-menu-item.is-selected { background: rgb(var(--text) / 0.08); }
+.slash-menu-item-title { font-size: 13px; color: rgb(var(--text)); }
+.slash-menu-item-desc { font-size: 11px; color: rgb(var(--text-muted)); }

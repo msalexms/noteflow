@@ -232,7 +232,10 @@ export function StickyApp() {
     }
   }
 
-  if (isLoading || !noteId || !sectionId) {
+  // Only block on the loading screen during the very first load (no notes yet).
+  // A background reload from sync keeps the previous notes in memory, so we must
+  // not unmount the sticky editor mid-session — that resets its scroll/focus.
+  if ((isLoading && notes.length === 0) || !noteId || !sectionId) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
         <StickyTitleBar noteTitle="Loading..." colorVar="--accent" onFold={() => {}} />

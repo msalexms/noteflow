@@ -53,10 +53,12 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup, 
   const adjRef = useRef<Map<string, Map<string, number>>>(new Map())
   useEffect(() => {
     const adj = new Map<string, Map<string, number>>()
-    for (const e of model.contentEdges) {
-      ;(adj.get(e.source) ?? adj.set(e.source, new Map()).get(e.source)!).set(e.target, e.score)
-      ;(adj.get(e.target) ?? adj.set(e.target, new Map()).get(e.target)!).set(e.source, e.score)
+    const addAdj = (a: string, b: string, score: number) => {
+      ;(adj.get(a) ?? adj.set(a, new Map()).get(a)!).set(b, score)
+      ;(adj.get(b) ?? adj.set(b, new Map()).get(b)!).set(a, score)
     }
+    for (const e of model.contentEdges) addAdj(e.source, e.target, e.score)
+    for (const e of model.relationEdges) addAdj(e.source, e.target, 1)
     adjRef.current = adj
   }, [model])
 
@@ -135,6 +137,21 @@ export function BrainCanvas({ model, showContentEdges, onOpenNote, onOpenGroup, 
           ctx.lineWidth = incident ? 1.6 : 1
           ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
         }
+      }
+
+      // ── User relation edges (explicit section↔section; same faint style as content, but
+      // ALWAYS drawn — they don't depend on the AI index nor the content toggle) ──
+      for (const e of m.relationEdges) {
+        const a = pos.get(e.source), b = pos.get(e.target)
+        if (!a || !b || a.x == null || b.x == null) continue
+        const incident = focusId === e.source || focusId === e.target
+        const alpha = focusId ? (incident ? 0.85 : 0.02) : 0.17
+        if (alpha < 0.012) continue
+        const [ax, ay] = toScreen(a.x, a.y!)
+        const [bx, by] = toScreen(b.x, b.y!)
+        ctx.strokeStyle = rgba(pal.text, alpha)
+        ctx.lineWidth = incident ? 1.6 : 1
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke()
       }
 
       // ── Structure edges (solid, colored by group) ──

@@ -104,6 +104,51 @@ function findGroup(nameOrId) {
   return groups.find(g => g.id === nameOrId || g.name.toLowerCase() === q || g.name.toLowerCase().includes(q))
 }
 
+// ── Folders (single nesting level inside a group: group → folder → note) ───────
+
+function readFolders() {
+  const p = path.join(NOTES_DIR, 'folders.json')
+  try { return JSON.parse(fs.readFileSync(p, 'utf-8')) }
+  catch { return [] }
+}
+
+function writeFolders(folders) {
+  if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
+  fs.writeFileSync(path.join(NOTES_DIR, 'folders.json'), JSON.stringify(folders, null, 2), 'utf-8')
+}
+
+/** Folders matching a name/id, optionally scoped to a group (names repeat across groups). */
+function findFolders(nameOrId, groupId) {
+  let folders = readFolders()
+  if (groupId) folders = folders.filter(f => f.groupId === groupId)
+  const q = nameOrId.toLowerCase()
+  const exact = folders.filter(f => f.id === nameOrId || f.name.toLowerCase() === q)
+  if (exact.length) return exact
+  return folders.filter(f => f.name.toLowerCase().includes(q))
+}
+
+/** Resolves a single folder, exiting with a helpful error on 0/many matches. --group narrows. */
+function resolveFolder(nameOrId, opts) {
+  let groupId
+  if (opts.group) {
+    const g = findGroup(opts.group)
+    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    groupId = g.id
+  }
+  const matches = findFolders(nameOrId, groupId)
+  if (!matches.length) { err(`No folder found: "${nameOrId}"`); process.exit(1) }
+  if (matches.length > 1) {
+    const groups = readGroups()
+    out('  Multiple folders match — narrow with --group:')
+    matches.forEach(f => {
+      const g = groups.find(gr => gr.id === f.groupId)
+      out(`    ${f.name}  (group: ${g ? g.name : '?'})`)
+    })
+    process.exit(1)
+  }
+  return matches[0]
+}
+
 // ── YAML parser ───────────────────────────────────────────────────────────────
 
 function splitFrontmatter(raw) {
@@ -290,6 +335,90 @@ function extractUpdatedTimestamp(content) {
   return match ? match[1].trim() : null
 }
 
+// ── Note / section resolution by name (no opaque ids on the CLI surface) ───────
+
+/** Resolves a single note by (partial) title, exiting with a helpful error on 0/many matches. */
+function resolveNote(titleQuery) {
+  const matches = findNoteByTitle(titleQuery)
+  if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
+  if (matches.length > 1) {
+    out('  Multiple matches — be more specific:')
+    matches.forEach(n => out(`    ${n.title}  (${n.dirname}/)`))
+    process.exit(1)
+  }
+  return matches[0]
+}
+
+function sectionNamesOf(note) {
+  return (note.sections || []).map(s => s.name).join(', ') || '(none)'
+}
+
+/** A section name may carry a 1-based '#<n>' suffix to pick among same-named duplicates. */
+function parseSectionRef(name) {
+  const m = name.match(/^(.*)#(\d+)$/)
+  if (m) return { baseName: m[1], ordinal: parseInt(m[2], 10) }
+  return { baseName: name, ordinal: null }
+}
+
+/**
+ * Finds a section by name. Section names are NOT unique in NoteFlow, so:
+ *  - 'Name#2' targets the 2nd section named 'Name' (1-based).
+ *  - an exact single match wins; multiple exact matches exit with a '#n' hint.
+ *  - otherwise a single case-insensitive substring match wins.
+ * Returns the section or null (no match at all). Ambiguity/out-of-range exit the process.
+ */
+function matchSectionOrNull(note, name) {
+  const { baseName, ordinal } = parseSectionRef(name)
+  const q = baseName.toLowerCase()
+  const exact = (note.sections || []).filter(s => s.name.toLowerCase() === q)
+  if (ordinal != null) {
+    if (exact[ordinal - 1]) return exact[ordinal - 1]
+    err(`"${baseName}#${ordinal}" out of range in "${note.title}" — there ${exact.length === 1 ? 'is' : 'are'} ${exact.length} section(s) named "${baseName}"`)
+    process.exit(1)
+  }
+  if (exact.length === 1) return exact[0]
+  if (exact.length > 1) {
+    err(`Multiple sections named "${baseName}" in "${note.title}". Disambiguate with "${baseName}#1" … "${baseName}#${exact.length}".`)
+    process.exit(1)
+  }
+  const partial = (note.sections || []).filter(s => s.name.toLowerCase().includes(q))
+  if (partial.length === 1) return partial[0]
+  if (partial.length > 1) {
+    err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${partial.map(s => s.name).join(', ')}. Use the exact name.`)
+    process.exit(1)
+  }
+  return null
+}
+
+/** Like matchSectionOrNull but exits when nothing matches (read/rename/delete must target an existing section). */
+function resolveSection(note, name) {
+  const sec = matchSectionOrNull(note, name)
+  if (!sec) { err(`No section "${parseSectionRef(name).baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}`); process.exit(1) }
+  return sec
+}
+
+function readStdin() {
+  return new Promise(resolve => {
+    let data = ''
+    process.stdin.setEncoding('utf-8')
+    process.stdin.on('data', c => { data += c })
+    process.stdin.on('end', () => resolve(data))
+  })
+}
+
+/** Content for `set`: --text wins, then --file, then stdin (explicit --stdin or a non-TTY pipe). */
+async function resolveSetContent(opts) {
+  let raw
+  if (typeof opts.text === 'string') raw = opts.text
+  else if (opts.file) {
+    try { raw = fs.readFileSync(path.resolve(opts.file), 'utf-8') }
+    catch (e) { err(`Cannot read --file: ${e.message}`); process.exit(1) }
+  } else if (opts.stdin || !process.stdin.isTTY) raw = await readStdin()
+  else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); process.exit(1) }
+  // Normalize newlines and trim a trailing newline so piped/echoed input round-trips cleanly.
+  return raw.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+}
+
 // ── GitHub API ────────────────────────────────────────────────────────────────
 
 function githubRequest(token, method, endpoint, body) {
@@ -471,8 +600,16 @@ async function cmdAdd(text, opts) {
     if (opts.tag && !note.tags.includes(opts.tag)) note.tags.push(opts.tag)
     if (opts.group) {
       const g = findGroup(opts.group)
-      if (g) note.group = g.id
-      else err(`Group not found: "${opts.group}"`)
+      if (g) {
+        note.group = g.id
+        if (opts.folder) {
+          const matches = findFolders(opts.folder, g.id)
+          if (matches.length === 1) note.folder = matches[0].id
+          else err(matches.length ? `Multiple folders match "${opts.folder}" in "${g.name}"` : `Folder "${opts.folder}" not found in group "${g.name}"`)
+        }
+      } else err(`Group not found: "${opts.group}"`)
+    } else if (opts.folder) {
+      err('--folder requires --group')
     }
     writeNoteFolder(note.dirname, note)
     out(`  Added to ${note.dirname}${opts.section ? ` → ${sectionName}` : ''}`)
@@ -480,11 +617,19 @@ async function cmdAdd(text, opts) {
   } else {
     const id = nanoid(8)
     const now = new Date().toISOString()
-    let groupId
+    let groupId, folderId
     if (opts.group) {
       const g = findGroup(opts.group)
-      if (g) groupId = g.id
-      else err(`Group not found: "${opts.group}"`)
+      if (g) {
+        groupId = g.id
+        if (opts.folder) {
+          const matches = findFolders(opts.folder, g.id)
+          if (matches.length === 1) folderId = matches[0].id
+          else err(matches.length ? `Multiple folders match "${opts.folder}" in "${g.name}"` : `Folder "${opts.folder}" not found in group "${g.name}"`)
+        }
+      } else err(`Group not found: "${opts.group}"`)
+    } else if (opts.folder) {
+      err('--folder requires --group')
     }
     const note = {
       id, title: targetTitle,
@@ -492,6 +637,7 @@ async function cmdAdd(text, opts) {
       created: now, updated: now,
       sections: [{ id: nanoid(6), name: sectionName, content: text, isRawMode: isRaw }],
       ...(groupId ? { group: groupId } : {}),
+      ...(folderId ? { folder: folderId } : {}),
     }
     const dirname = noteDirname(id, note.title)
     const written = writeNoteFolder(dirname, note)
@@ -505,16 +651,25 @@ async function cmdNew(title, opts) {
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
   const id = nanoid(8)
   const now = new Date().toISOString()
-  let groupId
+  let groupId, folderId
   if (opts.group) {
     const g = findGroup(opts.group)
-    if (g) groupId = g.id
-    else { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    groupId = g.id
+    if (opts.folder) {
+      const matches = findFolders(opts.folder, g.id)
+      if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); process.exit(1) }
+      if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); process.exit(1) }
+      folderId = matches[0].id
+    }
+  } else if (opts.folder) {
+    err('--folder requires --group'); process.exit(1)
   }
   const note = {
     id, title, tags: [], created: now, updated: now,
     sections: [{ id: nanoid(6), name: opts.section || 'Note', content: '', isRawMode: true }],
     ...(groupId ? { group: groupId } : {}),
+    ...(folderId ? { folder: folderId } : {}),
   }
   const dirname = noteDirname(id, title)
   const written = writeNoteFolder(dirname, note)
@@ -532,12 +687,16 @@ function cmdList(opts) {
     const g = findGroup(opts.group)
     filtered = g ? filtered.filter(n => n.group === g.id) : []
   }
+  if (opts.folder) {
+    const f = resolveFolder(opts.folder, opts)
+    filtered = filtered.filter(n => n.folder === f.id)
+  }
   if (!opts.archived) filtered = filtered.filter(n => !n.archived)
   filtered.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(filtered.map(n => ({
-      id: n.id, title: n.title, tags: n.tags, group: n.group,
+      id: n.id, title: n.title, tags: n.tags, group: n.group, folder: n.folder,
       created: n.created, updated: n.updated, archived: n.archived, favorited: n.favorited ?? n.pinned ?? false,
       sections: n.sections?.map(s => s.name),
       dirname: n.dirname,
@@ -547,11 +706,13 @@ function cmdList(opts) {
 
   if (!filtered.length) { out('  No notes found'); return }
   const groups = readGroups()
+  const folders = readFolders()
   out('')
   for (const n of filtered) {
     const g = n.group ? groups.find(gr => gr.id === n.group) : null
+    const f = n.folder ? folders.find(fo => fo.id === n.folder) : null
     const tags = n.tags?.length ? `  [${n.tags.join(', ')}]` : ''
-    const grp  = g ? `  (${g.name})` : ''
+    const grp  = g ? `  (${g.name}${f ? ` / ${f.name}` : ''})` : ''
     const fav  = (n.favorited || n.pinned) ? ' ⭐' : ''
     const arc  = n.archived ? ' [archived]' : ''
     out(`  ${n.title}${fav}${arc}${tags}${grp}`)
@@ -573,7 +734,7 @@ function cmdGet(titleQuery, opts) {
 
   if (opts.json) {
     const result = {
-      id: note.id, title: note.title, tags: note.tags, group: note.group,
+      id: note.id, title: note.title, tags: note.tags, group: note.group, folder: note.folder,
       created: note.created, updated: note.updated, archived: note.archived, favorited: note.favorited ?? note.pinned ?? false,
       sections: note.sections?.map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
       dirname: note.dirname,
@@ -695,6 +856,102 @@ function cmdSections(titleQuery) {
   out('')
 }
 
+// noteflow read <title> [section]  — raw, pipe-friendly output (no decoration)
+function cmdRead(titleQuery, sectionName, opts) {
+  const note = resolveNote(titleQuery)
+  if (sectionName) {
+    const sec = resolveSection(note, sectionName)
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ id: note.id, title: note.title, section: sec.name, content: sec.content || '', isRawMode: sec.isRawMode }) + '\n')
+      return
+    }
+    process.stdout.write((sec.content || '') + '\n')
+    return
+  }
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      id: note.id, title: note.title, tags: note.tags, group: note.group, folder: note.folder,
+      sections: (note.sections || []).map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
+      dirname: note.dirname,
+    }) + '\n')
+    return
+  }
+  let buf = `# ${note.title}\n`
+  if (note.tags?.length) buf += `\ntags: ${note.tags.join(', ')}\n`
+  for (const s of note.sections || []) buf += `\n## ${s.name}\n${s.content || ''}\n`
+  process.stdout.write(buf)
+}
+
+// noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--rich]
+// Overwrites the section's content (creates it if missing). Complements `add` (append).
+async function cmdSet(titleQuery, sectionName, opts) {
+  const note = resolveNote(titleQuery)
+  const content = await resolveSetContent(opts)
+  let sec = matchSectionOrNull(note, sectionName) // exits on ambiguity rather than guessing
+  let created = false
+  if (!sec) {
+    sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw !== false }
+    note.sections = note.sections || []
+    note.sections.push(sec)
+    created = true
+  }
+  sec.content = content
+  writeNoteFolder(note.dirname, note)
+  if (created) out(`  Created section "${sec.name}"`)
+  out(`  Set "${note.title}" → ${sec.name}  (${content ? content.split('\n').length + ' lines' : 'empty'})`)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
+}
+
+// noteflow section add <title> <name> [--rich]  — append a new (possibly duplicate-named) section
+async function cmdSectionAdd(titleQuery, name, opts) {
+  const note = resolveNote(titleQuery)
+  const sec = { id: nanoid(6), name, content: '', isRawMode: opts.raw !== false }
+  note.sections = note.sections || []
+  note.sections.push(sec)
+  writeNoteFolder(note.dirname, note)
+  out(`  Added section "${name}" to "${note.title}"`)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
+}
+
+// noteflow section rename <title> <old> <new>
+async function cmdSectionRename(titleQuery, oldName, newName) {
+  const note = resolveNote(titleQuery)
+  const sec = resolveSection(note, oldName)
+  const prev = sec.name
+  sec.name = newName
+  writeNoteFolder(note.dirname, note) // section file is keyed by id — only note.md changes
+  out(`  Renamed section "${prev}" → "${newName}" in "${note.title}"`)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
+}
+
+// noteflow section delete <title> <name> [--yes]
+async function cmdSectionDelete(titleQuery, name, opts) {
+  const note = resolveNote(titleQuery)
+  const sec = resolveSection(note, name)
+  if ((note.sections || []).length <= 1) {
+    err(`Cannot delete the last section of "${note.title}" — a note must keep at least one section`)
+    process.exit(1)
+  }
+  if (!opts.yes) {
+    const ok = await confirm(`Delete section "${sec.name}" from "${note.title}"?`)
+    if (!ok) { out('  Cancelled'); return }
+  }
+  const removedFile = `${sec.id}.md`
+  note.sections = note.sections.filter(s => s !== sec)
+  writeNoteFolder(note.dirname, note) // drops the orphan <id>.md (not in the keep set)
+  out(`  Deleted section "${sec.name}" from "${note.title}"`)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
+  // Remove the section's file from the remote too, or a pull would resurrect it
+  const sync = getSyncSettings()
+  if (sync.enabled && sync.owner && sync.repo) {
+    const token = getToken()
+    if (token) {
+      try { await removeRemoteFile(token, sync.owner, sync.repo, `${note.dirname}/${removedFile}`, `delete section: ${sec.name}`) }
+      catch { /* ignore remote errors */ }
+    }
+  }
+}
+
 // noteflow groups [--json]
 function cmdGroups(opts) {
   const groups = readGroups()
@@ -732,13 +989,120 @@ async function cmdGroupDelete(name, opts) {
   }
   const updated = groups.filter(gr => gr.id !== g.id)
   writeGroups(updated)
-  // Ungroup notes that were in this group
+  // Drop the group's folders too (they only exist inside a group)
+  const folders = readFolders()
+  const remainingFolders = folders.filter(f => f.groupId !== g.id)
+  if (remainingFolders.length !== folders.length) writeFolders(remainingFolders)
+  // Ungroup notes that were in this group (clear both group and folder)
   const notes = loadAllNotes()
   for (const n of notes.filter(n => n.group === g.id)) {
     delete n.group
+    delete n.folder
     writeNoteFolder(n.dirname, n)
   }
   out(`  Deleted group "${g.name}"`)
+}
+
+// noteflow folders [--group <g>] [--json]
+function cmdFolders(opts) {
+  let folders = readFolders()
+  const groups = readGroups()
+  if (opts.group) {
+    const g = findGroup(opts.group)
+    if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+    folders = folders.filter(f => f.groupId === g.id)
+  }
+  if (opts.json) { process.stdout.write(JSON.stringify(folders) + '\n'); return }
+  if (!folders.length) { out('  No folders'); return }
+  const byGroup = new Map()
+  for (const f of folders) {
+    if (!byGroup.has(f.groupId)) byGroup.set(f.groupId, [])
+    byGroup.get(f.groupId).push(f)
+  }
+  out('')
+  for (const [gid, list] of byGroup) {
+    const g = groups.find(gr => gr.id === gid)
+    out(`  ${g ? g.name : '(unknown group)'}:`)
+    for (const f of list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)))
+      out(`    ${f.name}  (id: ${f.id})`)
+  }
+  out('')
+}
+
+// noteflow folder create <name> --group <group>
+function cmdFolderCreate(name, opts) {
+  if (!opts.group) { err('A folder needs a group. Use: noteflow folder create <name> --group <group>'); process.exit(1) }
+  const g = findGroup(opts.group)
+  if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+  const folders = readFolders()
+  if (folders.find(f => f.groupId === g.id && f.name.toLowerCase() === name.toLowerCase())) {
+    err(`Folder "${name}" already exists in group "${g.name}"`); process.exit(1)
+  }
+  const siblings = folders.filter(f => f.groupId === g.id)
+  const maxOrder = siblings.length ? Math.max(...siblings.map(f => f.order ?? 0)) : -1
+  const folder = { id: nanoid(8), name, groupId: g.id, order: maxOrder + 1 }
+  folders.push(folder)
+  writeFolders(folders)
+  if (opts.json) { process.stdout.write(JSON.stringify(folder) + '\n'); return }
+  out(`  Created folder "${name}" in group "${g.name}"  (id: ${folder.id})`)
+}
+
+// noteflow folder rename <name> <new-name> [--group <g>]
+function cmdFolderRename(name, newName, opts) {
+  const folder = resolveFolder(name, opts)
+  const folders = readFolders()
+  const g = readGroups().find(gr => gr.id === folder.groupId)
+  if (folders.find(f => f.groupId === folder.groupId && f.id !== folder.id && f.name.toLowerCase() === newName.toLowerCase())) {
+    err(`Folder "${newName}" already exists in group "${g ? g.name : folder.groupId}"`); process.exit(1)
+  }
+  writeFolders(folders.map(f => (f.id === folder.id ? { ...f, name: newName } : f)))
+  out(`  Renamed folder "${folder.name}" → "${newName}"`)
+}
+
+// noteflow folder delete <name> [--group <g>] [--yes]
+async function cmdFolderDelete(name, opts) {
+  const folder = resolveFolder(name, opts)
+  if (!opts.yes) {
+    const ok = await confirm(`Delete folder "${folder.name}"? (Notes inside fall back to the group root)`)
+    if (!ok) { out('  Cancelled'); return }
+  }
+  writeFolders(readFolders().filter(f => f.id !== folder.id))
+  // Notes in this folder keep their group but lose the folder
+  const notes = loadAllNotes()
+  for (const n of notes.filter(n => n.folder === folder.id)) {
+    delete n.folder
+    writeNoteFolder(n.dirname, n)
+    await syncPushNoteFiles(n.dirname, [NOTE_MD])
+  }
+  out(`  Deleted folder "${folder.name}"`)
+}
+
+// noteflow move <title> --group <g> [--folder <f>]  |  --ungroup
+async function cmdMove(titleQuery, opts) {
+  const note = resolveNote(titleQuery)
+  if (opts.ungroup) {
+    delete note.group
+    delete note.folder
+    writeNoteFolder(note.dirname, note)
+    out(`  Moved "${note.title}" to ungrouped`)
+    await syncPushNoteFiles(note.dirname, [NOTE_MD])
+    return
+  }
+  if (!opts.group) { err('Usage: noteflow move <title> --group <g> [--folder <f>]   (or --ungroup)'); process.exit(1) }
+  const g = findGroup(opts.group)
+  if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
+  note.group = g.id
+  if (opts.folder) {
+    const matches = findFolders(opts.folder, g.id)
+    if (!matches.length) { err(`Folder "${opts.folder}" not found in group "${g.name}"`); process.exit(1) }
+    if (matches.length > 1) { err(`Multiple folders match "${opts.folder}" in "${g.name}"`); process.exit(1) }
+    note.folder = matches[0].id
+  } else {
+    delete note.folder // moving to the group root
+  }
+  writeNoteFolder(note.dirname, note)
+  out(`  Moved "${note.title}" → ${g.name}${note.folder ? ` / ${opts.folder}` : ''}`)
+  await syncPushNoteFiles(note.dirname, [NOTE_MD])
 }
 
 // noteflow login [repo]
@@ -1051,6 +1415,7 @@ function cmdHelp(topic) {
     --section <name>    Write to a specific section/tab (creates it if missing)
     --tag <tag>         Add a metadata tag to the note
     --group <name>      Assign the note to a group (only when creating)
+    --folder <name>     Put the note in a folder of that group (requires --group)
     --raw               Force raw/markdown mode for the section (default: true)
     --rich              Use rich text mode for the section
 
@@ -1075,7 +1440,8 @@ function cmdHelp(topic) {
     get: `
   noteflow get <title> [options]
 
-  Shows the content of a note. Title can be partial.
+  Shows the content of a note (pretty, human-readable). Title can be partial.
+  For machine/agent reading use 'noteflow read' instead (raw, unindented).
 
   Options:
     --section <name>   Show only this section
@@ -1084,12 +1450,85 @@ function cmdHelp(topic) {
   Example:
     noteflow get "Project Alpha" --section Tasks --json
 `,
+    read: `
+  noteflow read <title> [section]
+
+  Prints note/section content RAW to stdout — no indentation, no decoration —
+  so it is safe to pipe or feed to an agent. Title can be partial.
+
+  Forms:
+    noteflow read "Project Alpha"            Whole note as clean markdown
+    noteflow read "Project Alpha" "Tasks"    Just that section's body (verbatim)
+    noteflow read "Project Alpha" --section Tasks   Same, flag form (multi-word titles)
+    noteflow read "Project Alpha" --json     JSON with every section
+
+  Duplicate section names: target one with a 1-based suffix, e.g. "Tasks#2".
+`,
+    set: `
+  noteflow set <title> <section> [content source] [--rich]
+
+  Overwrites a section's content (creates the section if it doesn't exist).
+  This is the counterpart of 'add', which only appends.
+
+  Content source (first one wins):
+    --text "<content>"   Inline text
+    --file <path>        Read content from a file
+    --stdin              Read content from stdin (also auto-used when piped)
+    --rich               Create a new section in rich-text mode (default: raw)
+
+  Examples:
+    noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
+    cat notes.md | noteflow set "Project Alpha" Notes --stdin
+    noteflow set "Project Alpha" "Tasks#2" --file todo.txt   # 2nd 'Tasks' section
+`,
+    section: `
+  noteflow section list   <title>
+  noteflow section add    <title> <name> [--rich]
+  noteflow section rename <title> <old> <new>
+  noteflow section delete <title> <name> [--yes]
+
+  Manage a note's sections by name (no ids needed). Section names are NOT unique;
+  disambiguate duplicates with a 1-based suffix, e.g. "Tasks#2". 'delete' refuses
+  to remove the last remaining section. Quote multi-word names.
+
+  Examples:
+    noteflow section add "Project Alpha" "Meeting Notes"
+    noteflow section rename "Project Alpha" Tasks To-do
+    noteflow section delete "Project Alpha" Scratch --yes
+`,
     groups: `
   noteflow groups [--json]
   noteflow group create <name> [--color <red|cyan|purple|orange|pink|accent>]
   noteflow group delete <name> [--yes]
 
   Colors: accent (default), accent-2, red, cyan, purple, text, orange, pink
+  Deleting a group also removes its folders; its notes become ungrouped.
+`,
+    folders: `
+  noteflow folders [--group <g>] [--json]
+  noteflow folder create <name> --group <group>
+  noteflow folder rename <name> <new-name> [--group <g>]
+  noteflow folder delete <name> [--group <g>] [--yes]
+
+  Folders are a single nesting level inside a group (group -> folder -> note).
+  A folder always belongs to a group, so 'folder create' requires --group.
+  Folder names can repeat across groups; narrow with --group when ambiguous.
+  Deleting a folder drops its notes back to the group root (they keep the group).
+
+  Put notes in a folder:
+    noteflow new "Sprint 14" --group backend --folder Planning
+    noteflow add "text" --group backend --folder Planning
+    noteflow move "Sprint 14" --group backend --folder Planning
+    noteflow move "Sprint 14" --ungroup            Remove from group/folder
+    noteflow list --group backend --folder Planning
+`,
+    move: `
+  noteflow move <title> --group <g> [--folder <f>]
+  noteflow move <title> --ungroup
+
+  Moves a note between groups/folders. With --group but no --folder the note
+  goes to the group root. --folder requires the folder to exist in that group
+  (create it first with 'noteflow folder create'). --ungroup clears both.
 `,
   }
 
@@ -1099,20 +1538,32 @@ function cmdHelp(topic) {
   NoteFlow CLI — quick notes from your terminal
 
   Note commands:
-    add <text>            Add text to today's daily note
+    add <text>            Append text to today's daily note (or --title)
     new <title>           Create a new empty note
     list                  List notes
-    get <title>           Show note content
+    get <title>           Show note content (pretty, human-readable)
+    read <title> [sec]    Print note/section content RAW (pipe/agent-friendly)
+    set <title> <sec>     Overwrite a section's content (creates it if missing)
     delete <title>        Delete a note
     rename <old> <new>    Rename a note
-    sections <title>      List sections of a note
+    move <title>          Move a note to a group/folder (--group/--folder/--ungroup)
     favorite <title>      Toggle favorite on a note
     archive <title>       Toggle archive on a note
 
-  Group commands:
+  Section commands:
+    sections <title>            List sections of a note
+    section add <title> <name>      Add a section
+    section rename <title> <o> <n>  Rename a section
+    section delete <title> <name>   Delete a section
+
+  Group / folder commands:
     groups                List all groups
     group create <name>   Create a group
     group delete <name>   Delete a group
+    folders               List folders (group -> folder -> note)
+    folder create <name> --group <g>   Create a folder inside a group
+    folder rename <name> <new>         Rename a folder
+    folder delete <name>               Delete a folder (notes drop to group root)
 
   Sync commands:
     login [repo]          Connect to GitHub
@@ -1126,6 +1577,12 @@ function cmdHelp(topic) {
   Flags available on most commands:
     --json                Machine-readable JSON output
     --yes                 Skip confirmation prompts
+
+  Agent quickstart (read + write by name, no ids):
+    noteflow list --json                      Discover note titles + section names
+    noteflow read "<title>" "<section>"       Read one section RAW (pipe-friendly)
+    noteflow set  "<title>" "<section>" --text "..."   Overwrite a section
+    noteflow add  "..." --title "<title>" --section "<section>"   Append instead
 
   AI agent integration:
     NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
@@ -1141,8 +1598,12 @@ function cmdHelp(topic) {
     noteflow add "deploy steps" --section "Tasks" --tag urgent
     noteflow new "Project Alpha" --group backend
     noteflow list --group backend
-    noteflow get "Project Alpha" --json
+    noteflow read "Project Alpha" "Tasks"
+    noteflow set "Project Alpha" "Tasks" --text "- [ ] deploy"
+    noteflow section rename "Project Alpha" Tasks To-do
     noteflow group create backend --color cyan
+    noteflow folder create Planning --group backend
+    noteflow move "Project Alpha" --group backend --folder Planning
 `)
 }
 
@@ -1157,7 +1618,9 @@ function parseFlags(args) {
     else if (a === '--archived') { flags.archived = true }
     else if (a === '--raw') { flags.raw = true }
     else if (a === '--rich') { flags.raw = false }
-    else if ((a === '--tag' || a === '--title' || a === '--section' || a === '--group' || a === '--color') && args[i + 1]) {
+    else if (a === '--stdin') { flags.stdin = true }
+    else if (a === '--ungroup') { flags.ungroup = true }
+    else if ((a === '--tag' || a === '--title' || a === '--section' || a === '--group' || a === '--folder' || a === '--color' || a === '--text' || a === '--file') && i + 1 < args.length) {
       flags[a.slice(2)] = args[++i]
     }
     else if (a.startsWith('--')) { /* unknown flag, ignore */ }
@@ -1215,6 +1678,47 @@ async function main() {
       cmdSections(title)
       break
     }
+    case 'read': {
+      const title = positional[0]
+      if (!title) { err('Usage: noteflow read <title> [section]'); process.exit(1) }
+      const section = flags.section || positional.slice(1).join(' ')
+      cmdRead(title, section, flags)
+      break
+    }
+    case 'set': {
+      const title = positional[0]
+      const section = flags.section || positional.slice(1).join(' ')
+      if (!title || !section) { err('Usage: noteflow set <title> <section> [--text "..." | --file <path> | --stdin]'); process.exit(1) }
+      await cmdSet(title, section, flags)
+      break
+    }
+    case 'section': {
+      const sub = positional[0]
+      if (sub === 'list') {
+        const title = positional.slice(1).join(' ')
+        if (!title) { err('Usage: noteflow section list <title>'); process.exit(1) }
+        cmdSections(title)
+      } else if (sub === 'add') {
+        const title = positional[1]
+        const name = positional.slice(2).join(' ')
+        if (!title || !name) { err('Usage: noteflow section add <title> <name> [--rich]'); process.exit(1) }
+        await cmdSectionAdd(title, name, flags)
+      } else if (sub === 'rename') {
+        const title = positional[1]
+        const oldName = positional[2]
+        const newName = positional.slice(3).join(' ')
+        if (!title || !oldName || !newName) { err('Usage: noteflow section rename <title> <old> <new>'); process.exit(1) }
+        await cmdSectionRename(title, oldName, newName)
+      } else if (sub === 'delete' || sub === 'rm') {
+        const title = positional[1]
+        const name = positional.slice(2).join(' ')
+        if (!title || !name) { err('Usage: noteflow section delete <title> <name> [--yes]'); process.exit(1) }
+        await cmdSectionDelete(title, name, flags)
+      } else {
+        err('Usage: noteflow section list|add|rename|delete <title> ...'); process.exit(1)
+      }
+      break
+    }
     case 'favorite':
     case 'pin': {
       const title = positional.join(' ')
@@ -1235,6 +1739,32 @@ async function main() {
       if (sub === 'create') { if (!name) { err('Usage: noteflow group create <name>'); process.exit(1) }; cmdGroupCreate(name, flags) }
       else if (sub === 'delete' || sub === 'rm') { if (!name) { err('Usage: noteflow group delete <name>'); process.exit(1) }; await cmdGroupDelete(name, flags) }
       else { err('Usage: noteflow group create|delete <name>'); process.exit(1) }
+      break
+    }
+    case 'folders': cmdFolders(flags); break
+    case 'folder': {
+      const sub = positional[0]
+      if (sub === 'list') { cmdFolders(flags) }
+      else if (sub === 'create') {
+        const name = positional.slice(1).join(' ')
+        if (!name) { err('Usage: noteflow folder create <name> --group <group>'); process.exit(1) }
+        cmdFolderCreate(name, flags)
+      } else if (sub === 'rename') {
+        const old = positional[1]
+        const next = positional.slice(2).join(' ')
+        if (!old || !next) { err('Usage: noteflow folder rename <name> <new-name> [--group <g>]'); process.exit(1) }
+        cmdFolderRename(old, next, flags)
+      } else if (sub === 'delete' || sub === 'rm') {
+        const name = positional.slice(1).join(' ')
+        if (!name) { err('Usage: noteflow folder delete <name> [--group <g>] [--yes]'); process.exit(1) }
+        await cmdFolderDelete(name, flags)
+      } else { err('Usage: noteflow folder list|create|rename|delete ...'); process.exit(1) }
+      break
+    }
+    case 'move': {
+      const title = positional.join(' ')
+      if (!title) { err('Usage: noteflow move <title> --group <g> [--folder <f>]  (or --ungroup)'); process.exit(1) }
+      await cmdMove(title, flags)
       break
     }
     case 'login':   await cmdLogin(positional[0]); break

@@ -39,6 +39,7 @@ interface NoteContextMenuProps {
 export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
   const rawNotes = useNotesStore((s) => s.notes)
   const deleteNote = useNotesStore((s) => s.deleteNote)
+  const updateNote = useNotesStore((s) => s.updateNote)
   const encryptNote = useNotesStore((s) => s.encryptNote)
   const unlockNote = useNotesStore((s) => s.unlockNote)
   const removeNoteEncryption = useNotesStore((s) => s.removeNoteEncryption)
@@ -77,6 +78,21 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
     })
   }
 
+  const confirmDeleteSection = (note: Note, sectionId: string) => {
+    const section = note.sections.find((s) => s.id === sectionId)
+    if (!section) return
+    setModal({
+      title: 'Delete section',
+      message: `"${section.name}" will be permanently deleted.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: () => {
+        setModal(null)
+        void updateNote(note.id, { sections: note.sections.filter((s) => s.id !== sectionId) })
+      },
+    })
+  }
+
   return (
     <>
       {request && (
@@ -85,6 +101,7 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
           request={request}
           onClose={onClose}
           onConfirmDelete={confirmDelete}
+          onConfirmDeleteSection={confirmDeleteSection}
           onUnlockThenDelete={(noteId) => { onClose(); setPendingDeleteId(noteId); setEncModal({ mode: 'unlock', noteId }) }}
           onEncModal={(mode, noteId) => { onClose(); setEncModal({ mode, noteId }) }}
         />
@@ -137,13 +154,14 @@ interface NoteMenuBodyProps {
   request: NoteContextMenuRequest
   onClose: () => void
   onConfirmDelete: (note: Note) => void
+  onConfirmDeleteSection: (note: Note, sectionId: string) => void
   onUnlockThenDelete: (noteId: string) => void
   onEncModal: (mode: 'encrypt' | 'unlock' | 'remove', noteId: string) => void
 }
 
 // The visible menu. Mounted fresh per open (keyed by request) so its submenu and
 // inline-input state always starts clean.
-function NoteMenuBody({ request, onClose, onConfirmDelete, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
+function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
   const rawNotes = useNotesStore((s) => s.notes)
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
@@ -175,6 +193,9 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onUnlockThenDelete, o
   const currentSection = request.sectionId
     ? note.sections.find((section) => section.id === request.sectionId) ?? null
     : null
+  // Only offer per-section delete when the menu targets a section and the note
+  // has more than one — deleting the lone section would leave an empty note.
+  const canDeleteSection = !!currentSection && note.sections.length > 1
   const currentSectionColor = currentSection
     ? sectionTagColors[normalizeTagColorKey(currentSection.name)]
     : undefined
@@ -537,20 +558,33 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onUnlockThenDelete, o
         </>
       )}
       <div className="h-px bg-border my-1" />
-      <button
-        onClick={() => {
-          if (note.encryption && !sessionPasswords[note.id]) {
-            onUnlockThenDelete(note.id)
-            return
-          }
-          onClose()
-          onConfirmDelete(note)
-        }}
-        className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
-      >
-        <Trash2 size={12} />
-        Delete note
-      </button>
+      {canDeleteSection ? (
+        <button
+          onClick={() => {
+            onClose()
+            onConfirmDeleteSection(note, currentSection!.id)
+          }}
+          className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
+        >
+          <Trash2 size={12} />
+          Delete section
+        </button>
+      ) : (
+        <button
+          onClick={() => {
+            if (note.encryption && !sessionPasswords[note.id]) {
+              onUnlockThenDelete(note.id)
+              return
+            }
+            onClose()
+            onConfirmDelete(note)
+          }}
+          className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
+        >
+          <Trash2 size={12} />
+          Delete note
+        </button>
+      )}
     </ContextMenu>
   )
 }

@@ -30,37 +30,104 @@ const label =
   "font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-faint);";
 const cardP = 'margin:0;font-size:17px;line-height:1.5;color:var(--ink-dim);';
 
-// ── Notes section: the feature set drawn as a synaptic constellation ──
-// `tok` is a palette token (rgb triplet); `x`/`y` are stage percentages. The hub
-// (capture) sits in the centre; the rest ring around it. Links are wired in the
-// page script. Keeping the copy here means it ships in the static HTML for SEO.
-const synFeatures = [
-  { id: 'capture', tok: 'accent', glyph: '⌘', x: 50, y: 51, hub: true, name: 'Capture',
-    title: 'Always a keystroke away',
-    desc: 'Summon NoteFlow from the tray — anywhere, even when the window is hidden.',
-    chip: 'Ctrl+Shift+Space' },
-  { id: 'markdown', tok: 'accent-2', glyph: '▤', x: 19, y: 21, hub: false, name: 'Markdown',
-    title: 'Plain Markdown, on your disk',
-    desc: 'Every note is a portable .md file in a folder you choose. No lock-in, ever.',
-    chip: '~/noteflow-notes' },
-  { id: 'sections', tok: 'purple', glyph: '⊟', x: 81, y: 21, hub: false, name: 'Sections',
-    title: 'Sections, like tabs',
-    desc: 'Split one note into Note · Tasks · Questions. Each becomes a node in the brain.',
-    chip: 'Ctrl+T' },
-  { id: 'groups', tok: 'orange', glyph: '▦', x: 87, y: 70, hub: false, name: 'Groups',
-    title: 'Groups, folders, favorites',
-    desc: 'Color-coded groups with nested folders. Drag to reorder, star to pin.',
-    chip: 'drag & drop' },
-  { id: 'encrypted', tok: 'red', glyph: '⏱', x: 50, y: 90, hub: false, name: 'Security',
-    title: 'Temporary & encrypted',
-    desc: 'Notes that self-destruct in 24h, or lock any note with AES-256.',
-    chip: 'Ctrl+Shift+N' },
-  { id: 'cli', tok: 'cyan', glyph: '❯_', x: 13, y: 70, hub: false, name: 'CLI',
-    title: 'Command palette + CLI',
-    desc: 'Jump anywhere in a keystroke — or drive it headless from a terminal.',
-    chip: 'Ctrl+P' },
+// ── Notes section: the feature set drawn as a *real* NoteFlow window ──
+// Left = the app sidebar (each feature is a note, in colour-coded groups). Right =
+// a faithful section-preview card (the editor mock) that swaps when a note is picked.
+// `tok` is a palette token (rgb triplet) that tints the section tag + the card accent.
+// `body` blocks are rendered as a mini note, so all the marketing copy ships in the
+// static HTML for SEO. Keep this in sync with the markup + the page script below.
+type NoteBlock =
+  | { t: 'p'; html: string }
+  | { t: 'ul'; items: string[] }
+  | { t: 'check'; items: { done: boolean; text: string }[] }
+  | { t: 'kbd'; keys: string[] }
+  | { t: 'code'; lines: string[] }
+  | { t: 'tabs'; tabs: { name: string; tok: string }[] }
+  | { t: 'groups'; rows: { name: string; tok: string; count: number }[] };
+
+interface NoteFeature {
+  id: string;
+  tok: string;
+  title: string;   // shown both in the sidebar item and as the note heading
+  time: string;    // short modified time in the sidebar item (e.g. 21:34)
+  date: string;    // full created line inside the card
+  mode: 'rich' | 'raw';
+  tags: { name: string; tok: string }[];
+  body: NoteBlock[];
+}
+
+const noteFeatures: NoteFeature[] = [
+  {
+    id: 'capture', tok: 'accent', title: 'Capture anything',
+    time: '21:34', date: 'Jun 18, 2026 · 09:14', mode: 'rich',
+    tags: [{ name: 'Capture', tok: 'accent' }, { name: 'Inbox', tok: 'cyan' }],
+    body: [
+      { t: 'p', html: 'NoteFlow lives in your <strong>system tray</strong>. Summon it from anywhere — even when the window is hidden — and start typing before the thought escapes.' },
+      { t: 'kbd', keys: ['Ctrl', 'Shift', 'Space'] },
+      { t: 'check', items: [
+        { done: true, text: 'Global hotkey — window snaps to focus' },
+        { done: true, text: 'Cursor already blinking in the editor' },
+        { done: false, text: 'Back to what you were doing' },
+      ] },
+    ],
+  },
+  {
+    id: 'markdown', tok: 'accent-2', title: 'Plain Markdown',
+    time: '19:02', date: 'Jun 12, 2026 · 22:31', mode: 'rich',
+    tags: [{ name: 'Markdown', tok: 'accent-2' }],
+    body: [
+      { t: 'p', html: 'Every note is a portable <code>.md</code> file in a folder <strong>you</strong> choose. No database, no lock-in — ever.' },
+      { t: 'code', lines: ['~/noteflow-notes/', '  ├─ ideas/rag-agents.md', '  └─ infra/deploy.md'] },
+      { t: 'p', html: 'Edit it in NoteFlow, in Vim, in anything. It is just text on your machine.' },
+    ],
+  },
+  {
+    id: 'sections', tok: 'purple', title: 'Sections, like tabs',
+    time: '16:47', date: 'Jun 09, 2026 · 14:02', mode: 'rich',
+    tags: [{ name: 'Note', tok: 'purple' }, { name: 'Tasks', tok: 'orange' }, { name: 'Questions', tok: 'cyan' }],
+    body: [
+      { t: 'tabs', tabs: [{ name: 'Note', tok: 'purple' }, { name: 'Tasks', tok: 'orange' }, { name: 'Questions', tok: 'cyan' }] },
+      { t: 'p', html: 'Split a single note into tabbed sections — keep the write-up, the to-dos and the open questions side by side.' },
+      { t: 'ul', items: ['Each section is its own tab', 'And its own neuron in the Brain', 'Switch with <code>Ctrl+T</code>'] },
+    ],
+  },
+  {
+    id: 'groups', tok: 'orange', title: 'Groups & folders',
+    time: '11:08', date: 'Jun 05, 2026 · 18:47', mode: 'rich',
+    tags: [{ name: 'Organize', tok: 'orange' }],
+    body: [
+      { t: 'groups', rows: [
+        { name: 'Infra', tok: 'accent', count: 12 },
+        { name: 'Research', tok: 'purple', count: 7 },
+        { name: 'Personal', tok: 'pink', count: 23 },
+      ] },
+      { t: 'p', html: 'Colour-coded groups with nested folders. <strong>Drag</strong> to reorder, <strong>star</strong> to pin a favorite to the top.' },
+    ],
+  },
+  {
+    id: 'security', tok: 'red', title: 'Lock or vanish',
+    time: '09:21', date: 'Jun 01, 2026 · 07:55', mode: 'rich',
+    tags: [{ name: 'Vault', tok: 'red' }],
+    body: [
+      { t: 'p', html: 'Wrap any note in <strong>AES-256</strong>, or make it a temporary note that self-destructs after 24 hours.' },
+      { t: 'check', items: [
+        { done: true, text: '🔒 Encrypted — unlocks with your key' },
+        { done: true, text: '⏱ Expires in 24h · auto-deleted' },
+      ] },
+      { t: 'kbd', keys: ['Ctrl', 'Shift', 'N'] },
+    ],
+  },
+  {
+    id: 'cli', tok: 'cyan', title: 'Terminal & CLI',
+    time: '23:55', date: 'May 28, 2026 · 11:09', mode: 'raw',
+    tags: [{ name: 'Terminal', tok: 'cyan' }],
+    body: [
+      { t: 'code', lines: ['$ nf new "Deploy checklist"', '✓ created · 1 section · infra', '$ nf ls --group infra'] },
+      { t: 'p', html: 'A full headless CLI for scripts and pipelines — or hit <code>Ctrl+P</code> to jump anywhere without leaving the keyboard.' },
+    ],
+  },
 ];
-const synHub = synFeatures.find((f) => f.hub)!;
+const firstFeature = noteFeatures[0];
 ---
 
 <Base jsonLd={jsonLd}>
@@ -158,35 +225,114 @@ const synHub = synFeatures.find((f) => f.hub)!;
           <p style="margin:24px 0 0;font-size:clamp(19px,1.5vw,22px);line-height:1.62;color:var(--ink-dim);">A dark-first desktop notebook for developers. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.</p>
         </div>
 
-        <!-- Synaptic feature constellation: the app's features as a small neural web -->
-        <div class="nf-syn" data-reveal>
-          <div class="nf-syn-stage" data-syn-stage>
-            <svg class="nf-syn-svg" data-syn-svg aria-hidden="true"></svg>
-            {synFeatures.map((f) => (
+        <!-- Two floating things, separated only by space: a list of NoteFlow note
+             items (left, identical to the real dark sidebar) and the section-preview
+             card for the picked note (right). No window chrome — just the pieces. -->
+        <div class="nf-notes" data-reveal data-noteapp>
+          <!-- ── The clickable notes — a faithful slice of the NoteFlow sidebar ── -->
+          <div class="nf-note-list" role="tablist" aria-label="NoteFlow features">
+            {noteFeatures.map((f) => (
               <button
                 type="button"
-                class={`nf-syn-node${f.hub ? ' is-hub' : ''}`}
-                data-syn-node={f.id}
-                data-name={f.name}
-                data-title={f.title}
-                data-desc={f.desc}
-                data-chip={f.chip}
-                aria-label={`${f.title} — ${f.chip}`}
-                style={`--c:var(--${f.tok});left:${f.x}%;top:${f.y}%;`}
+                role="tab"
+                aria-selected={f.id === firstFeature.id ? 'true' : 'false'}
+                class={`nf-note${f.id === firstFeature.id ? ' is-active' : ''}`}
+                data-note={f.id}
+                style={`--ac:var(--nf-${f.tok});`}
+                aria-label={f.title}
               >
-                <span class="nf-syn-soma"><span class="nf-syn-glyph">{f.glyph}</span></span>
-                <span class="nf-syn-name">{f.name}</span>
+                <span class="nf-note-top">
+                  <span class="nf-note-title">{f.title}</span>
+                  <span class="nf-note-time">{f.time}</span>
+                </span>
+                <span class="nf-note-tags">
+                  {f.tags.map((tg) => (
+                    <span class="nf-note-tag" style={`--tc:var(--nf-${tg.tok});`}>{tg.name}</span>
+                  ))}
+                </span>
               </button>
             ))}
           </div>
 
-          <aside class="nf-syn-panel" data-syn-panel style={`--pc:var(--${synHub.tok});`}>
-            <div class="nf-syn-panel-tag"><span class="nf-syn-panel-dot"></span><span data-syn-eyebrow>{synHub.name}</span></div>
-            <h3 data-syn-title>{synHub.title}</h3>
-            <p data-syn-desc>{synHub.desc}</p>
-            <span class="nf-syn-panel-chip" data-syn-chip>{synHub.chip}</span>
-            <div class="nf-syn-panel-foot">Hover a neuron · the synapses fire</div>
-          </aside>
+          <!-- ── The note content — a floating section-preview card that swaps ── -->
+          <div class="nf-card-stage" data-noteapp-stage>
+            {noteFeatures.map((f) => (
+              <article
+                class={`nf-card${f.id === firstFeature.id ? ' is-active' : ''}`}
+                data-panel={f.id}
+                style={`--ac:var(--nf-${f.tok});`}
+                aria-hidden={f.id === firstFeature.id ? 'false' : 'true'}
+              >
+                {/* Section label — the card's identity (which tab this is) */}
+                <div class="nf-card-sec">
+                  <span class="nf-card-sec-dot"></span>
+                  <span class="nf-card-sec-name">{f.tags[0].name}</span>
+                  <span class="nf-card-sec-mode" title={f.mode === 'raw' ? 'Raw markdown section' : 'Rich text section'}>{f.mode === 'raw' ? '✎' : '◉'}</span>
+                </div>
+
+                {/* Editor mock — title, date, a representational toolbar, then the body */}
+                <div class="nf-card-doc">
+                  <div class="nf-card-rise nf-card-head">
+                    <div class="nf-card-title">{f.title}<span class="nf-card-caret"></span></div>
+                    <div class="nf-card-date">{f.date}</div>
+                  </div>
+                  <div class="nf-card-rise nf-card-toolbar" aria-hidden="true">
+                    {Array.from({ length: 6 }).map(() => <span></span>)}
+                  </div>
+
+                  <div class="nf-card-body">
+                    {f.body.map((b) => {
+                      if (b.t === 'p') return <p class="nf-card-rise nf-card-p" set:html={b.html} />;
+                      if (b.t === 'ul') return (
+                        <ul class="nf-card-rise nf-card-ul">
+                          {b.items.map((it) => <li set:html={it} />)}
+                        </ul>
+                      );
+                      if (b.t === 'check') return (
+                        <ul class="nf-card-rise nf-card-check">
+                          {b.items.map((it) => (
+                            <li class={it.done ? 'is-done' : ''}><span class="nf-card-box">{it.done ? '✓' : ''}</span>{it.text}</li>
+                          ))}
+                        </ul>
+                      );
+                      if (b.t === 'kbd') return (
+                        <div class="nf-card-rise nf-card-kbd">
+                          {b.keys.map((k, i) => (
+                            <>{i > 0 && <span class="nf-card-kbd-plus">+</span>}<kbd>{k}</kbd></>
+                          ))}
+                        </div>
+                      );
+                      if (b.t === 'code') return (
+                        <pre class="nf-card-rise nf-card-code"><code>{b.lines.join('\n')}</code></pre>
+                      );
+                      if (b.t === 'tabs') return (
+                        <div class="nf-card-rise nf-card-tabs">
+                          {b.tabs.map((tb) => (
+                            <span class="nf-card-tab" style={`--tc:var(--nf-${tb.tok});`}><span class="nf-card-tab-dot"></span>{tb.name}</span>
+                          ))}
+                        </div>
+                      );
+                      if (b.t === 'groups') return (
+                        <div class="nf-card-rise nf-card-grouprows">
+                          {b.rows.map((r) => (
+                            <div class="nf-card-grouprow" style={`--tc:var(--nf-${r.tok});`}>
+                              <span class="nf-card-grouprow-dot"></span>
+                              <span class="nf-card-grouprow-name">{r.name}</span>
+                              <span class="nf-card-grouprow-count">{r.count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                      return null;
+                    })}
+                  </div>
+
+                  {/* Bottom fade — suggests there's more below the fold (like the real card) */}
+                  <div class="nf-card-fade" aria-hidden="true"></div>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -367,190 +513,263 @@ const synHub = synFeatures.find((f) => f.hub)!;
   </div>
 
   <style is:global>
-    /* ── Notes · synaptic feature constellation ───────────────────────────── */
-    .nf-syn {
+    /* ── Notes · floating NoteFlow note items + a floating section card ──────── */
+    /* The block mirrors the real NoteFlow theme: Carbon-dark by default, Arctic-Day
+       under the light site theme. Colours are the app's rgb triples (src/lib/themes.ts). */
+    .nf-notes {
+      --nf-bg-0: 9 9 9; --nf-bg-1: 17 17 17; --nf-bg-2: 26 26 26; --nf-bg-3: 38 38 38;
+      --nf-bg-editor: 20 20 20; --nf-border: 42 42 42;
+      --nf-text: 212 212 212; --nf-text-muted: 140 140 140;
+      --nf-accent: 30 144 255; --nf-accent-2: 16 224 176; --nf-accent-3: 255 160 20;
+      --nf-red: 255 56 56; --nf-cyan: 32 200 255; --nf-purple: 200 96 240;
+      --nf-orange: 255 112 16; --nf-pink: 255 48 152;
       display: flex;
-      flex-wrap: wrap;
-      gap: clamp(20px, 3vw, 34px);
+      align-items: flex-start;
+      gap: clamp(62px, 8vw, 122px);
       margin-top: clamp(46px, 6vw, 72px);
-      align-items: stretch;
+      max-width: 960px;
     }
-    .nf-syn-stage {
-      position: relative;
-      flex: 1 1 460px;
-      min-height: clamp(390px, 44vw, 470px);
+    /* Light site → NoteFlow's Arctic Day palette (so the widget recolours, not stays dark) */
+    [data-theme='light'] .nf-notes {
+      --nf-bg-0: 220 230 242; --nf-bg-1: 237 243 252; --nf-bg-2: 226 234 247; --nf-bg-3: 208 220 238;
+      --nf-bg-editor: 237 243 252; --nf-border: 176 196 220;
+      --nf-text: 26 38 64; --nf-text-muted: 74 94 122;
+      --nf-accent: 14 78 168; --nf-accent-2: 8 120 95; --nf-accent-3: 150 96 4;
+      --nf-red: 184 28 36; --nf-cyan: 10 110 152; --nf-purple: 112 36 150;
+      --nf-orange: 156 58 2; --nf-pink: 156 18 96;
     }
-    .nf-syn-svg {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      overflow: visible;
-      z-index: 0;
-      pointer-events: none;
-    }
-    .nf-syn-fiber {
-      fill: none;
-      stroke: var(--line-2);
-      stroke-width: 1.2;
-      opacity: 0.65;
-      transition: stroke 0.3s, opacity 0.3s, stroke-width 0.3s;
-    }
-    .nf-syn-fiber.is-lit {
-      stroke: var(--lc, var(--detail));
-      stroke-width: 1.7;
-      opacity: 1;
-      stroke-dasharray: 5 9;
-      animation: nf-flow 0.6s linear infinite;
-      filter: drop-shadow(0 0 4px var(--lc, var(--detail)));
-    }
-    @keyframes nf-flow { to { stroke-dashoffset: -14; } }
 
-    .nf-syn-node {
-      position: absolute;
-      transform: translate(-50%, -50%);
+    /* ── Left · the clickable notes (faithful to the dark sidebar) ── */
+    .nf-note-list {
+      flex: 0 0 auto;
+      width: clamp(262px, 31%, 336px);
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: 9px;
-      z-index: 1;
-      padding: 0;
-      background: none;
-      border: 0;
-      cursor: pointer;
-      transition: opacity 0.3s;
+      gap: 6px;
     }
-    .nf-syn-soma {
+    .nf-note {
       position: relative;
-      width: 54px;
-      height: 54px;
-      display: grid;
-      place-items: center;
-      border-radius: 15px;
-      background: var(--card);
-      border: 1px solid rgb(var(--c) / 0.45);
-      transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.25s, box-shadow 0.25s;
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 11px 13px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      cursor: pointer;
+      font-family: 'Inter', system-ui, sans-serif;
+      transition: background 0.18s ease, transform 0.18s ease;
     }
-    .nf-syn-glyph {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 19px;
-      line-height: 1;
-      color: rgb(var(--c));
+    .nf-note:hover { background: rgb(var(--nf-bg-3) / 0.85); }
+    .nf-note.is-active {
+      background: rgb(var(--ac) / 0.14);
     }
-    .nf-syn-name {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--ink-dim);
-      text-shadow: 0 1px 10px var(--bg), 0 0 4px var(--bg);
-      transition: color 0.25s;
-    }
-    .nf-syn-node.is-hub .nf-syn-soma {
-      width: 66px;
-      height: 66px;
-      border-radius: 18px;
-      border-color: rgb(var(--c) / 0.7);
-      box-shadow: 0 0 0 5px rgb(var(--c) / 0.06), 0 0 26px rgb(var(--c) / 0.18);
-    }
-    .nf-syn-node.is-hub .nf-syn-glyph { font-size: 25px; }
-    .nf-syn-node.is-hub .nf-syn-soma::after {
+    .nf-note.is-active::before {
       content: '';
       position: absolute;
-      inset: -1px;
-      border-radius: inherit;
-      border: 1px solid rgb(var(--c) / 0.5);
-      animation: nf-soma-pulse 2.6s ease-in-out infinite;
-      pointer-events: none;
+      left: 0; top: 10px; bottom: 10px;
+      width: 2px;
+      border-radius: 0 2px 2px 0;
+      background: rgb(var(--ac));
+      box-shadow: 0 0 10px rgb(var(--ac) / 0.7);
     }
-    @keyframes nf-soma-pulse {
-      0%, 100% { opacity: 0.15; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(1.14); }
-    }
-    .nf-syn-node:hover .nf-syn-soma,
-    .nf-syn-node:focus-visible .nf-syn-soma,
-    .nf-syn-node.is-active .nf-syn-soma {
-      transform: scale(1.09);
-      border-color: rgb(var(--c));
-      box-shadow: 0 0 0 5px rgb(var(--c) / 0.10), 0 0 32px rgb(var(--c) / 0.42);
-    }
-    .nf-syn-node:hover .nf-syn-name,
-    .nf-syn-node:focus-visible .nf-syn-name,
-    .nf-syn-node.is-active .nf-syn-name { color: rgb(var(--c)); }
-    .nf-syn-node:focus-visible { outline: none; }
-    .nf-syn-stage.is-dim .nf-syn-node:not(.is-active) { opacity: 0.42; }
+    .nf-note:focus-visible { outline: 2px solid rgb(var(--ac) / 0.6); outline-offset: 2px; }
 
-    .nf-syn-panel {
-      flex: 1 1 290px;
-      align-self: stretch;
+    .nf-note-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .nf-note-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 500;
+      color: rgb(var(--nf-text) / 0.82);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: color 0.18s ease;
+    }
+    .nf-note:hover .nf-note-title,
+    .nf-note.is-active .nf-note-title { color: rgb(var(--nf-text)); }
+    .nf-note-time { font-size: 12px; color: rgb(var(--nf-text-muted) / 0.62); flex-shrink: 0; }
+    .nf-note-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    /* Section tag — identical recipe to the app: colour text + 0.12 fill + 0.28 border */
+    .nf-note-tag {
+      font-size: 11.5px;
+      line-height: 1.55;
+      padding: 1px 6px;
+      border-radius: 5px;
+      color: rgb(var(--tc));
+      background: rgb(var(--tc) / 0.12);
+      border: 1px solid rgb(var(--tc) / 0.28);
+    }
+
+    /* ── Right · the floating section-preview card (swaps on select) ── */
+    .nf-card-stage {
+      flex: 1 1 0;
+      min-width: 0;
+      max-width: 480px;
+      position: relative;
+      height: clamp(356px, 40vw, 438px);
+      border: 1px solid rgb(var(--nf-border) / 0.5);
+      border-radius: 13px;
+      overflow: hidden;
+      /* Disguised, see-through panel: semi-transparent surface + frosted backdrop so the
+         network background reads through it. */
+      background: rgb(var(--nf-bg-editor) / 0.42);
+      backdrop-filter: blur(9px);
+      -webkit-backdrop-filter: blur(9px);
+      box-shadow: 0 18px 48px -34px rgba(0, 0, 0, 0.5);
+    }
+    [data-theme='light'] .nf-card-stage { box-shadow: 0 16px 44px -36px rgba(40, 34, 24, 0.32); }
+    .nf-card-stage::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(120% 80% at 80% 0%, rgb(var(--stage-ac, var(--nf-accent)) / 0.12), transparent 62%);
+      transition: background 0.5s var(--ease);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .nf-card {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 26px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(12px) scale(0.99);
+      transition: opacity 0.4s var(--ease), transform 0.4s var(--ease), visibility 0s linear 0.4s;
+      pointer-events: none;
     }
-    .nf-syn-panel-tag {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--ink-faint);
-    }
-    .nf-syn-panel-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: rgb(var(--pc, var(--accent)));
-      box-shadow: 0 0 12px rgb(var(--pc, var(--accent)));
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    .nf-syn-panel h3 {
-      margin: 0;
-      font-size: 23px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      color: var(--ink-strong);
-    }
-    .nf-syn-panel p {
-      margin: 0;
-      font-size: 17px;
-      line-height: 1.55;
-      color: var(--ink-dim);
-    }
-    .nf-syn-panel-chip {
-      align-self: flex-start;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11.5px;
-      color: var(--ink);
-      background: var(--card-2);
-      border: 1px solid rgb(var(--pc, var(--accent)) / 0.35);
-      border-radius: 7px;
-      padding: 6px 10px;
-    }
-    .nf-syn-panel-foot {
-      margin-top: auto;
-      padding-top: 4px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 10.5px;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: var(--ink-faint);
+    .nf-card.is-active {
+      opacity: 1;
+      visibility: visible;
+      transform: none;
+      transition: opacity 0.44s var(--ease), transform 0.44s var(--ease);
+      pointer-events: auto;
     }
 
-    @media (max-width: 520px) {
-      .nf-syn-soma { width: 46px; height: 46px; border-radius: 13px; }
-      .nf-syn-glyph { font-size: 16px; }
-      .nf-syn-node.is-hub .nf-syn-soma { width: 56px; height: 56px; }
-      .nf-syn-node.is-hub .nf-syn-glyph { font-size: 21px; }
+    .nf-card-sec {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 18px;
+      border-bottom: 1px solid rgb(var(--nf-border));
+      background: rgb(var(--ac) / 0.07);
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .nf-card-sec-dot { width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--ac)); box-shadow: 0 0 12px rgb(var(--ac) / 0.7); }
+    .nf-card-sec-name { font-size: 12.5px; font-weight: 600; color: rgb(var(--ac)); letter-spacing: 0.01em; }
+    .nf-card-sec-mode { margin-left: auto; font-size: 11px; color: rgb(var(--nf-text-muted) / 0.7); }
+
+    .nf-card-doc {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      padding: 18px clamp(18px, 2.4vw, 26px) 0;
+      overflow: hidden;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .nf-card-head { margin-bottom: 14px; }
+    .nf-card-title {
+      display: flex;
+      align-items: center;
+      font-size: clamp(19px, 2vw, 23px);
+      font-weight: 700;
+      color: rgb(var(--nf-text));
+      letter-spacing: -0.015em;
+    }
+    .nf-card-caret { width: 2px; height: 1.05em; margin-left: 3px; background: rgb(var(--ac)); animation: nf-blink 1.1s steps(1) infinite; }
+    @keyframes nf-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+    .nf-card-date { margin-top: 4px; font-size: 11.5px; color: rgb(var(--nf-text-muted) / 0.8); }
+
+    .nf-card-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 22px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: rgb(var(--nf-bg-0) / 0.7);
+      border: 1px solid rgb(var(--nf-border));
+      margin-bottom: 15px;
+    }
+    .nf-card-toolbar span { width: 14px; height: 6px; border-radius: 2px; background: rgb(var(--nf-text) / 0.12); }
+    .nf-card-toolbar span:nth-child(3) { width: 9px; }
+    .nf-card-toolbar span:nth-child(5) { width: 20px; }
+
+    .nf-card-body { display: flex; flex-direction: column; gap: 14px; }
+    .nf-card-p { margin: 0; font-size: 15.5px; line-height: 1.65; color: rgb(var(--nf-text) / 0.85); }
+    .nf-card-p strong { color: rgb(var(--nf-text)); font-weight: 600; }
+    .nf-card-p code, .nf-card-ul code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.84em;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgb(var(--ac) / 0.15);
+      color: rgb(var(--ac));
+    }
+    .nf-card-ul { margin: 0; padding-left: 3px; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .nf-card-ul li { position: relative; padding-left: 18px; font-size: 15px; line-height: 1.55; color: rgb(var(--nf-text) / 0.85); }
+    .nf-card-ul li::before { content: ''; position: absolute; left: 2px; top: 0.62em; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--ac) / 0.8); }
+
+    .nf-card-check { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .nf-card-check li { display: flex; align-items: center; gap: 11px; font-size: 15px; color: rgb(var(--nf-text) / 0.85); }
+    .nf-card-check li.is-done { color: rgb(var(--nf-text-muted)); text-decoration: line-through; text-decoration-color: rgb(var(--ac) / 0.5); }
+    .nf-card-box { flex-shrink: 0; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 5px; border: 1.5px solid rgb(var(--nf-border)); font-size: 11px; color: rgb(var(--ac)); }
+    .nf-card-check li.is-done .nf-card-box { background: rgb(var(--ac) / 0.16); border-color: rgb(var(--ac) / 0.6); }
+
+    .nf-card-kbd { display: flex; align-items: center; gap: 6px; }
+    .nf-card-kbd kbd { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: rgb(var(--nf-text)); background: rgb(var(--nf-bg-2)); border: 1px solid rgb(var(--nf-border)); border-bottom-width: 2px; border-radius: 6px; padding: 4px 9px; }
+    .nf-card-kbd-plus { color: rgb(var(--nf-text-muted) / 0.7); font-size: 12px; }
+
+    .nf-card-code {
+      margin: 0;
+      padding: 13px 15px;
+      border-radius: 9px;
+      background: rgb(var(--nf-bg-0) / 0.75);
+      border: 1px solid rgb(var(--nf-border));
+      border-left: 2px solid rgb(var(--ac) / 0.7);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      color: rgb(var(--nf-text) / 0.85);
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .nf-card-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nf-card-tab { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 5px 12px; border-radius: 7px; color: rgb(var(--tc)); background: rgb(var(--tc) / 0.12); border: 1px solid rgb(var(--tc) / 0.30); }
+    .nf-card-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--tc)); }
+
+    .nf-card-grouprows { display: flex; flex-direction: column; gap: 8px; }
+    .nf-card-grouprow { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; background: rgb(var(--tc) / 0.08); border: 1px solid rgb(var(--tc) / 0.22); }
+    .nf-card-grouprow-dot { width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--tc)); box-shadow: 0 0 8px rgb(var(--tc) / 0.6); }
+    .nf-card-grouprow-name { font-size: 14px; color: rgb(var(--nf-text)); font-weight: 500; }
+    .nf-card-grouprow-count { margin-left: auto; font-size: 12px; color: rgb(var(--nf-text-muted) / 0.85); }
+
+    .nf-card-fade { position: absolute; inset-inline: 0; bottom: 0; height: 52px; background: linear-gradient(to top, rgb(var(--nf-bg-editor) / 0.6), transparent); pointer-events: none; z-index: 2; }
+
+    /* Staggered rise of the card's inner blocks when it becomes active */
+    .nf-card.is-active .nf-card-rise { animation: nf-card-rise 0.46s var(--ease) both; }
+    .nf-card.is-active .nf-card-rise:nth-child(1) { animation-delay: 0.02s; }
+    .nf-card.is-active .nf-card-rise:nth-child(2) { animation-delay: 0.08s; }
+    .nf-card.is-active .nf-card-rise:nth-child(3) { animation-delay: 0.14s; }
+    .nf-card.is-active .nf-card-rise:nth-child(4) { animation-delay: 0.20s; }
+    .nf-card.is-active .nf-card-rise:nth-child(n + 5) { animation-delay: 0.26s; }
+    @keyframes nf-card-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    @media (max-width: 760px) {
+      .nf-notes { flex-direction: column; max-width: none; }
+      .nf-note-list { width: 100%; flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; }
+      .nf-note { flex: 0 0 auto; width: 232px; }
+      .nf-card-stage { width: 100%; max-width: none; height: 400px; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .nf-syn-fiber.is-lit { animation: none; }
-      .nf-syn-node.is-hub .nf-syn-soma::after { animation: none; opacity: 0.4; }
+      .nf-card, .nf-card.is-active { transition: opacity 0.2s linear; transform: none; }
+      .nf-card.is-active .nf-card-rise { animation: none; }
+      .nf-card-caret { animation: none; }
     }
   </style>
 
@@ -857,93 +1076,59 @@ const synHub = synFeatures.find((f) => f.hub)!;
       b.addEventListener('click', () => ask(Number(b.dataset.ask)))
     );
 
-    // ── synaptic feature constellation ──
+    // ── Floating notes: pick a note → swap the section-preview card ──
     (() => {
-      const stage = document.querySelector('[data-syn-stage]') as HTMLElement | null;
-      const svg = document.querySelector('[data-syn-svg]') as SVGSVGElement | null;
-      const panel = document.querySelector('[data-syn-panel]') as HTMLElement | null;
-      if (!stage || !svg || !panel) return;
+      const app = document.querySelector('[data-noteapp]') as HTMLElement | null;
+      const stage = document.querySelector('[data-noteapp-stage]') as HTMLElement | null;
+      if (!app || !stage) return;
 
-      const nodes = Array.from(stage.querySelectorAll<HTMLElement>('[data-syn-node]'));
-      // Palette token per feature — kept in sync with synFeatures in the frontmatter.
+      const notes = Array.from(app.querySelectorAll<HTMLElement>('[data-note]'));
+      const cards = Array.from(stage.querySelectorAll<HTMLElement>('[data-panel]'));
+      const cardFor = (id: string) => cards.find((c) => c.dataset.panel === id) || null;
+      // Token per feature → recolours the soft wash behind the floating card.
       const TOK: Record<string, string> = {
         capture: 'accent', markdown: 'accent-2', sections: 'purple',
-        groups: 'orange', encrypted: 'red', cli: 'cyan',
+        groups: 'orange', security: 'red', cli: 'cyan',
       };
-      // Hub → every feature, plus a ring tying the satellites together = a small web.
-      const LINKS: [string, string][] = [
-        ['capture', 'markdown'], ['capture', 'sections'], ['capture', 'groups'],
-        ['capture', 'encrypted'], ['capture', 'cli'],
-        ['markdown', 'sections'], ['sections', 'groups'], ['groups', 'encrypted'],
-        ['encrypted', 'cli'], ['cli', 'markdown'],
-      ];
-      const SVGNS = 'http://www.w3.org/2000/svg';
-      const fibers = LINKS.map(([a, b]) => {
-        const ln = document.createElementNS(SVGNS, 'line');
-        ln.setAttribute('class', 'nf-syn-fiber');
-        svg.appendChild(ln);
-        return { el: ln, a, b };
+
+      let current = notes.find((n) => n.classList.contains('is-active'))?.dataset.note
+        || notes[0]?.dataset.note || '';
+
+      const paintWash = (id: string) =>
+        stage.style.setProperty('--stage-ac', `var(--nf-${TOK[id] || 'accent'})`);
+
+      const select = (id: string) => {
+        if (!id || id === current) return;
+        current = id;
+        notes.forEach((n) => {
+          const on = n.dataset.note === id;
+          n.classList.toggle('is-active', on);
+          n.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        cards.forEach((c) => {
+          const active = c.dataset.panel === id;
+          c.classList.toggle('is-active', active);
+          c.setAttribute('aria-hidden', active ? 'false' : 'true');
+        });
+        paintWash(id);
+      };
+
+      notes.forEach((n) => {
+        const id = n.dataset.note!;
+        n.addEventListener('click', () => select(id));
+        // Keyboard: ↑/↓ to walk the list like the real sidebar.
+        n.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+          e.preventDefault();
+          const i = notes.indexOf(n);
+          const next = notes[(i + (e.key === 'ArrowDown' ? 1 : notes.length - 1)) % notes.length];
+          next.focus();
+          select(next.dataset.note!);
+        });
       });
 
-      const somaCenter = (n: HTMLElement): [number, number] => {
-        const soma = n.querySelector('.nf-syn-soma') as HTMLElement;
-        const r = soma.getBoundingClientRect();
-        const s = stage.getBoundingClientRect();
-        return [r.left + r.width / 2 - s.left, r.top + r.height / 2 - s.top];
-      };
-      const layout = () => {
-        const w = stage.clientWidth, h = stage.clientHeight;
-        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-        const c: Record<string, [number, number]> = {};
-        nodes.forEach((n) => { c[n.dataset.synNode!] = somaCenter(n); });
-        fibers.forEach(({ el, a, b }) => {
-          const p = c[a], q = c[b];
-          if (!p || !q) return;
-          el.setAttribute('x1', String(p[0])); el.setAttribute('y1', String(p[1]));
-          el.setAttribute('x2', String(q[0])); el.setAttribute('y2', String(q[1]));
-        });
-      };
-
-      const setPanel = (n: HTMLElement) => {
-        const tok = TOK[n.dataset.synNode!] || 'accent';
-        panel.style.setProperty('--pc', `var(--${tok})`);
-        (panel.querySelector('[data-syn-eyebrow]') as HTMLElement).textContent = n.dataset.name!;
-        (panel.querySelector('[data-syn-title]') as HTMLElement).textContent = n.dataset.title!;
-        (panel.querySelector('[data-syn-desc]') as HTMLElement).textContent = n.dataset.desc!;
-        (panel.querySelector('[data-syn-chip]') as HTMLElement).textContent = n.dataset.chip!;
-      };
-      const activate = (n: HTMLElement) => {
-        const id = n.dataset.synNode!, tok = TOK[id] || 'accent';
-        nodes.forEach((m) => m.classList.toggle('is-active', m === n));
-        stage.classList.add('is-dim');
-        fibers.forEach(({ el, a, b }) => {
-          const lit = a === id || b === id;
-          el.classList.toggle('is-lit', lit);
-          if (lit) el.style.setProperty('--lc', `rgb(var(--${tok}))`);
-        });
-        setPanel(n);
-      };
-      const hub = nodes.find((n) => n.classList.contains('is-hub')) || nodes[0];
-      const reset = () => {
-        nodes.forEach((m) => m.classList.remove('is-active'));
-        stage.classList.remove('is-dim');
-        fibers.forEach(({ el }) => el.classList.remove('is-lit'));
-        if (hub) setPanel(hub);
-      };
-
-      nodes.forEach((n) => {
-        n.addEventListener('mouseenter', () => activate(n));
-        n.addEventListener('focus', () => activate(n));
-        n.addEventListener('click', () => activate(n));
-      });
-      stage.addEventListener('mouseleave', reset);
-
-      reset();
-      layout();
-      if ('ResizeObserver' in window) new ResizeObserver(layout).observe(stage);
-      window.addEventListener('resize', layout);
-      window.addEventListener('nf-brain-ready', layout);
-      setTimeout(layout, 200); // re-measure once the mono font has loaded
+      // Seed the wash for whichever note starts active.
+      if (cardFor(current)) paintWash(current);
     })();
 
     // ── scroll reveals ──

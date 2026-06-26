@@ -43,6 +43,34 @@ let nextId = 1;
 const pending = new Map();
 const indexTimers = new Map();
 const INDEX_DEBOUNCE_MS = 2500;
+// After this long with no AI traffic at all, kill the whole worker process — not just unload the
+// model. onnxruntime-node does not reliably return its native arena memory to the OS on dispose(),
+// so the model-unload inside the worker only drops it to ~70 MB resident; the only sure way to
+// reclaim everything is to let the process exit. The index lives on disk, so the next search/graph/
+// related lazily respawns it via ensureStarted() with nothing lost.
+const WORKER_IDLE_STOP_MS = 90000;
+let idleStopTimer = null;
+function cancelWorkerIdleStop() {
+    if (idleStopTimer) {
+        clearTimeout(idleStopTimer);
+        idleStopTimer = null;
+    }
+}
+// (Re)arm the idle-stop timer. Called on every request so any AI activity resets the countdown.
+// Only tears the worker down when it's actually idle (no in-flight requests, not mid-start).
+function bumpWorkerActivity() {
+    cancelWorkerIdleStop();
+    idleStopTimer = setTimeout(() => {
+        idleStopTimer = null;
+        if (!child || !ready)
+            return; // worker already gone → nothing to do; next request re-arms
+        if (starting || pending.size > 0) {
+            bumpWorkerActivity();
+            return;
+        } // still busy → re-check later
+        void stop().catch((err) => console.error('[aiIndex] idle stop failed:', String(err)));
+    }, WORKER_IDLE_STOP_MS);
+}
 // ── Public API ──────────────────────────────────────────────────────────────
 function init(opts) {
     notesDir = opts.notesDir;
@@ -214,6 +242,7 @@ async function start() {
 }
 async function stop() {
     manualStop = true;
+    cancelWorkerIdleStop();
     for (const t of indexTimers.values())
         clearTimeout(t);
     indexTimers.clear();
@@ -229,6 +258,7 @@ async function stop() {
 function onExit(code) {
     child = null;
     ready = false;
+    cancelWorkerIdleStop();
     for (const { reject } of pending.values())
         reject(new Error('AI worker exited'));
     pending.clear();
@@ -267,6 +297,7 @@ function onMessage(msg) {
 function request(type, payload) {
     if (!child)
         return Promise.reject(new Error('AI worker not running'));
+    bumpWorkerActivity(); // any traffic resets the idle-stop countdown
     const id = nextId++;
     return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });

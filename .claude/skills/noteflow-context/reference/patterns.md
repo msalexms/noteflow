@@ -1,0 +1,281 @@
+## Patrones y decisiones de arquitectura
+
+### Carga de notas en batch
+`loadNotes()` usa `fs:read-all-notes` (un solo IPC, con reintentos ante FS no listo en Windows
+al despertar/arrancar). Crítico para el tiempo de arranque con muchas notas.
+
+### Rendimiento del sidebar y la búsqueda (escala = miles de notas)
+Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de romper sin querer:
+- **Búsqueda cacheada (`src/lib/searchUtils.ts`):** `getNoteSearchIndex(note)` normaliza
+  título/tags/nombres/cuerpos de sección **una vez por versión de nota** y los guarda en un
+  `WeakMap` keyed por el **objeto `Note`**. Como `updateNote` siempre crea un objeto nuevo al
+  editar, la entrada se invalida sola (y la vieja se recolecta con el objeto). Toda búsqueda sobre
+  el cuerpo (`Sidebar.baseNotes`, `notesStore.getFilteredNotes`, `CommandPalette`) debe ir por esta
+  caché vía `getNoteSearchIndex`/`noteMatchesQuery` — **nunca** re-`normalize()` el contenido entero
+  por tecla (era O(texto total) por carácter).
+- **Filas memoizadas (`Sidebar.tsx`):** cada nota se pinta con `NoteRow` (`React.memo`). Para que la
+  memoización aguante, a `NoteRow` solo se le pasan **props estables/primitivas** y un objeto
+  `handlers` de **identidad fija** (`useMemo([])`) que delega a un `rowApiRef` refrescado en
+  `useLayoutEffect` cada render (closures frescos que leen `items`/`noteOrder`). Así, al teclear en
+  el editor (que dispara `updateNote`) solo se re-renderiza la fila de la nota editada, no todas.
+  **No pasar callbacks recreados por render a `NoteRow`** (rompería el memo y volvería el storm).
+- **Pendiente:** virtualización real (windowing de filas fuera de pantalla) — aún se montan todas
+  las filas en el DOM; el árbol anidado con grupos/carpetas colapsables + drag&drop lo hace no
+  trivial.
+
+### Importación desde otras apps (`electron/importers/`, `src/lib/notionHtml.ts`)
+Importa notas de **Markdown folder**, **Notion** (export HTML `.zip`) y **Google Keep** (Takeout
+`.zip`) reutilizando el pipeline de import existente (preview → conflictos → `notes:write-imported`).
+Dep nueva: `adm-zip` (JS puro, sin binario nativo → no toca `asarUnpack`/postinstall).
+- **Reparto main/renderer (clave):** `htmlToMarkdown` (`src/lib/markdownHtml.ts`) usa `DOMParser` →
+  **solo corre en el renderer**. Por eso el **main** (`electron/importers/{index,markdownFolder,notion,
+  googleKeep}.ts`, vía IPC `notes:parse-external-import`) hace **solo IO**: unzip/recorrer carpetas y
+  emitir un intermedio `ExternalNote[]` (`{title, format:'html'|'md', body, tags?, created?, archived?,
+  favorited?, relPath[]}`). El **renderer** (`ExportImportModal.tsx`) convierte `html→md`
+  (`notionHtml.notionBodyToMarkdown`, normaliza markup Notion→TipTap antes de `htmlToMarkdown`),
+  resuelve `relPath → grupo/folder` (`makeStructureResolver`, fusiona por nombre con `groupsStore`),
+  y serializa al v2 con `serializeNoteFolder`.
+- **Notion HTML:** maneja **ZIP anidados** (`Export-…-Part-N.zip`), quita el sufijo hex-32 de
+  nombres/carpetas, descarta wrappers `Export-*` y la **raíz workspace única** (sus hijos → grupos),
+  extrae `.page-title`/`.page-body`, convierte to-do lists (estado del checkbox), preserva embeds
+  (links de `<figure>`) y **descarta imágenes y `.csv`** (v1).
+- **Google Keep:** Takeout trae **un `.json` por nota** pero la **carpeta de Keep está localizada**
+  (ES = "Conservar", etc.), así que NO se filtra por ruta `/Keep/` sino por **forma de la nota**
+  (`isKeepNote`: tiene `textContent`/`listContent`/`isTrashed`/`userEditedTimestampUsec`…). Mapea
+  `textContent`+`listContent`(→checkboxes), `labels`→tags, `isArchived`/`isPinned`, timestamps µs;
+  omite `isTrashed`. Sin `relPath` (Keep no tiene carpetas).
+- **Decisiones de UX:** contenido importado en **rich-text** (`isRawMode:false`); **notas sin
+  contenido se omiten** (filtradas en preview por `externalContent()`); los **grupos/folders se crean
+  solo al confirmar** (previsualizar y cancelar no deja rastro). Nesting >2 niveles se aplana a
+  grupo + folder (`'A / B'`). Tutorial in-app por fuente en el selector de origen.
+- **Sync:** `notes:write-imported` sube las notas con `pushPathsNow` (push durable awaited por lotes)
+  en vez de `schedulePush` por archivo, para que un pull de auto-sync no las borre a mitad del import
+  (ver "GitHub Sync" → Push).
+- **Smokes:** `scripts/import-notion-smoke.cjs` (node, lado main: hex/wrappers/relPath) y
+  `scripts/import-notion-verify.cjs` (e2e: corre la conversión REAL del renderer en una ventana
+  oculta de Electron + esbuild, escribe a un dir temporal; valida 0 pérdida de contenido).
+
+### Vista de grupo (group overview)
+`notesStore` tiene `groupViewId: string | null` + `setGroupView(id)`. Cuando no es `null`,
+`App.tsx` renderiza `GroupOverview` en lugar del editor/paneles (sidebar y TitleBar siguen
+montados). `setActiveNote()` limpia `groupViewId` (seleccionar cualquier nota cierra la vista y
+devuelve el editor). El componente reutiliza `useSidebarGroups` y `updateNote({group,folder})`
+para reorganizar por drag&drop. La navegación a una sección concreta usa `pendingInitialSectionId`
++ un `noteflow:request-section` diferido con `setTimeout(0)` (el editor monta tras cerrar la vista;
+bajo StrictMode el efecto de montaje consume el `pending` dos veces, de ahí el re-aviso por evento).
+El ancho de tarjeta se guarda en `localStorage` (`noteflow:group-view-card-width`). Sin IPC nuevo.
+**Selección múltiple:** estado local `selectedIds: Set<string>` en `GroupOverview`; cada `NoteCard`
+recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hover o marcada). Las
+acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan los primitivos del
+store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
+iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
+pasa por `ConfirmModal`. `Esc` limpia la selección antes de cerrar la vista. Sin IPC nuevo.
+
+### Vista de nota (note overview)
+`notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es la **tercera vista full-area
+mutuamente excluyente** con la group overview y la brain view: los tres setters (`setGroupView`,
+`setNoteView`, `setBrainView`) y `setActiveNote` se limpian entre sí, así que abrir una cierra las
+otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
+misma prioridad de routing (brain → group → note → editor). **Entradas:** botón en la toolbar de
+`NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual del sidebar. Una
+**tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título+`created` de la
+nota, una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
+`htmlFromMarkdown` (de `lib/markdownHtml.ts`) dentro de `.prose-editor .ProseMirror`, encogido con
+CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. El mock visual vive en
+`SectionPreview/SectionPreviewCard.tsx` (componente puro, props `compact`/`previewHeight`/`previewZoom`);
+`NoteOverview` lo envuelve en su `<button>`. Click en una tarjeta navega a esa sección con el mismo baile
+`pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de tarjeta **fijo** (sin slider).
+Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC nuevo. **Nota CSS:** el reset global
+`button { border: none }` deja `border-style: none`, así que las tarjetas usan `border-solid` explícito para
+que el borde se vea (la utilidad `border` de Tailwind solo fija el ancho).
+
+### Previsualización de sección (hover + cerebro)
+Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
+en memoria en `notesStore`):
+- **Hover** (`SectionPreview/HoverPreviewProvider.tsx`, montado en `App.tsx`): un **único** popover en
+  portal a `document.body`. El hook `useSectionHoverPreview()` (en `hoverPreviewContext.ts`, archivo
+  aparte por la regla `react-refresh/only-export-components`) expone `previewProps(noteId, sectionId, opts)`
+  que devuelve handlers de ratón para escupir sobre cualquier disparador. Disparadores cableados:
+  `SectionTabsRow` (sidebar + group overview), pestañas del editor (omite la activa), `RelatedView`/`ChatView`.
+  `placement: 'cursor-below'` ancla la esquina sup-izq junto al cursor (sidebar/grupos/editor);
+  `'element-right'` (default) al lado del elemento (IA). Retardo ~380 ms; el popover es `pointer-events-none`
+  y se cierra con **cualquier click** (listener `pointerdown` global en el provider — esto evita que se quede
+  pegado al pasar una pestaña del editor a "activa" y perder sus handlers). `title:''` en los handlers
+  suprime el tooltip nativo del ancestro. Posición flash-free: primera pintura con altura estimada +
+  `opacity:0`, se mide en `useLayoutEffect` y se revela.
+- **Cerebro** (`Brain/BrainNodePreview.tsx`): NO es hover. Click en un nodo nota/sección llama
+  `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de navegar) → `BrainView` fija una tarjeta
+  **clicable** junto al click; pulsarla navega (`openNote`), click fuera o `Esc` la cierra. Sustituyó al
+  antiguo "fly-in" de cámara (eliminado).
+
+### Relaciones sección↔sección (slash command + cerebro)
+Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →
+menú de comandos → "Link section" → buscador de secciones → inserta una **pill** que enlaza a otra
+sección (de cualquier nota/grupo). Click navega; hover muestra el preview estándar; aparece como
+arista en el cerebro **aunque la IA esté apagada**.
+- **Fuente única de verdad = inline en el markdown** de la sección:
+  `[Nombre](noteflow://<noteId>/<sectionId>)`. NO toca el frontmatter ni los tres espejos del
+  formato (`noteUtils`/`noteFormat`/`cli`) — es texto plano en el `.md`, así sincroniza, hace
+  round-trip y se degrada a un link inocuo en editores externos/CLI/móvil. Helpers en
+  `src/lib/sectionRelations.ts` (`buildRelationUrl`, `parseRelationUrl`, `extractSectionRelations`).
+- **Round-trip md↔html** (`src/lib/markdownHtml.ts`): `inlineToHtml` convierte el link `noteflow://`
+  en `<span data-type="section-relation" data-note-id data-section-id>` **antes** del regex genérico
+  de links; `inlineElToMd` lo revierte. Por eso `SectionPreviewCard` (que usa `htmlFromMarkdown`)
+  pinta la pill en los previews sin código extra (estilo por atributo en `index.css`).
+- **Editor (`src/components/Editor/`):** `SectionRelation.ts` (nodo inline atom + comando
+  `insertSectionRelation`, NodeView React `SectionRelationView.tsx`: nombre en vivo desde el store,
+  estado "roto" si el destino no existe, hover vía `previewProps`, click vía
+  `notesStore.navigateToSection`). El slash usa **`@tiptap/suggestion`** (dep nueva, JS puro):
+  `SlashCommands.ts` (Suggestion `char:'/'`, off en code blocks) + `SlashCommandMenu.tsx` (popup
+  comandos) + `SectionLinkPicker.tsx` (overlay buscador). `Editor.tsx` registra ambas extensiones y
+  abre el picker con estado local. Solo en modo rich; en raw se ve el markdown literal.
+- **Navegación:** `notesStore.navigateToSection(noteId, sectionId)` encapsula el patrón
+  pending+`request-section` (reutilizable; mismo que overviews/cerebro).
+- **Cerebro (capa de relaciones):** `useBrainGraph` añade `relationEdges` derivado de escanear el
+  contenido de las secciones visibles (`extractSectionRelations`) → independiente del índice IA.
+  Render con el **mismo estilo tenue** que las aristas de contenido pero **siempre visible**: en 3D
+  (`BrainScene`) van en un `relationGroup` propio (no se ocultan con el toggle `showContentEdges`); en
+  2D (`BrainCanvas`) un loop aparte siempre dibujado; `useForceLayout` las incluye como links de
+  contenido. Endpoints resueltos a `s:<sectionId>` (o `n:<noteId>` si la nota colapsa/sección no
+  existe). 100% renderer — sin IPC, sin cambios en `electron/`/`dist-electron/`.
+
+### Grupos archivados
+`NoteGroup.archived?` (en `groups.json`, vía `toggleGroupArchived` en `groupsStore`). Cuando
+`showArchived` está off, el sidebar oculta el grupo **y sus notas** (el filtro de `baseNotes`
+excluye notas cuyo `group` esté en `archivedGroupIds`, y el render salta el item del grupo); con
+`showArchived` on, el grupo aparece atenuado y al final (`useSidebarGroups` ordena archivados
+últimos). Las notas conservan su `archived` individual (no se cascada). Reusa el mismo toggle
+"Show archived" que las notas. El campo es retrocompatible y lo sincroniza `groups:set`; el CLI lo
+ignora. Sin IPC nuevo.
+
+### Ventana frameless + hide-on-close
+`frame: false`. Los controles de ventana son componentes React → IPC. La ventana principal se
+oculta en lugar de cerrarse (`win.hide()`); la app vive en el system tray. Atajo global
+`Ctrl+Shift+Space` la muestra/oculta.
+
+### Ventana de Ajustes unificada (`src/components/Settings/`)
+El ⚙ del TitleBar abre `SettingsModal` (overlay in-app, NO un BrowserWindow): split **nav
+izquierda + panel derecho**, una sección por opción (Appearance, Editor, Startup, Sync, Data,
+Shortcuts, About; el usuario añadió además AI). Sustituye al antiguo dropdown del titlebar y al
+botón de paleta. Cada panel es el cuerpo extraído de los modales previos (`ThemeSettingsModal`,
+`StartupSettingsModal`, `GitHubSyncModal`, `KeyboardShortcutsModal` — **eliminados**, junto con
+`TitleBarMenu.tsx`); `ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback.
+Tamaño **fijo proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]` (no crece con el contenido;
+encoge si la ventana de la app es pequeña). Cada panel gestiona su propio estado/efectos — **sin
+store ni IPC nuevo** salvo `app:get-version` (panel About). El `CommandPalette` no cambió: sigue
+disparando los mismos eventos (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/
+-export/-import`) y el TitleBar los reinterpreta para abrir la ventana en la sección correcta
+(export/import siguen abriendo el flujo `ExportImportModal` directo).
+
+### Single instance
+`app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente.
+
+### Sync entre ventanas
+Al escribir/borrar una nota, main hace broadcast (`notes-updated`) a todas las BrowserWindows.
+El renderer filtra eventos de su propia ventana por `senderId`/`windowId` para evitar races.
+
+### fs.watch de cambios externos
+main observa el dir de notas con `fs.watch` (debounce 150ms) para detectar cambios del CLI o
+de la sincronización desde otro dispositivo. Los writes propios se marcan en
+`recentInternalWrites` para ignorarlos y evitar bucles.
+
+### Recuperación de fallos del renderer
+`render-process-gone` / `unresponsive` recargan la ventana automáticamente (común tras
+suspender/reanudar). `powerMonitor.on('resume')` reemite `notes-updated` con delays escalonados
+(1.5s…30s) por si el FS o el renderer tardan en recuperarse.
+
+### Ventanas sticky (fold/unfold + shape)
+Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&sectionId=...`,
+`alwaysOnTop`, transparentes. En Windows se usa `win.setShape()` (región redondeada calculada
+píxel a píxel) porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado
+en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
+
+
+### Motor de alarmas y notas temporales (en main)
+`setInterval` cada 60s ejecuta `checkAlarms()` + `checkExpiredNotes()`:
+- **Alarmas:** el renderer recolecta deadlines/alarmas de los task items (`alarmUtils.ts`) y las
+  envía con `alarms:schedule`; el main dispara `Notification` nativa cuando vence (incluye las ya
+  vencidas/perdidas al registrar).
+- **Notas temporales:** archivos con `expiresAt` vencido se borran del disco y del remoto.
+
+### Auto-update in-app
+`app:check-update` consulta la última release (API GitHub, endpoint `/releases/latest` → **ignora
+prereleases**; compara con `latest !== current`, así que cualquier versión local distinta dispara
+el update — útil para probar el flujo bajando a una versión inferior a la publicada). En Linux
+elige el artefacto según la distro detectada: **Arch-based** (`/etc/arch-release`,
+`/etc/cachyos-release` o `/usr/bin/pacman`) → `.pkg.tar.zst`; **Debian-based**
+(`/etc/debian_version` o `/usr/bin/dpkg`) → `.deb`; resto → `.AppImage` (universal).
+En **macOS** elige `NoteFlow-${latest}-arm64.dmg` (solo Apple Silicon).
+`app:download-and-install` descarga el artefacto con una **allowlist estricta de hosts**
+(github.com + objects/release-assets de githubusercontent.com) y de extensiones (`.exe`, `.deb`,
+`.AppImage`, `.pkg.tar.zst`, `.dmg`), emite `update:download-progress` durante la descarga y
+`update:installing` al terminarla (la UI muestra un spinner "Installing…" en el botón del
+TitleBar), y luego instala **sin depender de popups del SO**:
+- **Windows:** `spawn(setup, ['--updated','--force-run'], {detached:true}).unref()` + `app.quit()`
+  (tras ~1s). **No usa `/S`**: así la **ventana de progreso nativa de NSIS sí se ve**. El flag
+  `--updated` activa el `isUpdated` del macro `_CHECK_APP_RUNNING` de electron-builder, que **se
+  salta el popup "cierra la aplicación"** y cierra la instancia él solo (el `MessageBox` solo
+  aparece en instalación no-update); `--force-run` la relanza al terminar; al ser instalación
+  **per-user** no hay UAC. **Clave:** el `app.quit()` explícito es imprescindible porque el cierre
+  de ventana hace hide-to-tray (no sale) — sin él, el instalador tendría que force-killear la app
+  tras un retry. Decisión de diseño: se eligió `--updated` (con barra de progreso) sobre `/S`
+  (totalmente silencioso) para dar feedback visual de la instalación.
+- **Linux deb/pacman:** `pkexec dpkg -i` / `pkexec pacman -U --noconfirm` (el diálogo de PolicyKit
+  pidiendo root es esperado e inevitable: instalar a nivel de sistema requiere elevación), con
+  fallback a `shell.openPath` si `pkexec` no está; al instalar hace `app.relaunch()` + `app.quit()`.
+- **AppImage:** reemplazo en sitio — copia al dir de `$APPIMAGE`, `chmod +x`, **rename atómico**
+  sobre el original (no sobreescribe el inodo en uso → no corrompe el proceso vivo) +
+  `app.relaunch({execPath})` + `quit()`. Sin `$APPIMAGE` (dev/empaquetado raro) cae a `shell.openPath`.
+- **macOS:** la build **no está notarizada**, así que no se usa Squirrel.Mac. Se hace
+  `shell.openPath(dest)` para **abrir el `.dmg` en Finder** + una `Notification` "Drag NoteFlow to
+  Applications"; el usuario arrastra a Applications y relanza a mano (la app NO sale). Reemplazo
+  automático descartado por no poder probarse a ciegas.
+
+> **Pendiente de verificar** en build empaquetado real (Win silent + AppImage in-place + **macOS dmg
+> en Apple Silicon real**): probado de momento solo a nivel de compilación/typecheck. macOS, además,
+> no se ha podido probar en runtime (sin Mac) — ver el bloque de soporte macOS más abajo.
+
+`NOTEFLOW_NATIVE=1` (lo setea el wrapper
+del PKGBUILD) hace que la app trate la instalación nativa de Arch como `isPackaged` para rutas de
+iconos y modo no-dev.
+
+### Soporte macOS (Apple Silicon) — añadido sin Mac para probar
+Decisiones (tomadas por no disponer de Mac → mínima superficie de riesgo): **sin firmar/notarizar**
+(firma ad-hoc vía `CSC_IDENTITY_AUTO_DISCOVERY=false` en CI), **solo arm64** (un `.dmg`), **update =
+abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
+- **NO cambió:** `app.getPath('userData')` (Keychain/Application Support ya correctos), `safeStorage`
+  (Keychain con fallback), `fs.watch` recursivo (rama no-Linux), atajos globales/tray (`CommandOrControl`),
+  `app.on('activate')→showWindow` (ya existía → reabrir desde el Dock funciona), notes dir (se mantiene
+  `~/noteflow-notes` por **paridad con el CLI**), barra de título (`frame:false` → los semáforos nativos
+  quedan ocultos y se usan los controles propios de la derecha, sin solapamiento).
+- **Sí cambió:** bloque `mac` en electron-builder + `public/icon.icns`; ramas `darwin` en `app:check-update`
+  y `app:download-and-install` (`main.ts`); `.dmg` en la allowlist de update; matrix `macos-14` + globs en
+  el workflow; `preload.ts` expone `platform` y el renderer muestra `⌘`/`⌃` vía `src/lib/platform.ts`
+  (`modKey`/`controlKey`/`keyLabel`); fix `Editor.tsx` Ctrl+Shift+B → acepta `metaKey`.
+- **El único punto sin verificar es el runtime en un Mac real** (Gatekeeper + carga de módulos nativos
+  desde `app.asar.unpacked` dentro del `.app` + arranque del worker de IA). Recomendado: publicar primero
+  un tag prerelease (`-mac.1`) y que alguien lo pruebe antes del estable.
+
+### CLI companion (`cli/noteflow.js`)
+Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
+`add`, `new`, `list`, `get`, `read`, `set`, `delete`, `rename`, `sections`, `section add/rename/delete`,
+`favorite` (alias `pin`), `archive`, `groups`, `group create/delete`, `login`, `logout`, `push`,
+`pull`/`update`, `status`, `self-update`.
+Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
+sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). Pensado para
+agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
+**`set`** sobrescribe una sección (vs `add`, que solo añade al final). Detalle completo en
+`cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
+
+## Temas
+
+14 temas en `src/lib/themes.ts` (cada uno = set de CSS vars). Default: `noteflow-dark`.
+Los temas de marca **NoteFlow Dark** (default) y **NoteFlow Light** espejan los colores de la
+landing real ("The Brain" design system, `docs/src/styles/brain-site.css` — NO el `tokens.css`
+sin usar): superficies casi negras cálidas (`#0c0c11`) / pergamino (`#E7DFCC`), tinta blanco-cálida
+(`#ECEAE0`) y el acento ámbar firma `--detail` (`#f5a623`, hover/realces de la web) + teal/verde/
+púrpura/cyan/rosa/rojo de la web. Ambos usan la fuente Space Grotesk. Resto —
+Dark: Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, GruvBox Dark,
+Obsidian, Emerald Forest, Synthwave. Light: Arctic Day, Parchment. El tema se persiste en
+`settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`); usuarios
+existentes conservan el suyo, los nuevos arrancan en `noteflow-dark`.

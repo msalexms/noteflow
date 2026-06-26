@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useEffect, useState } from 'react'
+import { Fragment, memo, useMemo, useRef, useEffect, useLayoutEffect, useState } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -8,12 +8,13 @@ import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { TAG_COLOR_VARS } from '../../lib/tagColors'
-import { normalize, escapeRegExp, parseSearchQuery } from '../../lib/searchUtils'
+import { escapeRegExp, parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { NoteFolderHeader } from './NoteFolderHeader'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
-import type { GroupColor } from '../../types'
+import type { GroupColor, Note } from '../../types'
+import type { TagColorMap } from '../../lib/tagColors'
 
 interface SidebarProps {
   onCollapse: () => void
@@ -72,6 +73,117 @@ function dayKeyToDate(dayKey: string): Date {
 }
 
 const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
+
+// Stable row callbacks shared by every NoteRow. The Sidebar keeps a ref to the live
+// implementations and exposes this fixed-identity object so the memoized rows never
+// re-render just because the parent re-rendered (e.g. on every editor keystroke).
+interface RowHandlers {
+  reorderDragOver: (e: React.DragEvent<HTMLLIElement>, note: Note, contextKey: string) => void
+  reorderDragLeave: (noteId: string) => void
+  drop: (e: React.DragEvent<HTMLLIElement>, note: Note, contextKey: string, inFavorites: boolean) => void
+  dragStart: (e: React.DragEvent<HTMLButtonElement>, noteId: string, contextKey: string) => void
+  dragEnd: () => void
+  click: (e: React.MouseEvent, note: Note) => void
+  contextMenu: (e: React.MouseEvent, note: Note) => void
+  sectionClick: (e: React.MouseEvent, note: Note, sectionId: string) => void
+  sectionContextMenu: (e: React.MouseEvent, note: Note, sectionId: string) => void
+}
+
+interface NoteRowProps {
+  note: Note
+  groupColor: string | null
+  indent?: number
+  inFavorites?: boolean
+  wrapperClassName?: string
+  contextKey: string
+  isActive: boolean
+  isSearchTarget: boolean
+  isDropBefore: boolean
+  isDropAfter: boolean
+  searchQuery: string
+  sectionFilter: string | null
+  sectionTagColors: TagColorMap
+  handlers: RowHandlers
+}
+
+// A single note row in the sidebar. Memoized so that with a large vault only the rows
+// whose note object (or flags) actually changed re-render — editing one note no longer
+// reconciles all the others. All dynamic-per-render behavior arrives via the stable
+// `handlers` object; everything else is a primitive/stable prop.
+const NoteRow = memo(function NoteRow({
+  note,
+  groupColor,
+  indent,
+  inFavorites,
+  wrapperClassName,
+  contextKey,
+  isActive,
+  isSearchTarget,
+  isDropBefore,
+  isDropAfter,
+  searchQuery,
+  sectionFilter,
+  sectionTagColors,
+  handlers,
+}: NoteRowProps) {
+  return (
+    <li
+      style={{ position: 'relative' }}
+      className={wrapperClassName}
+      onDragOver={(e) => handlers.reorderDragOver(e, note, contextKey)}
+      onDragLeave={() => handlers.reorderDragLeave(note.id)}
+      onDrop={(e) => handlers.drop(e, note, contextKey, !!inFavorites)}
+    >
+      {isDropBefore && (
+        <div style={{ position: 'absolute', top: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
+      )}
+      {isDropAfter && (
+        <div style={{ position: 'absolute', bottom: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
+      )}
+      <button
+        data-note-id={note.id}
+        draggable
+        onDragStart={(e) => handlers.dragStart(e, note.id, contextKey)}
+        onDragEnd={handlers.dragEnd}
+        onClick={(e) => handlers.click(e, note)}
+        onContextMenu={(e) => handlers.contextMenu(e, note)}
+        className={`relative block w-full text-left px-2.5 py-1.5 rounded-md transition-colors
+          ${!isActive ? 'hover:bg-surface-3' : ''}
+          ${isSearchTarget ? 'ring-1 ring-inset ring-text/25' : ''}`}
+        style={{
+          ...(indent != null ? { paddingLeft: indent } : {}),
+          ...(isActive
+            ? { background: groupColor ? `rgb(var(${groupColor}) / 0.14)` : 'rgb(var(--text) / 0.1)' }
+            : {}),
+          ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
+        }}
+        title="Ctrl/Cmd + click to open side by side"
+      >
+        <div className="flex items-center gap-1 min-w-0">
+          {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
+          {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
+          <span className={`text-[13px] font-mono font-medium truncate flex-1
+            ${isActive ? 'text-text' : 'text-text/80'}`}>
+            {renderHighlightedText(note.title || 'Untitled', searchQuery)}
+          </span>
+          <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
+            {formatNoteDate(note.updated)}
+          </span>
+        </div>
+        <SectionTabsRow
+          noteId={note.id}
+          sections={note.sections}
+          searchQuery={searchQuery}
+          sectionFilter={sectionFilter}
+          sectionTagColors={sectionTagColors}
+          onSectionClick={(sectionId, e) => handlers.sectionClick(e, note, sectionId)}
+          onSectionContextMenu={(e, sectionId) => handlers.sectionContextMenu(e, note, sectionId)}
+          renderHighlightedText={renderHighlightedText}
+        />
+      </button>
+    </li>
+  )
+})
 
 export function Sidebar({ onCollapse }: SidebarProps) {
   const rawNotes = useNotesStore((s) => s.notes)
@@ -178,6 +290,21 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const draggingNoteContextRef = useRef<string | null>(null)
   const draggingNoteIdRef = useRef<string | null>(null)
 
+  // Live row callbacks (reassigned every render) behind a stable façade, so NoteRow's
+  // memoization isn't defeated by new closure identities on each parent render.
+  const rowApiRef = useRef<RowHandlers>({} as RowHandlers)
+  const rowHandlers = useMemo<RowHandlers>(() => ({
+    reorderDragOver: (e, note, ck) => rowApiRef.current.reorderDragOver(e, note, ck),
+    reorderDragLeave: (id) => rowApiRef.current.reorderDragLeave(id),
+    drop: (e, note, ck, fav) => rowApiRef.current.drop(e, note, ck, fav),
+    dragStart: (e, id, ck) => rowApiRef.current.dragStart(e, id, ck),
+    dragEnd: () => rowApiRef.current.dragEnd(),
+    click: (e, note) => rowApiRef.current.click(e, note),
+    contextMenu: (e, note) => rowApiRef.current.contextMenu(e, note),
+    sectionClick: (e, note, sid) => rowApiRef.current.sectionClick(e, note, sid),
+    sectionContextMenu: (e, note, sid) => rowApiRef.current.sectionContextMenu(e, note, sid),
+  }), [])
+
   // ── Close menus on click elsewhere ────────────────────────────────────────
   useEffect(() => {
     const close = () => {
@@ -216,26 +343,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       .filter((n) => !filterTag || n.tags.includes(filterTag))
       .filter((n) => {
         if (!searchQuery.trim()) return true
-
-        if (sectionFilter) {
-          const sf = normalize(sectionFilter)
-          const matchingSections = n.sections.filter(s => normalize(s.name).includes(sf))
-          if (matchingSections.length === 0) return false
-          if (!sectionTextQuery) return true
-          const tq = normalize(sectionTextQuery)
-          return (
-            normalize(n.title).includes(tq) ||
-            matchingSections.some(s => normalize(s.content).includes(tq)) ||
-            n.tags.some(t => normalize(t).includes(tq))
-          )
-        }
-
-        const q = normalize(searchQuery)
-        return (
-          normalize(n.title).includes(q) ||
-          n.sections.some((s) => normalize(s.content).includes(q) || normalize(s.name).includes(q)) ||
-          n.tags.some((t) => normalize(t).includes(q))
-        )
+        return noteMatchesQuery(n, { sectionFilter, textQuery: sectionTextQuery })
       })
       .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime())
   }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery, archivedGroupIds])
@@ -625,7 +733,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     void reorderGroups(without)
   }
 
-  function renderNoteButton(note: (typeof rawNotes)[0], group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
+  function renderNoteButton(note: Note, group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
     // When the note overview is open the editor is hidden, so the highlighted
     // note must follow that view; otherwise fall back to the active editor note.
     const isActive = noteViewId != null ? noteViewId === note.id : activeNoteId === note.id
@@ -634,121 +742,23 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     const isDropBefore = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'before'
     const isDropAfter = noteDropTarget?.noteId === note.id && noteDropTarget.position === 'after'
     return (
-      <li
+      <NoteRow
         key={inFavorites ? `fav-${note.id}` : note.id}
-        style={{ position: 'relative' }}
-        className={wrapperClassName}
-        onDragOver={(e) => handleNoteReorderDragOver(e, note, contextKey)}
-        onDragLeave={() => setNoteDropTarget((prev) => prev?.noteId === note.id ? null : prev)}
-        onDrop={(e) => inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey)}
-      >
-        {isDropBefore && (
-          <div style={{ position: 'absolute', top: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
-        )}
-        {isDropAfter && (
-          <div style={{ position: 'absolute', bottom: 0, left: 4, right: 4, height: 2, borderRadius: 2, background: 'rgb(var(--text) / 0.45)', zIndex: 5, pointerEvents: 'none' }} />
-        )}
-        <button
-          data-note-id={note.id}
-          draggable
-          onDragStart={(e) => handleNoteDragStart(e, note.id, contextKey)}
-          onDragEnd={handleNoteDragEnd}
-          onClick={(e) => {
-            if (e.ctrlKey || e.metaKey) {
-              openNoteInSplit(note.id)
-              return
-            }
-            // Clicking the note itself opens the note overview (every section with a
-            // content preview). With a single section there's nothing to choose, so go
-            // straight to it. Clicking a section tag (handled in SectionTabsRow) always
-            // jumps to that section regardless of count.
-            if (note.sections.length > 1) {
-              setNoteView(note.id)
-              return
-            }
-            setOpenNoteIds([note.id])
-            setActiveNote(note.id)
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            setContextMenu({
-              x: e.clientX,
-              y: e.clientY,
-              noteId: note.id,
-              sectionId: null,
-            })
-          }}
-          className={`relative block w-full text-left px-2.5 py-1.5 rounded-md transition-colors
-            ${!isActive ? 'hover:bg-surface-3' : ''}
-            ${isSearchTarget ? 'ring-1 ring-inset ring-text/25' : ''}`}
-          style={{
-            ...(indent != null ? { paddingLeft: indent } : {}),
-            ...(isActive
-              ? { background: group ? `rgb(var(${group.color}) / 0.14)` : 'rgb(var(--text) / 0.1)' }
-              : {}),
-            ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
-          }}
-          title="Ctrl/Cmd + click to open side by side"
-        >
-          <div className="flex items-center gap-1 min-w-0">
-            {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
-            {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
-            <span className={`text-[13px] font-mono font-medium truncate flex-1
-              ${isActive ? 'text-text' : 'text-text/80'}`}>
-              {renderHighlightedText(note.title || 'Untitled', searchQuery)}
-            </span>
-            <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
-              {formatNoteDate(note.updated)}
-            </span>
-          </div>
-          <SectionTabsRow
-            noteId={note.id}
-            sections={note.sections}
-            searchQuery={searchQuery}
-            sectionFilter={sectionFilter}
-            sectionTagColors={sectionTagColors}
-            onSectionClick={(sectionId, e) => {
-              e.stopPropagation()
-              // When the group overview or brain view is open the editor is unmounted, so a
-              // synchronous request-section event is lost. Stash the target section (the editor
-              // reads it on mount) and re-emit once it's listening (next macrotask) — same as
-              // GroupOverview / BrainView.
-              const { groupViewId, noteViewId, brainViewOpen } = useNotesStore.getState()
-              const editorUnmounted = groupViewId !== null || noteViewId !== null || brainViewOpen
-              if (editorUnmounted) {
-                useNotesStore.setState({ pendingInitialSectionId: sectionId })
-              }
-              window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-                detail: { noteId: note.id, sectionId }
-              }))
-              if (e.ctrlKey || e.metaKey) {
-                openNoteInSplit(note.id)
-                return
-              }
-              setOpenNoteIds([note.id])
-              setActiveNote(note.id)
-              if (editorUnmounted) {
-                setTimeout(() => {
-                  window.dispatchEvent(new CustomEvent('noteflow:request-section', {
-                    detail: { noteId: note.id, sectionId },
-                  }))
-                }, 0)
-              }
-            }}
-            onSectionContextMenu={(e, sectionId) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                noteId: note.id,
-                sectionId,
-              })
-            }}
-            renderHighlightedText={renderHighlightedText}
-          />
-        </button>
-      </li>
+        note={note}
+        groupColor={group?.color ?? null}
+        indent={indent}
+        inFavorites={inFavorites}
+        wrapperClassName={wrapperClassName}
+        contextKey={contextKey}
+        isActive={isActive}
+        isSearchTarget={isSearchTarget}
+        isDropBefore={isDropBefore}
+        isDropAfter={isDropAfter}
+        searchQuery={searchQuery}
+        sectionFilter={sectionFilter}
+        sectionTagColors={sectionTagColors}
+        handlers={rowHandlers}
+      />
     )
   }
 
@@ -841,6 +851,73 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       </div>
     )
   }
+
+  // Refresh the live row-behavior closures after every render (synchronously, before any
+  // user interaction). NoteRow only ever sees the stable `rowHandlers` façade above, which
+  // forwards to whatever lives here now — keeping each row's props stable so memoization
+  // holds while these closures still read current state (items, noteOrder, …).
+  useLayoutEffect(() => {
+    rowApiRef.current = {
+      reorderDragOver: (e, note, contextKey) => handleNoteReorderDragOver(e, note, contextKey),
+      reorderDragLeave: (noteId) => setNoteDropTarget((prev) => (prev?.noteId === noteId ? null : prev)),
+      drop: (e, note, contextKey, inFavorites) =>
+        inFavorites ? handleFavoritesReorderDrop(e, note) : handleNoteReorderDrop(e, note, contextKey),
+      dragStart: (e, noteId, contextKey) => handleNoteDragStart(e, noteId, contextKey),
+      dragEnd: () => handleNoteDragEnd(),
+      contextMenu: (e, note) => {
+        e.preventDefault()
+        setContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: null })
+      },
+      sectionContextMenu: (e, note, sectionId) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId })
+      },
+      click: (e, note) => {
+        if (e.ctrlKey || e.metaKey) {
+          openNoteInSplit(note.id)
+          return
+        }
+        // Clicking the note itself opens the note overview (every section with a content
+        // preview). With a single section there's nothing to choose, so go straight to it.
+        // Clicking a section tag (sectionClick) always jumps to that section regardless.
+        if (note.sections.length > 1) {
+          setNoteView(note.id)
+          return
+        }
+        setOpenNoteIds([note.id])
+        setActiveNote(note.id)
+      },
+      sectionClick: (e, note, sectionId) => {
+        e.stopPropagation()
+        // When the group overview or brain view is open the editor is unmounted, so a
+        // synchronous request-section event is lost. Stash the target section (the editor
+        // reads it on mount) and re-emit once it's listening (next macrotask) — same as
+        // GroupOverview / BrainView.
+        const { groupViewId, noteViewId: nv, brainViewOpen } = useNotesStore.getState()
+        const editorUnmounted = groupViewId !== null || nv !== null || brainViewOpen
+        if (editorUnmounted) {
+          useNotesStore.setState({ pendingInitialSectionId: sectionId })
+        }
+        window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+          detail: { noteId: note.id, sectionId },
+        }))
+        if (e.ctrlKey || e.metaKey) {
+          openNoteInSplit(note.id)
+          return
+        }
+        setOpenNoteIds([note.id])
+        setActiveNote(note.id)
+        if (editorUnmounted) {
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('noteflow:request-section', {
+              detail: { noteId: note.id, sectionId },
+            }))
+          }, 0)
+        }
+      },
+    }
+  })
 
   return (
     <div className="flex flex-col h-full border-r border-border bg-surface-1">

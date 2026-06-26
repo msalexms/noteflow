@@ -50,12 +50,15 @@ const AlignedTableHeader = TableHeader.extend({
 })
 import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { common, createLowlight } from 'lowlight'
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
+import { SectionRelation } from './SectionRelation'
+import { SlashCommands } from './SlashCommands'
+import { SectionLinkPicker } from './SectionLinkPicker'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
-import { htmlFromMarkdown, htmlToMarkdown, containsMarkdownTable } from '../../lib/markdownHtml'
+import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
 
 const lowlight = createLowlight(common)
 
@@ -75,6 +78,11 @@ interface EditorProps {
   readOnly?: boolean
   hideToolbar?: boolean
   fontSize?: number
+  /** Whether to grab focus on mount. Disabled while a section rename is in progress
+   *  so the editor doesn't steal focus from the tab-name input. */
+  autoFocus?: boolean
+  /** Id of the section being edited — excluded from the "Link section" picker. */
+  currentSectionId?: string | null
 }
 
 export interface EditorHandle {
@@ -88,24 +96,37 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   readOnly = false,
   hideToolbar = false,
   fontSize,
+  autoFocus = true,
+  currentSectionId,
 }, ref) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { fontFamily } = useEditorSettingsStore()
+  // When the "/ → Link section" command runs, open the section picker.
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false)
 
   const editor = useEditor({
     editorProps: {
       attributes: {
         spellcheck: 'false',
       },
-      // Pasting raw markdown that contains a pipe table renders it as a real
-      // table (matching other markdown editors). ProseMirror's default would
-      // drop it in as literal `| … |` text. We only intercept when the pasted
-      // plain text actually holds a markdown table — copying a rendered table
-      // from the web carries text/html (tab-separated text/plain, no `|---|`),
-      // which falls through to ProseMirror's native, richer handling.
+      // Pasting raw markdown source (from VS Code, a terminal, another markdown
+      // editor…) renders it as real formatting — lists, tables, task lists,
+      // headings — instead of literal text. ProseMirror's default would drop it
+      // in verbatim (lists as dashes, tables as `| … |`) or, worse, parse the
+      // syntax-highlighting HTML those editors ship into a mess of empty
+      // paragraphs (the stray blank line after a heading).
+      //
+      // We bail to the native handler when the clipboard carries genuinely rich
+      // HTML (Word, Google Docs, a rendered web page): it has semantic tags a
+      // markdown re-parse of the degraded plain text would lose. Editors that
+      // copy markdown source only ship styled <span>/<div> markup — none of
+      // these tags — so they fall through to our converter.
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData('text/plain') ?? ''
-        if (!containsMarkdownTable(text)) return false
+        if (!text.trim()) return false
+        const html = event.clipboardData?.getData('text/html') ?? ''
+        const richHtml = /<(a|strong|em|b|i|table|img|h[1-6]|blockquote)[\s>]/i.test(html)
+        if (richHtml || !looksLikeMarkdown(text)) return false
         event.preventDefault()
         const dom = new window.DOMParser().parseFromString(htmlFromMarkdown(text), 'text/html')
         const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(dom.body)
@@ -143,10 +164,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       History,
       Placeholder.configure({ placeholder }),
       SearchHighlight,
+      SectionRelation,
+      SlashCommands.configure({ onLinkSection: () => setLinkPickerOpen(true) }),
     ],
     content: htmlFromMarkdown(content),
     editable: !readOnly,
-    autofocus: true,
+    autofocus: autoFocus,
     onUpdate({ editor }) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
@@ -261,6 +284,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         />
       </div>
       {!readOnly && <TableContextMenu editor={editor} />}
+      {linkPickerOpen && (
+        <SectionLinkPicker
+          editor={editor}
+          currentSectionId={currentSectionId}
+          onClose={() => setLinkPickerOpen(false)}
+        />
+      )}
     </div>
   )
 })

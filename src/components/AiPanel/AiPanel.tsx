@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link2, MessageSquare, PanelLeftClose, Settings, Sparkles } from 'lucide-react'
 import { useAiChatStore, type PanelTab } from '../../stores/aiChatStore'
+import { useNotesStore } from '../../stores/notesStore'
+import { useGroupsStore } from '../../stores/groupsStore'
 import { ChatView } from './ChatView'
 import { RelatedView } from './RelatedView'
 import { LlmConfigView } from './LlmConfigView'
-import { ProfileFlow } from './ProfileFlow'
+import { ProfileFlow, ProfileSummary, findAiProfileNote } from './ProfileFlow'
 
 type Tab = PanelTab
 
@@ -16,17 +18,41 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
   const configLoaded = useAiChatStore((s) => s.configLoaded)
   const panelTab = useAiChatStore((s) => s.panelTab)
 
+  // Notes + groups are synced across machines; the local settings flag is not. So we treat the
+  // synced profile note (a note in the "AI generated" group) as the source of truth, and only
+  // fall back to the local flag for the "skipped" state or legacy notes that predate the group.
+  const notes = useNotesStore((s) => s.notes)
+  const notesLoading = useNotesStore((s) => s.isLoading)
+  const groups = useGroupsStore((s) => s.groups)
+  const syncedProfileNote = findAiProfileNote(groups, notes)
+
   const [tab, setTab] = useState<Tab>('chat')
   const [profileDone, setProfileDone] = useState<boolean | null>(null) // null = unknown
+  const [profileNoteId, setProfileNoteId] = useState<string | null>(null)
+  const [profileEditing, setProfileEditing] = useState(false) // "Start over" reopened the wizard
   const [autoRouted, setAutoRouted] = useState(false)
 
   useEffect(() => {
     void loadConfig()
     void loadSessions()
     const off = initListeners()
-    window.noteflow.aiProfileGetStatus().then((s) => setProfileDone(!!s.completedAt)).catch(() => setProfileDone(true))
     return off
   }, [loadConfig, loadSessions, initListeners])
+
+  // Resolve profile status once notes have loaded, so first-time routing doesn't flash the
+  // wizard on a machine that already has a synced profile.
+  useEffect(() => {
+    if (notesLoading) return
+    if (syncedProfileNote) {
+      setProfileDone(true)
+      setProfileNoteId(syncedProfileNote.id)
+      return
+    }
+    // No synced profile note → fall back to the local flag (covers "Not now" and legacy notes).
+    window.noteflow.aiProfileGetStatus()
+      .then((s) => { setProfileDone(!!s.completedAt); setProfileNoteId((prev) => prev ?? s.noteId) })
+      .catch(() => setProfileDone(true))
+  }, [notesLoading, syncedProfileNote?.id])
 
   // First-time routing once both config + profile status are known: show the profile wizard
   // if it hasn't been done and a provider is configured; otherwise land on chat.
@@ -92,7 +118,25 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
       <div className="flex-1 min-h-0">
         {tab === 'chat' && <ChatView onOpenNote={onOpenNote} onConfigure={() => setTab('settings')} />}
         {tab === 'related' && <RelatedView onOpenNote={onOpenNote} />}
-        {tab === 'profile' && <ProfileFlow onDone={() => { setProfileDone(true); setTab('chat') }} />}
+        {tab === 'profile' && (
+          profileDone && profileNoteId && !profileEditing ? (
+            <ProfileSummary
+              noteId={profileNoteId}
+              onOpenNote={onOpenNote}
+              onStartOver={() => setProfileEditing(true)}
+            />
+          ) : (
+            <ProfileFlow
+              existingNoteId={profileNoteId}
+              onDone={(noteId) => {
+                setProfileDone(true)
+                setProfileNoteId(noteId)
+                setProfileEditing(false)
+                setTab('chat')
+              }}
+            />
+          )
+        )}
         {tab === 'settings' && <LlmConfigView />}
       </div>
     </div>

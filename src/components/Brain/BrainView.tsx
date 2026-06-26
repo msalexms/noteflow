@@ -3,6 +3,7 @@ import { Brain, Loader2, PanelLeftOpen, RefreshCw, Sparkles, X } from 'lucide-re
 import { useAiStore } from '../../stores/aiStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
+import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { useBrainGraph } from './useBrainGraph'
 import { BrainCanvas } from './BrainCanvas'
 import { AiPanel } from '../AiPanel/AiPanel'
@@ -55,7 +56,10 @@ export function BrainView({ onClose }: { onClose: () => void }) {
   // AI is currently on (offer to disable) or off (offer to enable). Auto-opens on
   // entry when AI is off, as an onboarding nudge.
   const [showDialog, setShowDialog] = useState(() => !enabled)
-  const [use3D] = useState(() => detectWebGL() && localStorage.getItem('noteflow:brain-force-2d') !== '1')
+  // WebGL support is fixed for the session; the 3D/2D preference is live (Settings → Appearance).
+  const [webglSupported] = useState(detectWebGL)
+  const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
+  const use3D = webglSupported && prefer3D
 
   // The AI panel can be collapsed to give the brain the full width (combined with
   // hiding the notes sidebar this yields a fullscreen brain). Resets on each entry.

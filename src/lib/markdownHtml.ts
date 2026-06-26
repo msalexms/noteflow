@@ -176,6 +176,12 @@ function inlineElToMd(el: Element): string {
         const suffix = w ? `{width=${w}}` : ''
         result += `![${c.getAttribute('alt') ?? ''}](${c.getAttribute('src') ?? ''})${suffix}`
       }
+      else if (tag === 'span' && c.getAttribute('data-type') === 'section-relation') {
+        const relNoteId = c.getAttribute('data-note-id') ?? ''
+        const relSectionId = c.getAttribute('data-section-id') ?? ''
+        const relName = (c.textContent ?? '').replace(/\u00A0/g, ' ')
+        result += `[${relName}](noteflow://${relNoteId}/${relSectionId})`
+      }
       else if (tag === 'a') result += `[${inlineElToMd(c)}](${c.getAttribute('href') ?? ''})`
       else result += inlineElToMd(c)
     }
@@ -251,6 +257,11 @@ function inlineToHtml(s: string): string {
     .replace(/ {2,}/g, (m) => '&nbsp;'.repeat(m.length))
     .replace(/!\[([^\]]*)\]\(([^)]+)\)(?:\{width=(\d+)\})?/g, (_, alt, src, w) =>
       w ? `<img alt="${alt}" src="${src}" width="${w}">` : `<img alt="${alt}" src="${src}">`)
+    // Section relation: `[Name](noteflow://noteId/sectionId)` → inline pill. Must
+    // run BEFORE the generic link regex below (it would otherwise capture it as a
+    // plain <a>). Rendered as a span the SectionRelation node parses back.
+    .replace(/\[([^\]]+)\]\(noteflow:\/\/([^/)]+)\/([^)]+)\)/g,
+      '<span data-type="section-relation" data-note-id="$2" data-section-id="$3">$1</span>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -378,6 +389,27 @@ export function containsMarkdownTable(md: string): boolean {
     if (/\|/.test(lines[i]) && TABLE_SEPARATOR_RE.test(lines[i + 1])) return true
   }
   return false
+}
+
+/**
+ * Heuristic: does this text look like *markdown source* (vs plain prose)?
+ *
+ * Used by the editor's paste handler to decide whether to parse pasted plain
+ * text as markdown. Detects any block-level marker (heading, bullet/task list,
+ * ordered list, blockquote, code fence, table) on its own line. Rendered
+ * content (copied from a web page) doesn't carry these markers in text/plain,
+ * so this stays false there and the native, richer HTML handling is used.
+ */
+export function looksLikeMarkdown(md: string): boolean {
+  const src = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  for (const line of src.split('\n')) {
+    if (/^\s{0,3}#{1,6}\s+\S/.test(line)) return true   // ATX heading
+    if (/^\s*[-*+]\s+\S/.test(line)) return true        // bullet / task list
+    if (/^\s*\d+[.)]\s+\S/.test(line)) return true      // ordered list
+    if (/^\s*>\s/.test(line)) return true               // blockquote
+    if (/^\s*(```|~~~)/.test(line)) return true         // code fence
+  }
+  return containsMarkdownTable(src)
 }
 
 function splitPipeRow(line: string): string[] {

@@ -9,7 +9,7 @@ import {
   Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal,
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { escapeRegExp } from '../../lib/searchUtils'
+import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
 
 function HighlightText({ text, query }: { text: string; query: string }) {
@@ -246,16 +246,22 @@ export function CommandPalette() {
   ]
 
   const q = query.toLowerCase().trim()
+  // Accent-insensitive, and reuses the cached per-note normalized index so scanning
+  // every note's body here doesn't re-normalize on each keystroke (see searchUtils).
+  const nq = normalize(query)
 
   const matchedNotes: Command[] = q
     ? notes
-        .filter(
-          (n) =>
-            !n.archived &&
-            (n.title.toLowerCase().includes(q) ||
-              n.sections.some((s) => s.content.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)) ||
-              n.tags.some((t) => t.includes(q)))
-        )
+        .filter((n) => {
+          if (n.archived) return false
+          const idx = getNoteSearchIndex(n)
+          return (
+            idx.title.includes(nq) ||
+            idx.sectionContents.some((c) => c.includes(nq)) ||
+            idx.sectionNames.some((s) => s.includes(nq)) ||
+            idx.tags.some((t) => t.includes(nq))
+          )
+        })
         .slice(0, 8)
         .map((n: Note) => ({
           id: `note-${n.id}`,

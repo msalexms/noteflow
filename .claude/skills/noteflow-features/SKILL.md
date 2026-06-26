@@ -360,6 +360,21 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Botón de copiar integrado en cada bloque.
 - Syntax highlighting con Lowlight.
 
+### Relacionar secciones (slash command `/`)
+- Mientras escribes en el editor **rich**, teclea `/` → aparece un **menú de comandos** con
+  **"Link section"**. Al elegirlo se abre un **buscador** de todas las secciones (de cualquier nota
+  o grupo); filtra por nombre de sección o título de nota. Al elegir una, se inserta una **pill**
+  (chip con icono de enlace + nombre de la sección) en el punto donde estabas escribiendo.
+- **Click** en la pill → navega a la sección destino (misma nota u otra). **Hover** → muestra el
+  mismo preview del contenido que en el resto de la app. La pill muestra el nombre **en vivo** (si
+  renombras la sección destino, se actualiza); si la sección destino se borra, la pill queda en
+  estado **"roto"** (atenuada, tachada, sin navegar).
+- Estas relaciones también aparecen como **aristas en la Vista Cerebro**, conectando las dos
+  secciones — y **funcionan aunque la IA/embeddings esté desactivada** (no dependen del modelo).
+- La relación se guarda **dentro del texto** de la sección (es un enlace markdown), así que
+  sincroniza, sobrevive export/import y en **modo raw** se ve como `[Nombre](noteflow://…)`. El
+  slash command solo está en modo rich; el buscador excluye notas cifradas/archivadas/temporales.
+
 ### Búsqueda dentro de la nota
 - `Ctrl+F` (con el editor enfocado) → barra de "Find in note" que resalta coincidencias.
 - Funciona en ambos modos (WYSIWYG y raw).
