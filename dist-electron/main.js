@@ -1477,11 +1477,53 @@ function findNoteDirPath(noteId, dirs) {
     const match = dirs.find((d) => d.endsWith('-' + noteId));
     return match ? path_1.default.join(NOTES_DIR, match) : null;
 }
+/** Load the user's "second brain" profile note as a background block for the chat system prompt.
+ *  Unlike RAG context this is injected on EVERY question (regardless of semantic relevance) so the
+ *  assistant always knows the user's tone/style/criteria. Read straight from disk by its stable id
+ *  (settings.aiProfile.noteId), so it does not depend on the embeddings index being enabled.
+ *  Returns null when there is no profile, it is missing or it is encrypted. Never produces a
+ *  `source`: the profile is invisible background, must not be cited or illuminated in the brain. */
+function buildProfileBlock(dirs) {
+    const profile = (readSettings().aiProfile ?? {});
+    const noteId = profile.noteId;
+    if (!noteId)
+        return null;
+    const dirPath = findNoteDirPath(noteId, dirs);
+    if (!dirPath)
+        return null;
+    const note = noteFormat.parseNoteDir(dirPath);
+    if (!note || note.encryption || note.sections.length === 0)
+        return null;
+    // Same defence-in-depth as pushSection: AI-hidden sections never feed the chat context.
+    const visible = note.sections.filter((s) => !s.aiHidden);
+    if (visible.length === 0)
+        return null;
+    // The profile is a short, abstract note, so include ALL visible sections (each with its name),
+    // capping per-section content like the RAG blocks (1500 chars) to keep token use bounded.
+    const parts = [];
+    for (const section of visible) {
+        const text = stripBase64(section.content).trim().slice(0, 1500);
+        if (text)
+            parts.push(`### ${section.name}\n${text}`);
+    }
+    if (parts.length === 0)
+        return null;
+    return { block: parts.join('\n\n'), noteId };
+}
+/** Append the profile background (if any) to a system prompt. */
+function withProfile(system, profile) {
+    if (!profile)
+        return system;
+    return `${system}\n\nUser profile (background — tone & preferences, do not cite):\n\n${profile.block}`;
+}
 /** Build the RAG context for a question. Returns the augmented system prompt + the source notes
- *  (for citation + brain illumination). Empty context when Local AI is off or nothing matches. */
+ *  (for citation + brain illumination). The user's profile note is always injected as background
+ *  (even when Local AI is off or nothing matches); RAG context is added on top when available. */
 async function buildChatContext(query) {
+    const profileDirs = noteFormat.listNoteDirs(NOTES_DIR);
+    const profile = buildProfileBlock(profileDirs);
     if (!query.trim() || !aiIndex.isEnabled())
-        return { system: CHAT_SYSTEM_BASE, sources: [] };
+        return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] };
     let hits = [];
     try {
         hits = await aiIndex.search(query, 6);
@@ -1490,7 +1532,7 @@ async function buildChatContext(query) {
         hits = [];
     }
     if (hits.length === 0)
-        return { system: CHAT_SYSTEM_BASE, sources: [] };
+        return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] };
     // Expand with up to a few content-edge neighbours of the matched notes.
     const hitNoteIds = new Set(hits.map((h) => h.noteId));
     const neighbours = new Set();
@@ -1503,11 +1545,15 @@ async function buildChatContext(query) {
         }
     }
     catch { /* edges are best-effort */ }
-    const dirs = noteFormat.listNoteDirs(NOTES_DIR);
+    const dirs = profileDirs;
     const sources = [];
     const blocks = [];
     const seen = new Set(); // noteId:sectionId
     const pushSection = (noteId, preferredSectionId) => {
+        // The profile note is injected whole as background above; skip it in RAG to avoid duplicate
+        // content and to keep it out of the cited `sources`.
+        if (profile && noteId === profile.noteId)
+            return;
         const dirPath = findNoteDirPath(noteId, dirs);
         if (!dirPath)
             return;
@@ -1535,9 +1581,9 @@ async function buildChatContext(query) {
     for (const id of [...neighbours].slice(0, 3))
         pushSection(id);
     if (blocks.length === 0)
-        return { system: CHAT_SYSTEM_BASE, sources: [] };
-    const system = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`;
-    return { system, sources };
+        return { system: withProfile(CHAT_SYSTEM_BASE, profile), sources: [] };
+    const ragSystem = `${CHAT_SYSTEM_BASE}\n\nContext from the user's notes:\n\n${blocks.join('\n\n---\n\n')}`;
+    return { system: withProfile(ragSystem, profile), sources };
 }
 // Pending destructive-tool confirmations, keyed by toolCallId — resolved by `ai:chat-confirm`.
 const chatConfirms = new Map();

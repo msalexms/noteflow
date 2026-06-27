@@ -370,7 +370,7 @@ export function ChatView({
       </div>
 
       {/* Composer — one rounded surface (attachments + input + actions), like the design's cards. */}
-      <div className="flex-shrink-0 p-2">
+      <div className="flex-shrink-0 px-4 pt-2 pb-6">
         {shownSuggestions.length > 0 && (
           <div className="mb-1.5 flex flex-wrap gap-1">
             {shownSuggestions.map((s) => (
