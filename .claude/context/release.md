@@ -22,7 +22,7 @@
    git config user.name "<tu-usuario>"
    ```
 
-### Flujo completo
+### Flujo de release completo (con tag)
 
 ```bash
 npm run build                     # 1. compilar si hay cambios en electron/
@@ -33,12 +33,32 @@ git push origin main
 git tag vX.Y.Z                    # 4. tag → dispara el workflow de release
 git push origin vX.Y.Z
 ```
-- Antes de hacer push a `main` revisar que la documentación en .claude\skills\noteflow-context\reference y .claude\skills están actualizadas con los nuevos cambios que se suben (solamente en caso apropiado de ser un cambio a la altura de ser añadido a estas skills).
+- Antes de hacer push a `main` revisar que la documentación en `.claude/context/` (y la skill `noteflow-features`) está actualizada con los nuevos cambios que se suben (solamente en caso apropiado de ser un cambio a la altura de ser añadido a la documentación).
 - Los mensajes de commits deben estar escritos en inglés.
 
 > Al hacer push a `main` puede aparecer `Bypassed rule violations for refs/heads/main: Changes
 > must be made through a pull request`. Es una protección de rama bypasseable por el propietario;
 > el push se completa igualmente.
+
+### Subir código SIN hacer release
+
+Caso por defecto cuando solo se quiere publicar el código (features, fixes, docs) sin generar
+una nueva versión instalable. **El release solo se dispara con tags `v*`** — un push a `main`
+sin tag **nunca** crea release. Por tanto, basta con commitear y pushear, **sin crear ni pushear
+ningún tag**:
+
+```bash
+npm run build                              # 1. solo si se tocó electron/ (recompila dist-electron/)
+git add -A                                 # 2. incluye dist-electron/ si cambió
+git commit -m "feat/fix: descripción"      # 3. mensaje en inglés
+git push origin main                       # 4. push — NO crear tag
+```
+
+- **No** ejecutar `git tag` / `git push origin vX.Y.Z`: eso es lo único que arranca `release.yml`.
+- Subir `dist-electron/` si se tocó `electron/` (está versionado).
+- Efecto secundario esperado: si el push incluye cambios en `docs/**`, el workflow `pages.yml`
+  redeploya la web de GitHub Pages. Eso **no** es una release de la app, solo el sitio; es
+  inofensivo y no requiere acción.
 
 ### Qué hace el workflow (`.github/workflows/release.yml`)
 

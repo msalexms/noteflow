@@ -1,5 +1,19 @@
 # NoteFlow — Arquitectura, IPC y almacenamiento
 
+## Repositorio y proyectos relacionados
+
+- **GitHub:** https://github.com/yagoid/noteflow
+- **Rama principal:** `main`
+- **Directorio local:** raíz del repo clonado (la ruta absoluta varía por máquina).
+- **Versión actual:** ver `package.json` (`version`). Convención `vX.Y.Z`.
+- **Licencia:** ver el campo `license` de `package.json`.
+- **Documentación del proyecto:** vive en `.claude/context/*.md` (este directorio); el **índice/mapa**
+  está en el `CLAUDE.md` de la raíz, que se carga en cada sesión.
+- **Proyectos/skills hermanas:**
+  - `noteflow-features` (skill) → funcionalidades, UI, UX, atajos (perspectiva de producto/usuario).
+  - `noteflow-cli` (skill) → referencia completa del CLI companion.
+  - `noteflow-mobile` (skill) → app móvil hermana (React Native + Expo), comparte el formato de nota.
+
 ## Estructura de directorios
 
 ```

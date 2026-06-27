@@ -5,9 +5,10 @@ description: Funcionalidades, diseño de UI y experiencia de usuario de NoteFlow
 
 # NoteFlow — Funcionalidades y Diseño
 
-> **Mantenimiento:** al implementar una feature importante, actualizar esta skill **y**
-> `noteflow-context` (arquitectura/IPC/release). Si toca el CLI, también `cli/noteflow-cli/SKILL.md`.
-> La fuente de verdad de los atajos es `src/components/Settings/ShortcutsPanel.tsx`.
+> **Mantenimiento:** al implementar una feature importante, actualizar esta skill **y** la
+> documentación de `.claude/context/` (arquitectura/IPC/release — ver el mapa en `CLAUDE.md`). Si
+> toca el CLI, también `cli/noteflow-cli/SKILL.md`. La fuente de verdad de los atajos es
+> `src/components/Settings/ShortcutsPanel.tsx`.
 >
 > **Teclas en macOS:** los atajos se documentan con `Ctrl` (Windows/Linux); en macOS `Ctrl` = **⌘
 > (Cmd)** — los handlers aceptan `ctrlKey||metaKey`. Excepción: navegar secciones usa el **Control
@@ -328,12 +329,17 @@ sin navegar.
 | Imagen | `![alt](src)` | Drag & drop / Paste |
 | Separador | `---` | — |
 
-### Tareas con deadline y alarma
+### Tareas con deadline, alarma e importancia
 Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - **Deadline**: fecha límite (se muestra junto al checkbox).
 - **Alarm**: notificación nativa del sistema en ese momento (el proceso principal la dispara,
   funciona aunque la ventana esté oculta; incluye las ya vencidas al registrar).
-- Se accede desde el icono de reloj al hacer hover sobre el task item.
+- **Importancia/prioridad**: grado Low / Medium / High. Se elige en un picker y queda visible
+  como un **punto de color** sin texto (Low → verde, Medium → amarillo, High → rojo), para que
+  ocupe poco. Persiste en markdown con el marcador ` 🔺{level}` (low|medium|high), tras `📅`/`⏰`.
+- Al hacer hover sobre el task item aparecen **dos triggers** a la derecha del texto: un icono de
+  **calendario** para el deadline/alarma y un icono de **bandera** para la importancia. Cada uno
+  abre su propio picker; los valores asignados quedan visibles de forma permanente.
 
 ### Tablas
 - Insertables desde la toolbar (3×3 con cabecera por defecto).
@@ -414,7 +420,7 @@ derivado reconstruible desde los `.md`.
 - **Reindexar:** botón "Reindex all notes" en el mismo menú (muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
-  "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en la skill `noteflow-context`.
+  "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.claude/context/ai.md`.
 
 ---
 
@@ -655,7 +661,7 @@ Settings → "Startup settings...":
   "Installing…") y se actualiza **sin popups del SO ni cerrar/reabrir a mano**:
   - Windows: muestra la **barra de progreso nativa del instalador**, se cierra sola y se reabre ya
     actualizada — **sin el popup "cierra la aplicación" ni UAC** (instalador NSIS lanzado con
-    `--updated`, que omite ese prompt; ver detalle técnico en `noteflow-context`).
+    `--updated`, que omite ese prompt; ver detalle técnico en `.claude/context/release.md`).
   - Linux (deb/pacman): pide la contraseña de root (diálogo del sistema — inevitable al instalar a
     nivel de sistema) y se relanza.
   - Linux (AppImage): se reemplaza a sí misma en su ubicación y se relanza.
@@ -720,7 +726,7 @@ ids/dirs frescos → sin conflicto, y muestran el grupo/folder destino):
 Detalles de los imports externos: el contenido entra en **rich-text** (no raw); las notas **sin
 contenido se omiten** (las filas de BD / páginas título-solo de Notion no ensucian); subcarpetas →
 grupos (1er nivel) + folders (anidados, aplanados a 2 niveles); imágenes y `.csv` de Notion no se
-importan (v1). Implementación en `noteflow-context` (importadores + IPC).
+importan (v1). Implementación en `.claude/context/patterns.md` (importadores + IPC).
 
 ---
 
