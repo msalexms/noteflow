@@ -14,6 +14,8 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.electron.json",
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint .",
     "dist": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps"
@@ -92,6 +94,7 @@
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1",
     "vite-plugin-electron": "^0.29.0",
+    "vitest": "^4.1.9",
     "wait-on": "^8.0.5"
   },
   "build": {
