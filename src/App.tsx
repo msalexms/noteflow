@@ -242,17 +242,13 @@ export function App() {
     return []
   }, [notes, openNoteIds, activeNoteId])
 
+  // Panes default to auto-fill (flex) and only get a stored width once the user
+  // resizes one by hand. So we never seed defaults here — we only prune entries
+  // for notes that are no longer visible.
   useEffect(() => {
     setPaneWidths((prev) => {
       let changed = false
       const next: Record<string, number> = { ...prev }
-
-      for (const id of visibleOpenNoteIds) {
-        if (typeof next[id] !== 'number') {
-          next[id] = PANE_DEFAULT_WIDTH
-          changed = true
-        }
-      }
 
       for (const id of Object.keys(next)) {
         if (!visibleOpenNoteIds.includes(id)) {
@@ -316,7 +312,15 @@ export function App() {
   const beginPaneResize = useCallback((e: React.MouseEvent<HTMLElement>, paneId: string) => {
     e.preventDefault()
     e.stopPropagation()
-    const startWidth = paneWidths[paneId] ?? PANE_DEFAULT_WIDTH
+    // Auto panes have no stored width, so we seed the drag from the real rendered
+    // width of the <section> — otherwise the pane would jump to PANE_DEFAULT_WIDTH
+    // the moment the drag pins it. Fall back to the stored/default width if the
+    // element can't be measured for some reason.
+    const paneEl = document.querySelector(`[data-pane-id="${CSS.escape(paneId)}"]`)
+    const measured = paneEl?.getBoundingClientRect().width
+    const startWidth = typeof measured === 'number' && measured > 0
+      ? Math.min(PANE_MAX_WIDTH, Math.max(PANE_MIN_WIDTH, measured))
+      : paneWidths[paneId] ?? PANE_DEFAULT_WIDTH
     paneResizeRef.current = { paneId, startX: e.clientX, startWidth }
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
@@ -533,13 +537,20 @@ export function App() {
                     {visibleOpenNoteIds.map((noteId, index) => {
                       const paneNote = notes.find((n) => n.id === noteId)
                       const paneTitle = paneNote?.title?.trim() || 'Untitled'
-                      const paneWidth = paneWidths[noteId] ?? PANE_DEFAULT_WIDTH
+                      // A pane is "pinned" once the user has resized it by hand
+                      // (it then has a stored width). Otherwise it stays "auto" and
+                      // shares the available width via flexbox, recomputed natively
+                      // on every render / window resize.
+                      const pinnedWidth = paneWidths[noteId]
+                      const paneStyle: React.CSSProperties = typeof pinnedWidth === 'number'
+                        ? { width: `${pinnedWidth}px`, minWidth: `${PANE_MIN_WIDTH}px`, flexGrow: 0, flexShrink: 0 }
+                        : { flex: '1 1 0', minWidth: `${PANE_MIN_WIDTH}px` }
                       return (
                         <section
                           key={noteId}
                           data-pane-id={noteId}
-                          style={{ width: `${paneWidth}px`, minWidth: `${PANE_MIN_WIDTH}px` }}
-                          className={`relative h-full flex-shrink-0 flex flex-col border-r border-border/70 last:border-r-0 ${
+                          style={paneStyle}
+                          className={`relative h-full flex flex-col border-r border-border/70 last:border-r-0 ${
                             noteId === activeNoteId ? 'ring-1 ring-inset ring-text/20' : ''
                           } ${
                             draggingPaneId === noteId ? 'opacity-70' : ''
