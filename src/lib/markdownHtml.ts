@@ -227,9 +227,11 @@ function listElToMd(listEl: Element, depth: number): string {
       const checked   = li.getAttribute('data-checked') === 'true'
       const due       = li.getAttribute('data-due')
       const alarm     = li.getAttribute('data-alarm')
+      const importance = li.getAttribute('data-importance')
       const dueAnn    = due   ? ` 📅${due}`   : ''
       const alarmAnn  = alarm ? ` ⏰${alarm}` : ''
-      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}${dueAnn}${alarmAnn}\n`
+      const impAnn    = importance ? ` 🔺${importance}` : ''
+      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}${dueAnn}${alarmAnn}${impAnn}\n`
     } else if (isOl) {
       result += `${prefix}${olIndex++}. ${text}\n`
     } else {
@@ -273,24 +275,32 @@ function inlineToHtml(s: string): string {
 
 // ── Nested markdown list parsing (htmlFromMarkdown helpers) ──────────────────
 
+type TaskImportance = 'low' | 'medium' | 'high'
+
 interface MdListItem {
   type: 'ul' | 'ol' | 'task'
   checked: boolean
   text: string
   due: string | null
   alarm: string | null
+  importance: TaskImportance | null
   children: MdListItem[]
 }
 
-function extractDeadlineAnnotations(raw: string): { text: string; due: string | null; alarm: string | null } {
+function extractDeadlineAnnotations(
+  raw: string
+): { text: string; due: string | null; alarm: string | null; importance: TaskImportance | null } {
   let text = raw
   let due: string | null = null
   let alarm: string | null = null
+  let importance: TaskImportance | null = null
   const dueMatch = text.match(/📅(\d{4}-\d{2}-\d{2})/)
   if (dueMatch) { due = dueMatch[1]; text = text.replace(dueMatch[0], '').trim() }
   const alarmMatch = text.match(/⏰(\d{2}:\d{2})/)
   if (alarmMatch) { alarm = alarmMatch[1]; text = text.replace(alarmMatch[0], '').trim() }
-  return { text, due, alarm }
+  const impMatch = text.match(/🔺(low|medium|high)/)
+  if (impMatch) { importance = impMatch[1] as TaskImportance; text = text.replace(impMatch[0], '').trim() }
+  return { text, due, alarm, importance }
 }
 
 function parseMdListItems(lines: string[]): MdListItem[] {
@@ -319,12 +329,12 @@ function parseMdListItems(lines: string[]): MdListItem[] {
 
     let item: MdListItem
     if (taskMatch) {
-      const { text: cleanText, due, alarm } = extractDeadlineAnnotations(taskMatch[2])
-      item = { type: 'task', checked: taskMatch[1] === 'x', text: cleanText, due, alarm, children: [] }
+      const { text: cleanText, due, alarm, importance } = extractDeadlineAnnotations(taskMatch[2])
+      item = { type: 'task', checked: taskMatch[1] === 'x', text: cleanText, due, alarm, importance, children: [] }
     } else if (olMatch) {
-      item = { type: 'ol', checked: false, text: olMatch[2], due: null, alarm: null, children: [] }
+      item = { type: 'ol', checked: false, text: olMatch[2], due: null, alarm: null, importance: null, children: [] }
     } else if (ulMatch) {
-      item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, children: [] }
+      item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, importance: null, children: [] }
     } else {
       // Continuation line (soft/hard break inside list item) — append to last item
       if (stack.length > 0) {
@@ -361,7 +371,8 @@ function renderMdListItems(items: MdListItem[]): string {
     if (item.type === 'task') {
       const dueAttr   = item.due   ? ` data-due="${item.due}"`     : ''
       const alarmAttr = item.alarm ? ` data-alarm="${item.alarm}"` : ''
-      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
+      const impAttr   = item.importance ? ` data-importance="${item.importance}"` : ''
+      return `<li data-checked="${item.checked}" data-type="taskItem"${dueAttr}${alarmAttr}${impAttr}><label><input type="checkbox"${item.checked ? ' checked' : ''}></label><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
     }
     return `<li><p>${item.text.split('\n').map(inlineToHtml).join('<br>')}</p>${childHtml}</li>`
   }).join('')

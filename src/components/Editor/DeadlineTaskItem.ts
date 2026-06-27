@@ -27,6 +27,12 @@ export const DeadlineTaskItem = TaskItem.extend({
         parseHTML: (el) => el.getAttribute('data-alarm') || null,
         renderHTML: (attrs) => (attrs.alarm ? { 'data-alarm': attrs.alarm } : {}),
       },
+      importance: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-importance') || null,
+        renderHTML: (attrs) =>
+          attrs.importance ? { 'data-importance': attrs.importance } : {},
+      },
     }
   },
 
@@ -39,7 +45,7 @@ export const DeadlineTaskItem = TaskItem.extend({
         if (handled) {
           const { $from } = this.editor.state.selection
           if ($from.node(-1)?.type.name === this.name) {
-            this.editor.commands.updateAttributes(this.name, { due: null, alarm: null })
+            this.editor.commands.updateAttributes(this.name, { due: null, alarm: null, importance: null })
           }
         }
 
