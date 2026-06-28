@@ -262,9 +262,22 @@ button {
 
 .prose-editor .ProseMirror p { margin-bottom: 0.25rem; }
 
-.prose-editor .ProseMirror strong { color: rgb(var(--accent-3) / 0.75); font-weight: 700; }
+/* Bold = solo negrita, hereda el color de texto normal del cuerpo (sin acento). */
+.prose-editor .ProseMirror strong { color: inherit; font-weight: 700; }
 .prose-editor .ProseMirror em    { color: rgb(var(--purple)); font-style: italic; }
 .prose-editor .ProseMirror s     { color: rgb(var(--text-muted)); text-decoration: line-through; }
+/* Highlight (`==texto==`): texto en color de acento, sin fondo. */
+.prose-editor .ProseMirror mark  { color: rgb(var(--accent)); background: transparent; font-weight: inherit; }
+
+/* Cita / blockquote (`> texto`): borde izquierdo de acento + texto atenuado,
+   al estilo de las citas markdown de VSCode. Comparte el acento de borde con `pre`. */
+.prose-editor .ProseMirror blockquote {
+  border-left: 3px solid rgb(var(--accent-2));
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: rgb(var(--text-muted));
+}
+.prose-editor .ProseMirror blockquote p { margin-bottom: 0.25rem; }
 
 .prose-editor .ProseMirror code {
   font-family: 'JetBrains Mono', monospace;

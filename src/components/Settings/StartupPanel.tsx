@@ -60,7 +60,7 @@ export function StartupPanel() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">Launch on system startup</p>
-          <p className="text-[10px] font-mono text-text-muted mt-0.5">
+          <p className="text-[11px] font-mono text-text-muted mt-0.5">
             NoteFlow starts automatically when you turn on your computer
           </p>
         </div>
@@ -83,12 +83,12 @@ export function StartupPanel() {
       <div>
         <div className="flex items-center gap-1.5 mb-1">
           <Bookmark size={11} className="text-text-muted" />
-          <span className="text-[10px] font-mono font-medium text-text-muted uppercase tracking-widest">
+          <span className="text-[11px] font-mono font-medium text-text-muted uppercase tracking-widest">
             Open as sticky at startup
           </span>
         </div>
         {!openAtLogin && (
-          <p className="text-[10px] font-mono text-text-muted/60 mb-2">
+          <p className="text-[11px] font-mono text-text-muted/60 mb-2">
             Enable "Launch on system startup" to use this feature
           </p>
         )}
@@ -118,7 +118,7 @@ export function StartupPanel() {
                           <button
                             key={section.id}
                             onClick={() => toggleSection(note.id, section.id)}
-                            className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-all"
+                            className="text-[10px] font-mono px-1.5 py-0.5 rounded transition-all"
                             style={
                               active
                                 ? { ...getTagColor(section.name, sectionTagColors), opacity: 1, outline: '1px solid currentColor' }
@@ -137,7 +137,7 @@ export function StartupPanel() {
           )}
         </div>
 
-        <p className="text-[10px] font-mono text-text-muted/60 mt-3">
+        <p className="text-[11px] font-mono text-text-muted/60 mt-3">
           {startupStickies.length > 0
             ? `${startupStickies.length} sticky window${startupStickies.length > 1 ? 's' : ''} will open on startup`
             : 'No tabs selected — app will start in tray'}

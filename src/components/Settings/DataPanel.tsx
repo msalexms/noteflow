@@ -16,7 +16,7 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
     <div className="space-y-5">
       {/* Export / Import */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Backup</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Backup</div>
         <div className="flex flex-col gap-2">
           <button
             onClick={() => onOpenExportImport('export')}
@@ -37,7 +37,7 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
 
       {/* Notes location */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Notes location</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Notes location</div>
         <p className="text-[11px] font-mono text-text-muted break-all mb-2">{notesDir || '…'}</p>
         <button
           onClick={() => window.noteflow.openNotesFolder()}

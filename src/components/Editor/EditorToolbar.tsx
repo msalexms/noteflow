@@ -5,6 +5,7 @@ import {
   Italic,
   Underline,
   Strikethrough,
+  Highlighter,
   Code,
   Code2,
   Heading1,
@@ -13,6 +14,7 @@ import {
   List,
   ListOrdered,
   CheckSquare,
+  Quote,
   Link,
   Undo2,
   Redo2,
@@ -112,6 +114,12 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       title: 'Strikethrough',
     },
     {
+      icon: <Highlighter size={14} />,
+      action: () => editor.chain().focus().toggleHighlight().run(),
+      isActive: editor.isActive('highlight'),
+      title: 'Highlight (accent color)',
+    },
+    {
       icon: <Code size={14} />,
       action: () => editor.chain().focus().toggleCode().run(),
       isActive: editor.isActive('code'),
@@ -141,6 +149,12 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       action: () => editor.chain().focus().toggleTaskList().run(),
       isActive: editor.isActive('taskList'),
       title: 'Task list',
+    },
+    {
+      icon: <Quote size={14} />,
+      action: () => editor.chain().focus().toggleBlockquote().run(),
+      isActive: editor.isActive('blockquote'),
+      title: 'Blockquote',
     },
     'sep',
     {

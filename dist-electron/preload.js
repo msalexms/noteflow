@@ -31,6 +31,8 @@ const api = {
     setSectionTagColors: (colors) => electron_1.ipcRenderer.invoke('section-colors:set', colors),
     getNoteOrder: () => electron_1.ipcRenderer.invoke('note-order:get'),
     setNoteOrder: (order) => electron_1.ipcRenderer.invoke('note-order:set', order),
+    getTemplates: () => electron_1.ipcRenderer.invoke('templates:get'),
+    setTemplates: (templates) => electron_1.ipcRenderer.invoke('templates:set', templates),
     // Window controls
     openSticky: (noteId, sectionId) => electron_1.ipcRenderer.send('window:open-sticky', noteId, sectionId),
     minimize: () => electron_1.ipcRenderer.send('window:minimize'),

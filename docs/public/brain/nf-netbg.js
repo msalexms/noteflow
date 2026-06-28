@@ -1,9 +1,11 @@
-/* NoteFlow background wireframe — a sparse 2D echo of the 3D brain. NOT a mesh/web:
-   it draws long STRAIGHT fibres with nodes strung along them, exactly like the wireframe.
-   "Relationships" fire as fast, random sparks that flash a straight line from one distant
-   node to another (the same idea as the brain's synapses). The field spans the whole page
-   and drifts with scroll (parallax), so different patterns slide into view as you scroll.
-   Reads --brain-bg / --brain-text CSS vars so it recolours with the theme. No dependencies. */
+/* NoteFlow background mesh — a sparse 2D echo of the 3D brain. Nodes are scattered across the
+   whole page (a jittered grid, so the spread is even but organic) and each is wired to its
+   nearest neighbours, forming an interconnected web rather than disjoint straight scratches.
+   The lines you SEE are the same links the impulses travel along, so a spark always follows the
+   mesh node → node → node instead of darting along invisible paths. "Relationships" fire as
+   fast, coloured sparks that zig-zag from one node to another (the brain's synapses). The field
+   drifts with scroll (parallax) so fresh parts of the web slide into view. Reads --brain-bg /
+   --brain-text + the --brain-* accents so it recolours with the theme. No dependencies. */
 (function () {
   function readTriple(name) {
     const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -48,8 +50,8 @@
       this._bg = 'rgb(' + bg[0] + ',' + bg[1] + ',' + bg[2] + ')';
       const t = this._dark ? 0.6 : 0.72; // blend text toward bg → faint wire color
       this._wire = text.map((v, i) => Math.round(v + (bg[i] - v) * t));
-      // Accent palette for the impulses — same signal colours the brain uses for synapses.
-      this._accents = ['--accent', '--accent-2', '--purple', '--orange', '--cyan', '--pink'].map(readTriple);
+      // Accent palette for the impulses — the same saturated synapse colours the brain uses.
+      this._accents = ['--brain-accent', '--brain-accent-2', '--brain-purple', '--brain-orange', '--brain-cyan', '--brain-pink'].map(readTriple);
     }
 
     _resize() {
@@ -65,59 +67,64 @@
 
     _build() {
       const w = this._w, h = this._h;
-      // Parallax: the field drifts slower than the page so fresh fibres scroll into view.
+      // Parallax: the field drifts slower than the page so fresh mesh scrolls into view.
       this._parallax = 0.45;
       const docH = Math.max(document.documentElement.scrollHeight || h, h);
       // Virtual field height covering the whole scroll range plus a viewport of slack.
       const fieldH = docH * this._parallax + h;
       this._fieldH = fieldH;
 
-      // Straight fibres: each a line at an arbitrary angle, with a few nodes strung along it.
-      const lineCount = Math.max(6, Math.min(64, Math.round((w * fieldH) / 90000)));
-      const lines = [];
-      const allNodes = [];
-      const span = Math.min(w, h);
-      for (let i = 0; i < lineCount; i++) {
-        const cx = Math.random() * w;
-        const cy = Math.random() * fieldH;
-        const ang = (Math.random() - 0.5) * Math.PI; // any direction
-        const half = (0.18 + Math.random() * 0.34) * span * 1.4;
-        const ux = Math.cos(ang), uy = Math.sin(ang);
-        const line = {
-          ax: cx - ux * half, ay: cy - uy * half,
-          bx: cx + ux * half, by: cy + uy * half,
-          ph: Math.random() * 6.2832, sp: 0.3 + Math.random() * 0.5, nodes: [],
-        };
-        const m = 4 + (Math.random() * 4 | 0); // 4..7 nodes strung along the fibre
-        for (let k = 0; k < m; k++) {
-          const f = (k + 0.5 + (Math.random() - 0.5) * 0.4) / m;
-          const nd = {
-            x: line.ax + (line.bx - line.ax) * f,
-            y: line.ay + (line.by - line.ay) * f,
+      // Scatter nodes on a jittered grid: even coverage, but no rigid lattice.
+      const target = Math.max(24, Math.min(200, Math.round((w * fieldH) / 52000)));
+      const cols = Math.max(2, Math.round(Math.sqrt(target * w / fieldH)));
+      const rows = Math.max(2, Math.round(target / cols));
+      const cw = w / cols, ch = fieldH / rows;
+      const nodes = [];
+      for (let r = 0; r < rows; r++) {
+        for (let cI = 0; cI < cols; cI++) {
+          nodes.push({
+            x: (cI + 0.5 + (Math.random() - 0.5) * 0.72) * cw,
+            y: (r + 0.5 + (Math.random() - 0.5) * 0.72) * ch,
             r: 1 + Math.random() * 1.3, ph: Math.random() * 6.2832,
-            sp: 0.4 + Math.random() * 0.8, lit: 0,
-          };
-          line.nodes.push(nd); allNodes.push(nd);
+            sp: 0.4 + Math.random() * 0.8, lit: 0, near: [],
+          });
         }
-        lines.push(line);
       }
-      this._lines = lines;
-      this._allNodes = allNodes;
 
-      // Wire each node to its nearest neighbours (across fibres, not just along one)
-      // so an impulse can zig-zag node → node → node through the field instead of
-      // shooting a straight line. O(n²) once at build time; n stays small.
-      const maxR = span * 0.5;
-      for (const nd of allNodes) {
-        const near = [];
-        for (const o of allNodes) {
-          if (o === nd) continue;
+      // Wire each node to its few nearest neighbours → the visible mesh. Edges are
+      // deduplicated, and the same list drives the impulses, so what you see IS what
+      // sparks travel along. O(n²) once at build time; n stays small (≤ 200).
+      const maxR = Math.hypot(cw, ch) * 1.45;
+      const K = 3;
+      const edges = [];
+      const seen = new Set();
+      for (let i = 0; i < nodes.length; i++) {
+        const nd = nodes[i];
+        const cands = [];
+        for (let j = 0; j < nodes.length; j++) {
+          if (j === i) continue;
+          const o = nodes[j];
           const d = Math.hypot(o.x - nd.x, o.y - nd.y);
-          if (d < maxR) near.push({ o, d });
+          if (d < maxR) cands.push({ j, o, d });
         }
-        near.sort((p, q) => p.d - q.d);
-        nd.near = near.slice(0, 6).map((p) => p.o);
+        cands.sort((p, q) => p.d - q.d);
+        let added = 0;
+        for (const cand of cands) {
+          if (added >= K) break;
+          const a = Math.min(i, cand.j), b = Math.max(i, cand.j);
+          const key = a * 1000003 + b;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          edges.push({ a: nd, b: cand.o, ph: Math.random() * 6.2832, sp: 0.3 + Math.random() * 0.5 });
+          added++;
+        }
       }
+      // Bidirectional adjacency for the sparks (both ends of every edge).
+      for (const e of edges) { e.a.near.push(e.b); e.b.near.push(e.a); }
+
+      this._nodes = nodes;
+      this._allNodes = nodes;
+      this._edges = edges;
 
       this._sparks = [];
       this._nextSpark = 1.6 + Math.random() * 2.5;
@@ -133,14 +140,13 @@
       for (const nd of nodes) { const y = nd.y + off; if (y > -0.05 * h && y < 1.05 * h) vis.push(nd); }
       if (vis.length < 2) return;
 
-      // Build a zig-zag path: hop from node to a random near neighbour, again and
-      // again, so the impulse darts THROUGH intermediate nodes instead of drawing a
-      // straight a→b line. To keep it streaking outward (rather than doubling back),
-      // bias each hop toward neighbours that continue roughly the current heading.
+      // Build a zig-zag path: hop from node to a near neighbour, again and again, so the
+      // impulse darts THROUGH the mesh instead of drawing a straight a→b line. To keep it
+      // streaking outward (rather than doubling back), bias each hop toward neighbours that
+      // continue roughly the current heading.
       const start = vis[(Math.random() * vis.length) | 0];
-      // Mostly short darts, but ~30% are LONG sweeps that streak clear across the
-      // field (edge to edge). Long ones lean harder on the forward bias so they keep
-      // their heading instead of wandering.
+      // Mostly short darts, but ~30% are LONG sweeps that streak across the field. Long ones
+      // lean harder on the forward bias so they keep their heading instead of wandering.
       const long = Math.random() < 0.3;
       const hops = long ? 10 + (Math.random() * 12 | 0) : 3 + (Math.random() * 5 | 0); // 10..21 vs 3..7
       const fwd = long ? 1.1 : 0.6;
@@ -183,8 +189,8 @@
       this._raf = requestAnimationFrame(this._loop);
       if (!this._t0) this._t0 = ts;
       const t = (ts - this._t0) / 1000;
-      const ctx = this._ctx, w = this._w, h = this._h, lines = this._lines;
-      if (!lines || !ctx) return;
+      const ctx = this._ctx, w = this._w, h = this._h, edges = this._edges;
+      if (!edges || !ctx) return;
       const wr = this._wire[0], wg = this._wire[1], wb = this._wire[2];
       const wcol = (a) => 'rgba(' + wr + ',' + wg + ',' + wb + ',' + a.toFixed(3) + ')';
       const off = -(window.scrollY || window.pageYOffset || 0) * this._parallax;
@@ -192,15 +198,16 @@
       ctx.fillStyle = this._bg;
       ctx.fillRect(0, 0, w, h);
 
-      // Straight fibres (lines pass through their nodes).
+      // Mesh links: each edge connects two neighbouring nodes; it brightens when either
+      // endpoint is lit by a passing impulse.
       ctx.lineWidth = 1;
-      for (const ln of lines) {
-        const ay = ln.ay + off, by = ln.by + off;
+      for (const e of edges) {
+        const ay = e.a.y + off, by = e.b.y + off;
         if ((ay < -40 && by < -40) || (ay > h + 40 && by > h + 40)) continue; // cull off-screen
-        const base = (this._dark ? 0.07 : 0.09) + 0.025 * Math.sin(t * ln.sp + ln.ph);
-        let lit = 0; for (const nd of ln.nodes) if (nd.lit > lit) lit = nd.lit;
+        const base = (this._dark ? 0.065 : 0.085) + 0.022 * Math.sin(t * e.sp + e.ph);
+        const lit = e.a.lit > e.b.lit ? e.a.lit : e.b.lit;
         ctx.strokeStyle = wcol(base + lit * 0.5);
-        ctx.beginPath(); ctx.moveTo(ln.ax, ay); ctx.lineTo(ln.bx, by); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(e.a.x, ay); ctx.lineTo(e.b.x, by); ctx.stroke();
       }
 
       // Spawn impulses at a relaxed, random cadence (kept uncommon on purpose).
@@ -208,7 +215,7 @@
         this._spawnSpark(off, h, t);
         this._nextSpark = t + 1.6 + Math.random() * 3.2;
       }
-      // Impulses: a coloured pulse zig-zagging node → node → node through the field,
+      // Impulses: a coloured pulse zig-zagging node → node → node through the mesh,
       // tracing a glowing trail behind it as it goes.
       for (let i = this._sparks.length - 1; i >= 0; i--) {
         const s = this._sparks[i];
@@ -256,7 +263,7 @@
         }
       }
 
-      // Nodes on top of the fibres.
+      // Nodes on top of the mesh.
       for (const nd of this._allNodes) {
         const y = nd.y + off;
         if (y < -20 || y > h + 20) { nd.lit *= 0.9; continue; }

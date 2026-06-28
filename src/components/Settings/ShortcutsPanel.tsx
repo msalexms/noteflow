@@ -69,7 +69,7 @@ export function ShortcutsPanel() {
     <div className="space-y-4">
       {SECTIONS.map((section) => (
         <div key={section.title}>
-          <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">
             {section.title}
           </div>
           <div className="space-y-0.5">
@@ -79,11 +79,11 @@ export function ShortcutsPanel() {
                 <div className="flex items-center gap-1 flex-shrink-0 ml-4">
                   {s.keys.map((k, i) => (
                     <span key={i} className="flex items-center gap-1">
-                      <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-surface-3 border border-border rounded text-text-muted">
+                      <kbd className="px-1.5 py-0.5 text-[11px] font-mono bg-surface-3 border border-border rounded text-text-muted">
                         {keyLabel(k)}
                       </kbd>
                       {i < s.keys.length - 1 && (
-                        <span className="text-[10px] text-text-muted/40">+</span>
+                        <span className="text-[11px] text-text-muted/40">+</span>
                       )}
                     </span>
                   ))}

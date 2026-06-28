@@ -10,7 +10,7 @@ Dos invariantes para que el sidebar siga fluido con muchas notas — fáciles de
   título/tags/nombres/cuerpos de sección **una vez por versión de nota** y los guarda en un
   `WeakMap` keyed por el **objeto `Note`**. Como `updateNote` siempre crea un objeto nuevo al
   editar, la entrada se invalida sola (y la vieja se recolecta con el objeto). Toda búsqueda sobre
-  el cuerpo (`Sidebar.baseNotes`, `notesStore.getFilteredNotes`, `CommandPalette`) debe ir por esta
+  el cuerpo (`Sidebar.notes`, `notesStore.getFilteredNotes`, `CommandPalette`) debe ir por esta
   caché vía `getNoteSearchIndex`/`noteMatchesQuery` — **nunca** re-`normalize()` el contenido entero
   por tecla (era O(texto total) por carácter).
 - **Filas memoizadas (`Sidebar.tsx`):** cada nota se pinta con `NoteRow` (`React.memo`). Para que la
@@ -72,11 +72,11 @@ iterando sobre la selección (favorite/archive calculan el target como `!todasYa
 pasa por `ConfirmModal`. `Esc` limpia la selección antes de cerrar la vista. Sin IPC nuevo.
 
 ### Vista de nota (note overview)
-`notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es la **tercera vista full-area
-mutuamente excluyente** con la group overview y la brain view: los tres setters (`setGroupView`,
-`setNoteView`, `setBrainView`) y `setActiveNote` se limpian entre sí, así que abrir una cierra las
-otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
-misma prioridad de routing (brain → group → note → editor). **Entradas:** botón en la toolbar de
+`notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es una de las **vistas full-area
+mutuamente excluyentes** (group / note / brain / all-content): todos los setters (`setGroupView`,
+`setNoteView`, `setBrainView`, `setAllView`) y `setActiveNote` se limpian entre sí, así que abrir una
+cierra las otras y seleccionar una nota devuelve el editor. `App.tsx` la renderiza (`NoteOverview`) con la
+prioridad de routing (all-content → brain → group → note → editor). **Entradas:** botón en la toolbar de
 `NoteEditor` (junto a la estrella) y el ítem "Note overview" del menú contextual del sidebar. Una
 **tarjeta por sección** que es un mini-mock del editor: etiqueta de sección, título+`created` de la
 nota, una barra-toolbar puramente representativa, y un **preview del contenido renderizado** con
@@ -85,9 +85,76 @@ CSS `zoom` (Chromium/Electron) y recortado a unas líneas con fade. El mock visu
 `SectionPreview/SectionPreviewCard.tsx` (componente puro, props `compact`/`previewHeight`/`previewZoom`);
 `NoteOverview` lo envuelve en su `<button>`. Click en una tarjeta navega a esa sección con el mismo baile
 `pendingInitialSectionId` + `noteflow:request-section` diferido. Ancho de tarjeta **fijo** (sin slider).
-Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC nuevo. **Nota CSS:** el reset global
-`button { border: none }` deja `border-style: none`, así que las tarjetas usan `border-solid` explícito para
+Las notas cifradas bloqueadas muestran un estado "encrypted". Sin IPC nuevo.
+**Header:** el `<h1>` del título es **editable inline** (click o icono lápiz en hover → `<input>` con
+autofocus+select, commit debounced en blur/Enter, Esc revierte — mismo patrón que `NoteEditor`); no editable
+cuando `locked`. Botón **Delete note** (rojo, junto a cerrar) abre `ConfirmModal` `danger` y llama
+`deleteNote(note.id)` (el effect que cierra al desaparecer la nota gestiona el cierre).
+**Multi-selección de secciones:** estado local `selectedIds: Set<string>` (por id, nunca índice) en
+`NoteOverview`; `App.tsx` keya la vista por `noteViewId` así que cambiar de nota remonta y resetea la
+selección sin effects. Cada `SectionCard` recibe `selected`/`selectionActive` y un checkbox (esquina sup-izq,
+visible en hover o siempre con ≥1 marcada; estado marcado en `accent`). Modificadores en el click de la card:
+Ctrl/Cmd-click togglea, Shift-click selecciona el rango (orden `note.sections`) desde el ancla (`anchorIdRef`),
+click normal abre la sección. La barra de selección (fila bajo el header) muestra `"N selected"` + **Hide/Show
+to AI** (solo `!note.encryption`; "Show to AI" si todas las marcadas tienen `aiHidden`), **Delete** (deshabilitado
+con tooltip si la selección == todas las secciones — borrarlas todas dejaría la nota vacía; confirma con
+`ConfirmModal`) y **Clear**. El conteo/derivados se calculan filtrando `selectedIds` contra `note.sections`
+(no se filtra el Set en un effect). `Esc` limpia la selección antes de cerrar la vista.
+**Nota CSS:** el reset global `button { border: none }` deja `border-style: none`, así que las tarjetas usan `border-solid` explícito para
 que el borde se vea (la utilidad `border` de Tailwind solo fija el ancho).
+
+### Vista "All content" (índice global)
+`notesStore` tiene `allViewOpen: boolean` + `setAllView(open)`. Es la **cuarta vista full-area** (prioridad
+de routing más alta en `App.tsx`: all-content → brain → group → note → editor). **Entrada:** botón "View all
+content" (icono `LayoutGrid`) en la cabecera del sidebar, bajo "+ New note". El componente
+(`AllContentOverview/AllContentOverview.tsx`) modela su layout sobre `GroupOverview` (header fijo + área scroll
++ grids `repeat(auto-fill, minmax(220px,1fr))`) y muestra TODO el contenido visible en bandas: **Favorites**
+(notas `favorited`), **Groups** (un `GroupTile` compacto por grupo no-archivado: barra de color + icono `Folder`
+tintado + nombre + nº de notas) y **Notes** (notas sueltas/ungrouped).
+**Groups desplegables (acordeón):** cada `GroupTile` es un `<div>` (no `<button>`, para anidar acciones sin
+botón-dentro-de-botón) con un botón principal que **expande/colapsa inline** (chevron que rota 90°) y un botón
+secundario `Maximize2` ("Open group view", visible en hover) que entra al grupo (`openGroupFromAll`). El botón
+principal es `w-full min-h-[78px]`, así que **todo el área del tile es clicable** para desplegar/plegar; el botón
+secundario (`absolute z-10` + `stopPropagation`) y la barra de color (`absolute z-10`) quedan por encima y siguen
+funcionando. Al expandir, un **panel hermano a ancho completo** cae en la rejilla (`gridColumn: '1 / -1'`,
+borde-izq con el color del grupo) que muestra las notas sueltas del grupo y sus folders (con sub-cabecera
+`Folder`/`FolderOpen` colapsable) con sus notas — igual que el sidebar, reutilizando `OverviewNoteCard`. Ese panel
+se envuelve en un componente local **`AccordionPanel`** que anima la apertura/cierre con la técnica
+`grid-template-rows: 0fr↔1fr` + `overflow-hidden` (misma que el sidebar, ~200ms ease, con un leve fade de
+opacidad). El **mismo `AccordionPanel` también envuelve la rejilla de notas de cada folder** dentro del panel del
+grupo, así que plegar/desplegar un folder tiene idéntica animación. El `gridColumn: '1 / -1'` (que hace caer el
+panel del grupo a ancho completo en la rejilla de tiles) **no está hardcodeado**: `AccordionPanel` acepta una prop
+opcional `style?: React.CSSProperties` que se mezcla en su wrapper externo — el uso del **grupo** pasa
+`style={{ gridColumn: '1 / -1' }}` y el uso del **folder** (que vive en un `space-y` normal, no en la rejilla de
+tiles) no pasa style. El contenido del `GroupTile` se alinea arriba (`items-start`) ya que el tile es alto
+(`min-h-[78px]`). **Por rendimiento, las previews de notas solo se montan cuando el grupo está expandido** (cada
+`OverviewNoteCard` pinta markdown y es caro): se mantienen montadas durante la animación de cierre y se desmontan
+en `onTransitionEnd`. La animación de apertura se dispara montando a `0fr` y pasando a `1fr` en el siguiente frame
+(`requestAnimationFrame`). **Estado de expansión LOCAL a
+la vista** (`expandedGroupIds`/`collapsedFolderIds` como `Set`), **colapsado por defecto**, no persistido (no usa
+`groupsStore`). Con búsqueda activa, todos los grupos/folders visibles se tratan como expandidos y las notas
+mostradas se filtran a las que matchean (revela resultados); las folders que quedan vacías con la query se omiten. Reutiliza
+`useSidebarGroups` para derivar grupos/sueltas y `OverviewNoteCard` para las tarjetas de nota (color = el del
+grupo de la nota, o `--text-muted` si no tiene). Búsqueda local (`searchQuery` de estado, **no** el global del
+store) con `parseSearchQuery`/`noteMatchesQuery` de `lib/searchUtils`: filtra favoritos y sueltas, y muestra un
+grupo si su nombre matchea o si contiene alguna nota que matchee. Click en sección usa el mismo baile
+`pendingInitialSectionId` + `noteflow:request-section` diferido. `Esc` cierra. Sin IPC nuevo.
+**Filtro de fecha/calendario (vive AQUÍ, no en el sidebar):** toolbar fija bajo la cabecera con los botones
+segmentados `All/Today/Week/Month` + toggle de calendario desplegable. Lee `filterDate`/`setFilterDate` del
+`notesStore` (campo compartido) y mantiene estado **local** `selectedDayKey`/`calendarMonth`/`calendarExpanded`.
+El filtrado (`dateBaseNotes` no-archivadas → `dateFilteredNotes`) replica la lógica que antes vivía en el
+sidebar: con día elegido, notas creadas o modificadas ese día; si no, rango sobre `updated`. Se aplica al
+**conjunto base** (`visibleNotes`) antes de derivar favoritos/grupos/sueltas, así que afecta a las tres bandas
+y se combina con la búsqueda local. `calendarDays`/`dayMarkers` (puntos verde=created, neutro=updated) se
+calculan como en el sidebar (helpers `toDayKey`/`toDayKeyFromIso`/`dayKeyToDate` a nivel de módulo). El
+sidebar ya **no** tiene este filtro (solo búsqueda/tags/archived); su botón "All content" perdió el borde.
+**Back inteligente:** entrar a un grupo/nota DESDE esta vista usa `openGroupFromAll(id)`/`openNoteFromAll(id)`,
+que marcan `cameFromAllView: true`. El "atrás" de group/note overview llama a `closeFullView()`: si
+`cameFromAllView` vuelve a "All content" (no al editor); si no, cierra al editor. Cualquier `setActiveNote`/
+creación de nota limpia `allViewOpen` y `cameFromAllView`.
+**OverviewNoteCard compartida:** la tarjeta de nota (antes inline en `GroupOverview`) vive en
+`components/OverviewNoteCard.tsx` (exporta `OverviewNoteCard`, `NoteCardProps` y la helper `formatCardDate`);
+la usan group overview y all-content. Las props de reorder/selección son opcionales (la all-content no las pasa).
 
 ### Previsualización de sección (hover + cerebro)
 Reutiliza `SectionPreviewCard` en dos interacciones, sin IPC nuevo (el contenido de toda sección ya está
@@ -107,6 +174,27 @@ en memoria en `notesStore`):
   `onNodeActivate(noteId, sectionId, clientX, clientY)` (en vez de navegar) → `BrainView` fija una tarjeta
   **clicable** junto al click; pulsarla navega (`openNote`), click fuera o `Esc` la cierra. Sustituyó al
   antiguo "fly-in" de cámara (eliminado).
+
+### Editor: marcas y bloques markdown (round-trip md↔html)
+El editor TipTap (`src/components/Editor/Editor.tsx`) registra las extensiones **una a una** (sin
+StarterKit). Todo elemento soportado **round-trippea** por `src/lib/markdownHtml.ts`, fuente única de
+verdad de la conversión, que debe mantenerse **simétrica**: marcas inline en
+`inlineToHtml`/`inlineElToMd`, bloques en el bucle de `htmlFromMarkdown`/`blockElToMd`. Las mismas
+funciones las usa `SectionPreviewCard`, así que un elemento nuevo aparece también en los previews sin
+código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.css`).
+- **Bold neutro + highlight de acento (decisión):** la negrita (`**`) ya **no** usa el color de
+  acento (`strong { color: inherit }`); el texto en color de acento es una marca aparte, **highlight**
+  `==texto==` → `<mark>` (`@tiptap/extension-highlight`, `multicolor` off; `mark { color: var(--accent);
+  background: transparent }`). Botón en la toolbar (icono `Highlighter`).
+- **Blockquote / cita (`> texto`, estilo VSCode):** `@tiptap/extension-blockquote`. Round-trip con
+  `mdBlockquoteToHtml` (líneas consecutivas → `<p>` con `<br>`; línea `>` vacía → nuevo párrafo) y el
+  caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo `--accent-2`
+  + texto atenuado. Botón en la toolbar (icono `Quote`).
+- **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → lista →
+  blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings).
+- Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
+  espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
+  editores externos/CLI/móvil.
 
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →

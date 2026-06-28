@@ -35,7 +35,7 @@ You are reading this note inside NoteFlow. It lives in your GitHub repository as
 // Root-level JSON files that sync alongside the note folders.
 // folders.json / note-order.json were historically pushed but never pulled —
 // fixed here as part of the v2 format work.
-const METADATA_FILENAMES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json'] as const
+const METADATA_FILENAMES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json'] as const
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -63,6 +63,21 @@ Antes de cerrar, ejecuta y deja en verde:
   **arréglalo** para que se entienda mejor — sin inventar: solo lo que sepas cierto por el código.
   Es preferible dejar el contexto correcto a dejarlo "como estaba". Anota en tu resumen qué corregiste.
 
+## Árbol compartido (varios agentes a la vez)
+
+El working tree **no es tuyo en exclusiva**: puede haber cambios sin commitear de **otros agentes
+trabajando en paralelo** en features/fixes distintos, o de trabajo previo. Por tanto:
+
+- **Acota tus ediciones a los ficheros que tu tarea necesita.** No "arregles de paso" ni reescribas
+  cosas ajenas a la tarea aunque las veas en el árbol.
+- **`git diff`/`git status` mezclan el trabajo de todos.** Al autoverificarte, no asumas que todo lo
+  modificado/sin trackear es tuyo. Si `lint`/`build`/`test` salen en rojo, comprueba si la causa
+  está en **tus** ficheros o en ficheros ajenos (compara con HEAD o aísla tus ficheros). Reporta lo
+  tuyo en verde; si hay rojos ajenos, dilo pero no intentes arreglarlos.
+- **Nunca ejecutes git destructivo/que cambie estado** (`checkout`/`restore`/`reset`/`stash`/`clean`)
+  sobre ficheros o sobre el árbol: podrías borrar el trabajo en curso de otro agente. Edita solo con
+  Edit/Write, y solo lo tuyo.
+
 ## Reglas duras
 
 - ❌ No improvises workarounds si una herramienta falla de forma inesperada: para y reporta el bloqueo.

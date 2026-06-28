@@ -2,8 +2,8 @@ import { Fragment, memo, useMemo, useRef, useEffect, useLayoutEffect, useState }
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPlus, Folder, FolderOpen, ChevronLeft, ChevronRight, CalendarDays, X, Plus, Timer, LayoutGrid } from 'lucide-react'
-import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, isYesterday, startOfMonth, startOfWeek } from 'date-fns'
+import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPlus, Folder, FolderOpen, X, Plus, Timer, LayoutGrid } from 'lucide-react'
+import { format, isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
@@ -52,24 +52,6 @@ function renderHighlightedText(text: string, query: string) {
       )
       : <span key={`${part}-${index}`}>{part}</span>
   ))
-}
-
-function toDayKey(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function toDayKeyFromIso(iso: string): string | null {
-  const parsed = new Date(iso)
-  if (Number.isNaN(parsed.getTime())) return null
-  return toDayKey(parsed)
-}
-
-function dayKeyToDate(dayKey: string): Date {
-  const [y, m, d] = dayKey.split('-').map(Number)
-  return new Date(y, m - 1, d)
 }
 
 const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
@@ -190,16 +172,15 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const noteViewId = useNotesStore((s) => s.noteViewId)
   const searchQuery = useNotesStore((s) => s.searchQuery)
-  const filterDate = useNotesStore((s) => s.filterDate)
   const filterTag = useNotesStore((s) => s.filterTag)
   const showArchived = useNotesStore((s) => s.showArchived)
 
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setGroupView = useNotesStore((s) => s.setGroupView)
   const setNoteView = useNotesStore((s) => s.setNoteView)
+  const setAllView = useNotesStore((s) => s.setAllView)
   const updateNote = useNotesStore((s) => s.updateNote)
   const setSearchQuery = useNotesStore((s) => s.setSearchQuery)
-  const setFilterDate = useNotesStore((s) => s.setFilterDate)
   const setShowArchived = useNotesStore((s) => s.setShowArchived)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
@@ -273,9 +254,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     onConfirm: () => void
   } | null>(null)
 
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()))
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null)
-  const [calendarExpanded, setCalendarExpanded] = useState(false)
   const [keyboardResultIndex, setKeyboardResultIndex] = useState(-1)
   const [newNoteCtx, setNewNoteCtx] = useState<{ x: number; y: number } | null>(null)
 
@@ -337,7 +315,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     [groups],
   )
 
-  const baseNotes = useMemo(() => {
+  const notes = useMemo(() => {
     return rawNotes
       .filter((n) => showArchived || (!n.archived && !(n.group && archivedGroupIds.has(n.group))))
       .filter((n) => !filterTag || n.tags.includes(filterTag))
@@ -347,62 +325,6 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       })
       .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime())
   }, [rawNotes, showArchived, filterTag, searchQuery, sectionFilter, sectionTextQuery, archivedGroupIds])
-
-  const notes = useMemo(() => {
-    if (selectedDayKey) {
-      return baseNotes.filter((note) => {
-        const createdDay = toDayKeyFromIso(note.created)
-        const updatedDay = toDayKeyFromIso(note.updated)
-        return createdDay === selectedDayKey || updatedDay === selectedDayKey
-      })
-    }
-
-    return baseNotes.filter((n) => {
-      if (filterDate === 'all') return true
-      const updated = new Date(n.updated)
-      const now = new Date()
-      if (filterDate === 'today') return isToday(updated)
-      if (filterDate === 'week') {
-        const weekAgo = new Date(now)
-        weekAgo.setDate(now.getDate() - 7)
-        return updated >= weekAgo
-      }
-      if (filterDate === 'month') {
-        const monthAgo = new Date(now)
-        monthAgo.setMonth(now.getMonth() - 1)
-        return updated >= monthAgo
-      }
-      return true
-    })
-  }, [baseNotes, filterDate, selectedDayKey])
-
-  const calendarDays = useMemo(() => {
-    const monthStart = startOfMonth(calendarMonth)
-    const monthEnd = endOfMonth(calendarMonth)
-    const rangeStart = startOfWeek(monthStart, { weekStartsOn: 1 })
-    const rangeEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
-    return eachDayOfInterval({ start: rangeStart, end: rangeEnd })
-  }, [calendarMonth])
-
-  const dayMarkers = useMemo(() => {
-    const markers = new Map<string, { created: number; updated: number }>()
-    for (const note of baseNotes) {
-      const createdKey = toDayKeyFromIso(note.created)
-      if (createdKey) {
-        const current = markers.get(createdKey) ?? { created: 0, updated: 0 }
-        current.created += 1
-        markers.set(createdKey, current)
-      }
-
-      const updatedKey = toDayKeyFromIso(note.updated)
-      if (updatedKey) {
-        const current = markers.get(updatedKey) ?? { created: 0, updated: 0 }
-        current.updated += 1
-        markers.set(updatedKey, current)
-      }
-    }
-    return markers
-  }, [baseNotes])
 
   const items = useSidebarGroups(notes, groups, folders, noteOrder)
   const visibleNoteIds = useMemo(() => {
@@ -418,11 +340,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     return ids
   }, [items])
   const hasSearchFilter = searchQuery.trim().length > 0
-  const hasDateFilter = filterDate !== 'all'
   const hasTagFilter = Boolean(filterTag)
-  const hasDayFilter = Boolean(selectedDayKey)
   const hasArchivedFilter = showArchived
-  const hasActiveFilters = hasSearchFilter || hasDateFilter || hasTagFilter || hasDayFilter || hasArchivedFilter
+  const hasActiveFilters = hasSearchFilter || hasTagFilter || hasArchivedFilter
   const scopedTotal = rawNotes.filter((n) => showArchived || !n.archived).length
 
   // Section headers ("groups" / "notes") mirror the favorites label. Compute the
@@ -968,152 +888,8 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </button>
       </div>
 
-      {/* ── Date filter ────────────────────────────────────────────────────── */}
-      <div>
-        <div className="flex gap-1 px-3 py-2">
-          {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-            const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
-            const active = !selectedDayKey && filterDate === opt
-            return (
-              <button
-                key={opt}
-                onClick={() => {
-                  setFilterDate(opt)
-                  setSelectedDayKey(null)
-                }}
-                className="flex-1 py-0.5 rounded text-xs font-mono transition-colors"
-                style={active
-                  ? { color: 'rgb(var(--text))', background: 'rgb(var(--text) / 0.12)', border: '1px solid rgb(var(--text) / 0.25)' }
-                  : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-                }
-              >
-                {labels[opt]}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="px-3 pb-2 flex items-center gap-1">
-          <button
-            onClick={() => setCalendarExpanded((prev) => !prev)}
-            className="flex-1 flex items-center justify-center py-0.5 rounded text-xs font-mono transition-colors"
-            style={calendarExpanded || selectedDayKey
-              ? { color: 'rgb(var(--text))', background: 'rgb(var(--text) / 0.12)', border: '1px solid rgb(var(--text) / 0.25)' }
-              : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
-            }
-            title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
-          >
-            <CalendarDays size={14} />
-          </button>
-          {selectedDayKey && (
-            <button
-              onClick={() => setSelectedDayKey(null)}
-              className="p-0.5 rounded transition-colors"
-              style={{ color: 'rgb(var(--text))' }}
-              title="Clear day filter"
-            >
-              <X size={13} />
-            </button>
-          )}
-        </div>
-        {selectedDayKey && !calendarExpanded && (
-          <div className="px-3 pb-2">
-            <span className="text-[10px] font-mono text-text">
-              {format(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
-            </span>
-          </div>
-        )}
-
-        <div
-          className="overflow-hidden transition-all duration-200 ease-in-out"
-          style={{ maxHeight: calendarExpanded ? '400px' : '0px', opacity: calendarExpanded ? 1 : 0 }}
-        >
-          <div className="px-3 pb-2">
-            <div className="rounded border border-border bg-surface-2/30 p-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <button
-                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
-                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                  title="Previous month"
-                >
-                  <ChevronLeft size={12} />
-                </button>
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
-                  <CalendarDays size={10} />
-                  <span>{format(calendarMonth, 'MMMM yyyy')}</span>
-                </div>
-                <button
-                  onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
-                  className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                  title="Next month"
-                >
-                  <ChevronRight size={12} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 mb-1">
-                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
-                  <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
-                    {label}
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-7 gap-1">
-                {calendarDays.map((day) => {
-                  const dayKey = toDayKey(day)
-                  const marker = dayMarkers.get(dayKey)
-                  const isSelected = selectedDayKey === dayKey
-                  const inMonth = isSameMonth(day, calendarMonth)
-                  const today = isToday(day)
-                  const hasActivity = Boolean(marker && (marker.created > 0 || marker.updated > 0))
-
-                  return (
-                    <button
-                      key={dayKey}
-                      onClick={() => {
-                        setSelectedDayKey((prev) => (prev === dayKey ? null : dayKey))
-                        setCalendarExpanded(false)
-                      }}
-                      title={hasActivity
-                        ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
-                        : format(day, 'PPP')
-                      }
-                      className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
-                      style={isSelected
-                        ? {
-                            background: 'rgb(var(--text) / 0.12)',
-                            border: '1px solid rgb(var(--text) / 0.25)',
-                            color: 'rgb(var(--text))',
-                          }
-                        : {
-                            background: inMonth ? 'transparent' : 'rgb(var(--surface-1) / 0.45)',
-                            border: today ? '1px solid rgb(var(--text) / 0.2)' : '1px solid rgb(var(--border) / 0.4)',
-                            color: inMonth ? 'rgb(var(--text-muted))' : 'rgb(var(--text-muted) / 0.45)',
-                          }
-                      }
-                    >
-                      <span>{format(day, 'd')}</span>
-                      <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
-                        {marker && marker.created > 0 && (
-                          <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
-                        )}
-                        {marker && marker.updated > 0 && (
-                          <span className="w-[4px] h-[4px] rounded-full bg-text/50" />
-                        )}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* ── New note / new group buttons ────────────────────────────────────── */}
-      <div className="px-3 pt-2 pb-2 space-y-1.5">
+      <div className="px-3 pt-0.5 pb-2 space-y-1.5">
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => createNote()}
@@ -1155,6 +931,20 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text placeholder-text-muted/40 caret-text"
           />
         )}
+      </div>
+
+      {/* ── All content view ───────────────────────────────────────────────── */}
+      <div className="px-3 pt-1.5 pb-0.5">
+        <button
+          onClick={() => setAllView(true)}
+          title="View all content"
+          className="w-full flex items-center justify-start gap-1.5 px-2 py-0.5 rounded text-xs font-mono
+                     transition-colors hover:bg-surface-2"
+          style={{ color: 'rgb(var(--text-muted))' }}
+        >
+          <LayoutGrid size={13} />
+          All content
+        </button>
       </div>
 
       {/* ── Notes list ──────────────────────────────────────────────────────── */}

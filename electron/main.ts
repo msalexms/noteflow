@@ -231,6 +231,7 @@ const GROUPS_FILE = path.join(NOTES_DIR, 'groups.json')
 const FOLDERS_FILE = path.join(NOTES_DIR, 'folders.json')
 const SECTION_COLORS_FILE = path.join(NOTES_DIR, 'section-colors.json')
 const NOTE_ORDER_FILE = path.join(NOTES_DIR, 'note-order.json')
+const TEMPLATES_FILE = path.join(NOTES_DIR, 'templates.json')
 const SECTION_COLOR_VALUES = new Set([
   '--accent',
   '--accent-2',
@@ -273,6 +274,7 @@ const RESERVED_ROOT_NAMES = new Set([
   'folders.json',
   'section-colors.json',
   'note-order.json',
+  'templates.json',
   'README.md',
   noteFormat.FORMAT_MARKER_FILE,
 ])
@@ -2300,6 +2302,23 @@ ipcMain.handle('note-order:set', (event, order: unknown) => {
     }
   })
   githubSync.schedulePush('note-order.json', content)
+})
+
+ipcMain.handle('templates:get', () => {
+  try {
+    return JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8'))
+  } catch { return [] }
+})
+
+ipcMain.handle('templates:set', (event, templates: unknown[]) => {
+  const content = JSON.stringify(templates, null, 2)
+  fs.writeFileSync(TEMPLATES_FILE, content, 'utf-8')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
+  githubSync.schedulePush('templates.json', content)
 })
 
 // Window controls

@@ -234,6 +234,7 @@ const GROUPS_FILE = path_1.default.join(NOTES_DIR, 'groups.json');
 const FOLDERS_FILE = path_1.default.join(NOTES_DIR, 'folders.json');
 const SECTION_COLORS_FILE = path_1.default.join(NOTES_DIR, 'section-colors.json');
 const NOTE_ORDER_FILE = path_1.default.join(NOTES_DIR, 'note-order.json');
+const TEMPLATES_FILE = path_1.default.join(NOTES_DIR, 'templates.json');
 const SECTION_COLOR_VALUES = new Set([
     '--accent',
     '--accent-2',
@@ -274,6 +275,7 @@ const RESERVED_ROOT_NAMES = new Set([
     'folders.json',
     'section-colors.json',
     'note-order.json',
+    'templates.json',
     'README.md',
     noteFormat.FORMAT_MARKER_FILE,
 ]);
@@ -2290,6 +2292,24 @@ electron_1.ipcMain.handle('note-order:set', (event, order) => {
         }
     });
     githubSync.schedulePush('note-order.json', content);
+});
+electron_1.ipcMain.handle('templates:get', () => {
+    try {
+        return JSON.parse(fs_1.default.readFileSync(TEMPLATES_FILE, 'utf-8'));
+    }
+    catch {
+        return [];
+    }
+});
+electron_1.ipcMain.handle('templates:set', (event, templates) => {
+    const content = JSON.stringify(templates, null, 2);
+    fs_1.default.writeFileSync(TEMPLATES_FILE, content, 'utf-8');
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        if (win.webContents.id !== event.sender.id) {
+            win.webContents.send('notes-updated');
+        }
+    });
+    githubSync.schedulePush('templates.json', content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {

@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { X, Star, FileText, Lock, Plus, EyeOff } from 'lucide-react'
+import { X, Star, FileText, Lock, Plus, EyeOff, Eye, Trash2, Check, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore, type SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import { SectionPreviewCard, CARD_WIDTH } from '../SectionPreview/SectionPreviewCard'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
+import { ConfirmModal } from '../ConfirmModal'
 import type { Note, NoteSection } from '../../types'
 
 interface NoteOverviewProps {
@@ -18,29 +19,48 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const updateNote = useNotesStore((s) => s.updateNote)
+  const deleteNote = useNotesStore((s) => s.deleteNote)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
 
   // Same right-click menu as a section tag in the sidebar (self-contained component)
   const [contextMenu, setContextMenu] = useState<NoteContextMenuRequest | null>(null)
+
+  // ── Multi-select (by section id, never index) ────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  // The card last toggled — shift-click selects the range from it to the clicked one.
+  const anchorIdRef = useRef<string | null>(null)
+
+  // ── Confirm modals (one slot — only one confirm is ever open at a time) ───────
+  const [confirm, setConfirm] = useState<'delete-sections' | 'delete-note' | null>(null)
+
+  // ── Inline title edit (debounced, like NoteEditor) ───────────────────────────
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(note?.title ?? '')
+  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const locked = Boolean(note?.encryption && note.sections.length === 0)
 
   // Note vanished (deleted locally or via sync) → close the overview
   useEffect(() => {
     if (!note) onClose()
   }, [note, onClose])
 
-  // Close on Escape
+  // Note: `App.tsx` keys this view by noteId, so switching notes remounts the
+  // component — selection/title/anchor state resets for free, no effect needed.
+
+  // Close on Escape — clear an active selection first, then exit title edit, else close.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
+      if (e.key !== 'Escape') return
+      // Title input handles its own Escape (revert) without closing the overview.
+      if (editingTitle) return
+      e.preventDefault()
+      if (selectedIds.size > 0) setSelectedIds(new Set())
+      else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const locked = Boolean(note?.encryption && note.sections.length === 0)
+  }, [onClose, selectedIds, editingTitle])
 
   // Navigate straight to a clicked section. Stash it in pendingInitialSectionId so the editor
   // (which mounts fresh once the overview closes) opens on the right section with no flash, and
@@ -66,9 +86,100 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
     openSection(newSection.id)
   }
 
+  // ── Selection helpers ─────────────────────────────────────────────────────────
+  const toggleSelected = (sectionId: string) => {
+    anchorIdRef.current = sectionId
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sectionId)) next.delete(sectionId)
+      else next.add(sectionId)
+      return next
+    })
+  }
+
+  // Shift-click: select the inclusive range (in note.sections order) from the anchor to here.
+  const selectRangeTo = (sectionId: string) => {
+    if (!note) return
+    const ids = note.sections.map((s) => s.id)
+    const anchor = anchorIdRef.current
+    const from = anchor ? ids.indexOf(anchor) : -1
+    const to = ids.indexOf(sectionId)
+    if (to < 0) return
+    if (from < 0) {
+      toggleSelected(sectionId)
+      return
+    }
+    const [lo, hi] = from <= to ? [from, to] : [to, from]
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (let i = lo; i <= hi; i++) next.add(ids[i])
+      return next
+    })
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+    anchorIdRef.current = null
+  }
+
+  // ── Inline title edit ─────────────────────────────────────────────────────────
+  const startTitleEdit = () => {
+    if (!note || locked) return
+    setTitleDraft(note.title ?? '')
+    setEditingTitle(true)
+  }
+
+  const commitTitle = () => {
+    if (!note) return
+    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
+    setEditingTitle(false)
+    if ((note.title ?? '') !== titleDraft) void updateNote(note.id, { title: titleDraft })
+  }
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!note) return
+    const val = e.target.value
+    setTitleDraft(val)
+    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
+    titleDebounceRef.current = setTimeout(() => {
+      void updateNote(note.id, { title: val })
+    }, 300)
+  }
+
   if (!note) return null
 
   const sectionCount = note.sections.length
+  // Derive the selection against the live sections so ids of deleted sections never
+  // inflate the count or the action bar (avoids filtering the Set in an effect).
+  const selectedSections = note.sections.filter((s) => selectedIds.has(s.id))
+  const selectedCount = selectedSections.length
+  const selectionActive = selectedCount > 0
+  // Can't wipe out every section (would leave the note empty — delete the note instead).
+  const selectingAll = sectionCount > 0 && selectedCount === sectionCount
+  // Mirror the context menu: AI visibility is unavailable on encrypted notes.
+  const aiActionAvailable = !note.encryption && selectedCount > 0
+  const allHidden = selectedCount > 0 && selectedSections.every((s) => s.aiHidden)
+
+  const deleteSelectedSections = () => {
+    setConfirm(null)
+    void updateNote(note.id, { sections: note.sections.filter((s) => !selectedIds.has(s.id)) })
+    clearSelection()
+  }
+
+  const toggleSelectedAiHidden = () => {
+    // If every selected section is already hidden → reveal all; otherwise hide all.
+    const hide = !allHidden
+    void updateNote(note.id, {
+      sections: note.sections.map((s) =>
+        selectedIds.has(s.id) ? { ...s, aiHidden: hide } : s,
+      ),
+    })
+  }
+
+  const deleteThisNote = () => {
+    setConfirm(null)
+    void deleteNote(note.id)
+  }
 
   return (
     <div
@@ -81,9 +192,49 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
         style={{ background: 'rgb(var(--bg-1) / 0.85)' }}
       >
         {note.encryption && <Lock size={13} className="text-amber-400 flex-shrink-0" />}
-        <h1 className="text-sm font-mono font-semibold text-text truncate">
-          {note.title || 'Untitled'}
-        </h1>
+
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={handleTitleChange}
+            onBlur={commitTitle}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitTitle() }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
+                setTitleDraft(note.title ?? '')
+                setEditingTitle(false)
+                void updateNote(note.id, { title: note.title ?? '' })
+              }
+            }}
+            placeholder="Untitled"
+            className="text-sm font-mono font-semibold text-text bg-surface-1 border border-text/25 rounded px-1.5 py-0.5 outline-none focus:border-text/40 min-w-0 flex-shrink"
+          />
+        ) : (
+          <button
+            onClick={startTitleEdit}
+            disabled={locked}
+            title={locked ? undefined : 'Rename note'}
+            className={`group/title flex items-center gap-1.5 min-w-0 rounded px-1 -mx-1 transition-colors ${
+              locked ? 'cursor-default' : 'hover:bg-surface-3'
+            }`}
+          >
+            <h1 className="text-sm font-mono font-semibold text-text truncate">
+              {note.title || 'Untitled'}
+            </h1>
+            {!locked && (
+              <Pencil
+                size={11}
+                className="text-text-muted/50 opacity-0 group-hover/title:opacity-100 transition-opacity flex-shrink-0"
+              />
+            )}
+          </button>
+        )}
+
         <button
           onClick={() => updateNote(note.id, { favorited: !note.favorited })}
           title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
@@ -110,6 +261,13 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
           </button>
         )}
         <button
+          onClick={() => setConfirm('delete-note')}
+          className="flex items-center justify-center w-7 h-7 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+          title="Delete note"
+        >
+          <Trash2 size={13} />
+        </button>
+        <button
           onClick={onClose}
           className="ml-1 flex items-center justify-center w-7 h-7 rounded border border-border bg-surface-2 text-text-muted hover:text-text hover:border-text/25 transition-colors"
           title="Close (Esc)"
@@ -119,7 +277,7 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
       </div>
 
       {/* ── Scroll area (only this scrolls — the scrollbar starts below the header) ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto relative">
       <div className="px-6 py-5">
         {locked ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
@@ -143,16 +301,95 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                 note={note}
                 section={section}
                 sectionTagColors={sectionTagColors}
+                selected={selectedIds.has(section.id)}
+                selectionActive={selectionActive}
                 onOpen={openSection}
+                onToggleSelect={toggleSelected}
+                onSelectRange={selectRangeTo}
                 onContextMenu={setContextMenu}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* ── Floating selection bar — sticks to the bottom while scrolling ── */}
+      {selectionActive && (
+        <div className="sticky bottom-0 z-20 pointer-events-none flex justify-center px-6 pb-5">
+          <div
+            className="pointer-events-auto relative flex items-center gap-1 rounded-lg border border-border bg-surface-2/95 backdrop-blur px-2 py-1.5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="px-2 text-[11px] font-mono text-text whitespace-nowrap">
+              {selectedCount} selected
+            </span>
+            <div className="w-px h-5 bg-border" />
+
+            {aiActionAvailable && (
+              <button
+                onClick={toggleSelectedAiHidden}
+                title={allHidden
+                  ? 'The AI will index and use these sections again'
+                  : 'The AI will never index, read or reference these sections'}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-text-muted hover:text-text hover:bg-text/10 transition-colors"
+              >
+                {allHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                {allHidden ? 'Show to AI' : 'Hide from AI'}
+              </button>
+            )}
+
+            <button
+              onClick={() => setConfirm('delete-sections')}
+              disabled={selectingAll}
+              title={selectingAll
+                ? "Can't delete every section — delete the note instead"
+                : undefined}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-red/75 hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-red/75"
+            >
+              <Trash2 size={13} />
+              Delete
+            </button>
+
+            <div className="w-px h-5 bg-border" />
+            <button
+              onClick={clearSelection}
+              title="Clear selection (Esc)"
+              className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-text/10 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
       </div>
 
       <NoteContextMenu request={contextMenu} onClose={() => setContextMenu(null)} />
+
+      {confirm === 'delete-sections' && (
+        <ConfirmModal
+          title="Delete sections"
+          message={
+            selectedCount === 1
+              ? '1 section will be permanently deleted.'
+              : `${selectedCount} sections will be permanently deleted.`
+          }
+          confirmLabel="Delete"
+          danger
+          onConfirm={deleteSelectedSections}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      {confirm === 'delete-note' && (
+        <ConfirmModal
+          title="Delete note"
+          message={`"${note.title || 'Untitled'}" will be permanently deleted.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={deleteThisNote}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
     </div>
   )
 }
@@ -162,29 +399,81 @@ interface SectionCardProps {
   note: Note
   section: NoteSection
   sectionTagColors: SectionTagColorMap
+  selected: boolean
+  selectionActive: boolean
   onOpen: (sectionId: string) => void
+  onToggleSelect: (sectionId: string) => void
+  onSelectRange: (sectionId: string) => void
   onContextMenu: (request: NoteContextMenuRequest) => void
 }
 
-function SectionCard({ note, section, sectionTagColors, onOpen, onContextMenu }: SectionCardProps) {
+function SectionCard({
+  note,
+  section,
+  sectionTagColors,
+  selected,
+  selectionActive,
+  onOpen,
+  onToggleSelect,
+  onSelectRange,
+  onContextMenu,
+}: SectionCardProps) {
   return (
     <button
-      onClick={() => onOpen(section.id)}
+      // Shift-click extends a range; Ctrl/Cmd-click toggles; a plain click while a
+      // selection is active toggles too. Otherwise a click opens the section.
+      onClick={(e) => {
+        if (e.shiftKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          onSelectRange(section.id)
+          return
+        }
+        if (selectionActive || e.ctrlKey || e.metaKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          onToggleSelect(section.id)
+          return
+        }
+        onOpen(section.id)
+      }}
       onContextMenu={(e) => {
         e.preventDefault()
         e.stopPropagation()
         onContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: section.id })
       }}
       title={`Open "${section.name}"`}
-      className="group relative text-left rounded-lg border border-solid border-text/20 bg-surface-1 shadow-md
-                 hover:border-text/45 hover:shadow-lg hover:-translate-y-0.5
-                 transition-all duration-150 overflow-hidden flex flex-col"
+      className={`group relative text-left rounded-lg border border-solid bg-surface-1 shadow-md
+                 hover:shadow-lg hover:-translate-y-0.5
+                 transition-all duration-150 overflow-hidden flex flex-col ${
+                   selected
+                     ? 'border-accent ring-1 ring-accent'
+                     : 'border-text/20 hover:border-text/45'
+                 }`}
       style={{ width: CARD_WIDTH }}
     >
+      {/* Selection tick — top-right, on hover or always while a selection is active */}
+      <span
+        role="checkbox"
+        aria-checked={selected}
+        aria-label="Select section"
+        title="Select section"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(section.id) }}
+        className={`absolute top-2 right-2 z-20 flex items-center justify-center w-[18px] h-[18px] rounded border transition-all cursor-pointer ${
+          selected
+            ? 'opacity-100 bg-accent border-accent text-white'
+            : `border-text/40 bg-surface-1/80 text-transparent hover:border-text/70 ${
+                selectionActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`
+        }`}
+      >
+        <Check size={12} strokeWidth={3} />
+      </span>
+
       {section.aiHidden && (
         <span
           title="Hidden from AI"
-          className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded
+          className="absolute top-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded
                      bg-surface-3/90 text-text-muted text-[9px] font-mono"
         >
           <EyeOff size={10} /> AI

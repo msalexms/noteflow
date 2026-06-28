@@ -37,7 +37,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-mono font-medium text-text">Local AI</p>
-            <p className="text-[10px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
+            <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
               Index your notes on this device to power Related notes, the brain graph and
               chat context. Runs fully offline; encrypted notes are skipped.
             </p>
@@ -68,7 +68,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
               Reindex all notes
             </button>
             {busy && progress && (
-              <span className="text-[10px] font-mono text-text-muted tabular-nums">
+              <span className="text-[11px] font-mono text-text-muted tabular-nums">
                 {indexState === 'downloading-model' ? 'Downloading model…' : `${progress.done}/${progress.total}`}
               </span>
             )}
@@ -78,8 +78,8 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
       {/* ── Assistant (LLM provider) ────────────────────────────────── */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Assistant (LLM)</div>
-        <p className="text-[10px] font-mono text-text-muted mb-3 max-w-md leading-relaxed">
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Assistant (LLM)</div>
+        <p className="text-[11px] font-mono text-text-muted mb-3 max-w-md leading-relaxed">
           Configure the chat provider, endpoint, API key and model. Each provider keeps
           its own credentials; switching providers won't mix keys.
         </p>
@@ -88,7 +88,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
       {/* ── Profile (second brain) ──────────────────────────────────── */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Profile</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Profile</div>
         <button
           onClick={openProfile}
           className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
@@ -96,7 +96,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
           <Sparkles size={13} className="text-text-muted flex-shrink-0" />
           <span>Open profile setup</span>
         </button>
-        <p className="text-[10px] font-mono text-text-muted/60 mt-2 max-w-md leading-relaxed">
+        <p className="text-[11px] font-mono text-text-muted/60 mt-2 max-w-md leading-relaxed">
           Re-run the questionnaire to refresh the profile note the assistant uses for context.
         </p>
       </section>

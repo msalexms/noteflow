@@ -58,72 +58,71 @@ interface NoteFeature {
 
 const noteFeatures: NoteFeature[] = [
   {
-    id: 'capture', tok: 'accent', title: 'Capture anything',
-    time: '21:34', date: 'Jun 18, 2026 · 09:14', mode: 'rich',
-    tags: [{ name: 'Capture', tok: 'accent' }, { name: 'Inbox', tok: 'cyan' }],
+    id: 'brain', tok: 'purple', title: 'A brain that mirrors you',
+    time: '22:10', date: 'Jun 24, 2026 · 22:10', mode: 'rich',
+    tags: [{ name: 'Brain', tok: 'purple' }],
     body: [
-      { t: 'p', html: 'NoteFlow lives in your <strong>system tray</strong>. Summon it from anywhere — even when the window is hidden — and start typing before the thought escapes.' },
-      { t: 'kbd', keys: ['Ctrl', 'Shift', 'Space'] },
+      { t: 'p', html: 'NoteFlow turns your notes into a living <strong>3D neural graph</strong>. The more order you give them, the more legible your brain becomes — clusters form, neurons connect, structure emerges.' },
+      { t: 'ul', items: ['Tidy groups → clean clusters', 'Linked notes → stronger connections', 'Each section is its own neuron'] },
+      { t: 'p', html: 'Organize on the left, watch it take shape in the <code>Brain</code> view.' },
+    ],
+  },
+  {
+    id: 'headless', tok: 'cyan', title: 'Drive it headless',
+    time: '20:48', date: 'Jun 21, 2026 · 20:48', mode: 'raw',
+    tags: [{ name: 'CLI', tok: 'cyan' }],
+    body: [
+      { t: 'p', html: 'No screen? No problem. Run NoteFlow on a <strong>Raspberry Pi</strong>, a VPS or a home server through its companion CLI.' },
+      { t: 'code', lines: ['$ ssh pi@home', '$ nf new "Backup plan" --group infra', '✓ created · synced'] },
+      { t: 'p', html: 'Full control over your notes and groups from any terminal — perfect for scripts and pipelines.' },
+    ],
+  },
+  {
+    id: 'import', tok: 'orange', title: 'Bring your notes along',
+    time: '18:33', date: 'Jun 17, 2026 · 18:33', mode: 'rich',
+    tags: [{ name: 'Import', tok: 'orange' }],
+    body: [
+      { t: 'p', html: 'Switching is painless. Import what you already wrote elsewhere — NoteFlow speaks the formats you already use.' },
       { t: 'check', items: [
-        { done: true, text: 'Global hotkey — window snaps to focus' },
-        { done: true, text: 'Cursor already blinking in the editor' },
-        { done: false, text: 'Back to what you were doing' },
+        { done: true, text: 'Notion exports' },
+        { done: true, text: 'Obsidian vaults' },
+        { done: true, text: 'Google Keep' },
+        { done: false, text: '…and plain Markdown from anywhere' },
       ] },
     ],
   },
   {
-    id: 'markdown', tok: 'accent-2', title: 'Plain Markdown',
-    time: '19:02', date: 'Jun 12, 2026 · 22:31', mode: 'rich',
-    tags: [{ name: 'Markdown', tok: 'accent-2' }],
+    id: 'ai', tok: 'accent', title: 'AI that knows you',
+    time: '16:05', date: 'Jun 14, 2026 · 16:05', mode: 'rich',
+    tags: [{ name: 'Agent', tok: 'accent' }],
     body: [
-      { t: 'p', html: 'Every note is a portable <code>.md</code> file in a folder <strong>you</strong> choose. No database, no lock-in — ever.' },
-      { t: 'code', lines: ['~/noteflow-notes/', '  ├─ ideas/rag-agents.md', '  └─ infra/deploy.md'] },
-      { t: 'p', html: 'Edit it in NoteFlow, in Vim, in anything. It is just text on your machine.' },
+      { t: 'p', html: 'The agent reads your <strong>profile</strong> and the full context of your notes before it answers — so its replies land closer to what you actually mean than any generic chat ever could.' },
+      { t: 'ul', items: ['Knows who you are and how you work', 'Sees every note as context', 'Answers in your language, on your terms'] },
     ],
   },
   {
-    id: 'sections', tok: 'purple', title: 'Sections, like tabs',
-    time: '16:47', date: 'Jun 09, 2026 · 14:02', mode: 'rich',
-    tags: [{ name: 'Note', tok: 'purple' }, { name: 'Tasks', tok: 'orange' }, { name: 'Questions', tok: 'cyan' }],
+    id: 'sticky', tok: 'pink', title: 'Pin it to your desktop',
+    time: '13:27', date: 'Jun 10, 2026 · 13:27', mode: 'rich',
+    tags: [{ name: 'Sticky', tok: 'pink' }],
     body: [
-      { t: 'tabs', tabs: [{ name: 'Note', tok: 'purple' }, { name: 'Tasks', tok: 'orange' }, { name: 'Questions', tok: 'cyan' }] },
-      { t: 'p', html: 'Split a single note into tabbed sections — keep the write-up, the to-dos and the open questions side by side.' },
-      { t: 'ul', items: ['Each section is its own tab', 'And its own neuron in the Brain', 'Switch with <code>Ctrl+T</code>'] },
-    ],
-  },
-  {
-    id: 'groups', tok: 'orange', title: 'Groups & folders',
-    time: '11:08', date: 'Jun 05, 2026 · 18:47', mode: 'rich',
-    tags: [{ name: 'Organize', tok: 'orange' }],
-    body: [
-      { t: 'groups', rows: [
-        { name: 'Infra', tok: 'accent', count: 12 },
-        { name: 'Research', tok: 'purple', count: 7 },
-        { name: 'Personal', tok: 'pink', count: 23 },
-      ] },
-      { t: 'p', html: 'Colour-coded groups with nested folders. <strong>Drag</strong> to reorder, <strong>star</strong> to pin a favorite to the top.' },
-    ],
-  },
-  {
-    id: 'security', tok: 'red', title: 'Lock or vanish',
-    time: '09:21', date: 'Jun 01, 2026 · 07:55', mode: 'rich',
-    tags: [{ name: 'Vault', tok: 'red' }],
-    body: [
-      { t: 'p', html: 'Wrap any note in <strong>AES-256</strong>, or make it a temporary note that self-destructs after 24 hours.' },
+      { t: 'p', html: 'Pop any note out as a <strong>sticky note</strong> that floats over your desktop — always in view while you work.' },
       { t: 'check', items: [
-        { done: true, text: '🔒 Encrypted — unlocks with your key' },
-        { done: true, text: '⏱ Expires in 24h · auto-deleted' },
+        { done: true, text: 'Stays on top, outside the main window' },
+        { done: true, text: 'Edits sync straight back to the note' },
       ] },
-      { t: 'kbd', keys: ['Ctrl', 'Shift', 'N'] },
     ],
   },
   {
-    id: 'cli', tok: 'cyan', title: 'Terminal & CLI',
-    time: '23:55', date: 'May 28, 2026 · 11:09', mode: 'raw',
-    tags: [{ name: 'Terminal', tok: 'cyan' }],
+    id: 'private', tok: 'red', title: 'Private by design',
+    time: '08:52', date: 'Jun 06, 2026 · 08:52', mode: 'rich',
+    tags: [{ name: 'Privacy', tok: 'red' }],
     body: [
-      { t: 'code', lines: ['$ nf new "Deploy checklist"', '✓ created · 1 section · infra', '$ nf ls --group infra'] },
-      { t: 'p', html: 'A full headless CLI for scripts and pipelines — or hit <code>Ctrl+P</code> to jump anywhere without leaving the keyboard.' },
+      { t: 'p', html: 'Your notes, your rules. Sync runs through a repo <strong>you</strong> own, and you can plug in <strong>local AI models</strong> so nothing ever leaves your machine.' },
+      { t: 'check', items: [
+        { done: true, text: 'Sync to a GitHub repo you control' },
+        { done: true, text: 'Run local LLMs — fully offline AI' },
+        { done: true, text: 'Your keys, your data, your disk' },
+      ] },
     ],
   },
 ];
@@ -410,7 +409,7 @@ const firstFeature = noteFeatures[0];
                 <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint);">Try asking</div>
                 <button data-ask="0" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">How do RAG and agents connect in my notes?</button>
                 <button data-ask="1" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">Summarize what I know about the frontend.</button>
-                <button data-ask="2" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">What should I write about next?</button>
+                <button data-ask="2" class="nf-suggest" style="text-align:left;font-size:16px;color:var(--ink);background:var(--card-2);border:1px solid var(--line);border-radius:5px;padding:10px 13px;cursor:pointer;">Organize my AI notes into a group.</button>
               </div>
             </div>
           </div>
@@ -802,10 +801,10 @@ const firstFeature = noteFeatures[0];
         citeLabels: ['React patterns', 'CSS architecture'],
       },
       {
-        a: 'Your “Random ideas” and “Newsletter ideas” both circle the “Blog: second brain” draft — that cluster is the densest unfinished thread in your brain. Start there.',
-        q: 'What should I write about next?',
-        cites: ['ideas', 'newsletter', 'blog-brain'],
-        citeLabels: ['Random ideas', 'Newsletter ideas', 'Blog: second brain'],
+        a: 'Done. I gathered your four loose AI notes — “RAG architectures”, “Agentic loops”, “Embeddings” and “LLM evaluation” — into a new “Research” group, and linked the two that kept referencing each other. Your brain just grew a cluster.',
+        q: 'Organize my AI notes into a group.',
+        cites: ['rag', 'agents', 'embeddings', 'eval'],
+        citeLabels: ['RAG architectures', 'Agentic loops', 'Embeddings', 'LLM evaluation'],
       },
     ];
 
@@ -1087,8 +1086,8 @@ const firstFeature = noteFeatures[0];
       const cardFor = (id: string) => cards.find((c) => c.dataset.panel === id) || null;
       // Token per feature → recolours the soft wash behind the floating card.
       const TOK: Record<string, string> = {
-        capture: 'accent', markdown: 'accent-2', sections: 'purple',
-        groups: 'orange', security: 'red', cli: 'cyan',
+        brain: 'purple', headless: 'cyan', import: 'orange',
+        ai: 'accent', sticky: 'pink', private: 'red',
       };
 
       let current = notes.find((n) => n.classList.contains('is-active'))?.dataset.note

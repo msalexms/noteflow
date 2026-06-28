@@ -11,7 +11,7 @@ export function EditorPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">Font size</p>
-          <p className="text-[10px] font-mono text-text-muted mt-0.5">Size of the text inside the editor</p>
+          <p className="text-[11px] font-mono text-text-muted mt-0.5">Size of the text inside the editor</p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
@@ -36,7 +36,7 @@ export function EditorPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">Editor font</p>
-          <p className="text-[10px] font-mono text-text-muted mt-0.5">Typeface used for note content</p>
+          <p className="text-[11px] font-mono text-text-muted mt-0.5">Typeface used for note content</p>
         </div>
         <button
           onClick={() => setFontFamily(fontFamily === 'mono' ? 'inter' : 'mono')}
@@ -52,7 +52,7 @@ export function EditorPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">Content width</p>
-          <p className="text-[10px] font-mono text-text-muted mt-0.5">Constrain editor content to a readable column</p>
+          <p className="text-[11px] font-mono text-text-muted mt-0.5">Constrain editor content to a readable column</p>
         </div>
         <button
           onClick={() => setReadableWidth(!readableWidth)}

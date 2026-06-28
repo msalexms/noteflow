@@ -26,6 +26,7 @@ function detectWebGL(): boolean {
 export function BrainView({ onClose }: { onClose: () => void }) {
   const enabled = useAiStore((s) => s.enabled)
   const indexState = useAiStore((s) => s.indexState)
+  const stale = useAiStore((s) => s.stale)
   const progress = useAiStore((s) => s.progress)
   const fetchGraphEdges = useAiStore((s) => s.fetchGraphEdges)
   const setEnabled = useAiStore((s) => s.setEnabled)
@@ -221,10 +222,14 @@ export function BrainView({ onClose }: { onClose: () => void }) {
               <button
                 onClick={() => reindexAll()}
                 disabled={indexing}
-                title={indexing ? 'Indexing in progress…' : 'Reindex all notes'}
-                className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={indexing ? 'Indexing in progress…' : stale ? 'Notes changed — reindex to update results' : 'Reindex all notes'}
+                className="relative flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw size={12} className={indexing ? 'animate-spin' : ''} />
+                {/* Stale dot: notes changed but the index hasn't caught up yet. */}
+                {stale && !indexing && (
+                  <span className="pointer-events-none absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />
+                )}
               </button>
             )}
             <button

@@ -7,9 +7,11 @@ import Bold from '@tiptap/extension-bold'
 import Italic from '@tiptap/extension-italic'
 import Underline from '@tiptap/extension-underline'
 import Strike from '@tiptap/extension-strike'
+import Highlight from '@tiptap/extension-highlight'
 import Code from '@tiptap/extension-code'
 import { CodeBlockWithCopy } from './CodeBlockWithCopy'
 import Heading from '@tiptap/extension-heading'
+import Blockquote from '@tiptap/extension-blockquote'
 import BulletList from '@tiptap/extension-bullet-list'
 import OrderedList from '@tiptap/extension-ordered-list'
 import ListItem from '@tiptap/extension-list-item'
@@ -142,9 +144,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       Italic,
       Underline,
       Strike,
+      // `==text==` input rule → <mark>. multicolor off: a single accent-coloured
+      // highlight (styled via CSS, no background) — see index.css `.ProseMirror mark`.
+      Highlight,
       Code,
       CodeBlockWithCopy.configure({ lowlight }),
       Heading.configure({ levels: [1, 2, 3] }),
+      // `> ` input rule → blockquote (VSCode/markdown-style citation). Round-trips
+      // to markdown via markdownHtml.ts; styled in index.css `.ProseMirror blockquote`.
+      Blockquote,
       BulletList,
       OrderedList,
       ListItem,

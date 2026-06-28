@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo, startTransition } from 'react'
 import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
+import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
 import { useAiStore } from './stores/aiStore'
 import { TitleBar } from './components/TitleBar'
@@ -9,6 +10,7 @@ import { NoteEditor } from './components/Editor/NoteEditor'
 import { GroupOverview } from './components/GroupOverview/GroupOverview'
 import { NoteOverview } from './components/NoteOverview/NoteOverview'
 import { BrainView } from './components/Brain/BrainView'
+import { AllContentOverview } from './components/AllContentOverview/AllContentOverview'
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
@@ -30,15 +32,17 @@ export function App() {
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const openNoteIds = useNotesStore((s) => s.openNoteIds)
   const groupViewId = useNotesStore((s) => s.groupViewId)
-  const setGroupView = useNotesStore((s) => s.setGroupView)
   const noteViewId = useNotesStore((s) => s.noteViewId)
-  const setNoteView = useNotesStore((s) => s.setNoteView)
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
   const setBrainView = useNotesStore((s) => s.setBrainView)
+  const allViewOpen = useNotesStore((s) => s.allViewOpen)
+  const setAllView = useNotesStore((s) => s.setAllView)
+  const closeFullView = useNotesStore((s) => s.closeFullView)
   const closeOpenNote = useNotesStore((s) => s.closeOpenNote)
   const openNoteInSplit = useNotesStore((s) => s.openNoteInSplit)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
   const loadGroups = useGroupsStore((s) => s.loadGroups)
+  const loadTemplates = useTemplatesStore((s) => s.loadTemplates)
   const loadSectionTagColors = useSectionTagColorsStore((s) => s.loadSectionTagColors)
 
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
@@ -71,8 +75,9 @@ export function App() {
   useEffect(() => {
     loadNotes()
     loadGroups()
+    loadTemplates()
     loadSectionTagColors()
-  }, [loadNotes, loadGroups, loadSectionTagColors])
+  }, [loadNotes, loadGroups, loadTemplates, loadSectionTagColors])
 
   // ── AI / semantic index: load settings + subscribe to index progress/state ──
   useEffect(() => {
@@ -173,6 +178,7 @@ export function App() {
       } else {
         loadNotes()
         loadGroups()
+        loadTemplates()
         loadSectionTagColors()
       }
     })
@@ -181,7 +187,7 @@ export function App() {
       unbindNew()
       unbindUpdate()
     }
-  }, [createNote, loadNotes, loadGroups, loadSectionTagColors])
+  }, [createNote, loadNotes, loadGroups, loadTemplates, loadSectionTagColors])
 
   // ── Resize drag handlers ──────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -502,12 +508,14 @@ export function App() {
           onDragLeave={handleEditorDragLeave}
           onDrop={handleEditorDrop}
         >
-          {brainViewOpen ? (
+          {allViewOpen ? (
+            <AllContentOverview onClose={() => setAllView(false)} />
+          ) : brainViewOpen ? (
             <BrainView onClose={() => setBrainView(false)} />
           ) : groupViewId ? (
-            <GroupOverview groupId={groupViewId} onClose={() => setGroupView(null)} />
+            <GroupOverview groupId={groupViewId} onClose={() => closeFullView()} />
           ) : noteViewId ? (
-            <NoteOverview noteId={noteViewId} onClose={() => setNoteView(null)} />
+            <NoteOverview key={noteViewId} noteId={noteViewId} onClose={() => closeFullView()} />
           ) : isLoading && notes.length === 0 ? (
             // Only show the full-screen spinner on the very first load (nothing to
             // show yet). A background reload triggered by sync keeps the previous

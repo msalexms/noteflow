@@ -52,7 +52,7 @@ export function AboutPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">NoteFlow</p>
-          <p className="text-[10px] font-mono text-text-muted mt-0.5">Fast notes for software engineers</p>
+          <p className="text-[11px] font-mono text-text-muted mt-0.5">Fast notes for software engineers</p>
         </div>
         <span className="text-xs font-mono text-text-muted tabular-nums flex-shrink-0">
           {version ? `v${version}` : '…'}
@@ -61,7 +61,7 @@ export function AboutPanel() {
 
       {/* Updates */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Updates</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Updates</div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleCheck}
@@ -104,7 +104,7 @@ export function AboutPanel() {
 
       {/* Links */}
       <section>
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Links</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Links</div>
         <button
           onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
           className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"

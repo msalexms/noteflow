@@ -34,6 +34,15 @@ export interface NoteGroup {
   archived?: boolean // present iff group is archived (hidden unless "Show archived")
 }
 
+// A reusable note template (predefined title + sections). Stored in templates.json (synced).
+export interface NoteTemplate {
+  id: string               // nanoid(8)
+  name: string             // template display label (shown in Settings)
+  title: string            // default title for notes created from it
+  sections: NoteSection[]  // section name + content; ids regenerated on instantiation
+  createdAt: string        // ISO timestamp
+}
+
 // A subfolder inside a group (single nesting level: group → folder → note)
 export interface NoteFolder {
   id: string        // nanoid(8)
@@ -291,6 +300,8 @@ declare global {
       setSectionTagColors: (colors: Record<string, GroupColor>) => Promise<void>
       getNoteOrder: () => Promise<Record<string, string[]>>
       setNoteOrder: (order: Record<string, string[]>) => Promise<void>
+      getTemplates: () => Promise<NoteTemplate[]>
+      setTemplates: (templates: NoteTemplate[]) => Promise<void>
       getAppVersion: () => Promise<string>
       checkUpdate: () => Promise<{ hasUpdate: boolean; latestVersion?: string; downloadUrl?: string }>
       openUrl: (url: string) => Promise<void>

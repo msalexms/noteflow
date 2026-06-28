@@ -32,9 +32,8 @@ archivos `.md` locales, con sync privado opcional a GitHub y un CLI companion pa
 ┌─ TitleBar (32px) ──────────────────────────────────────────────────┐
 │  NOTEFLOW  [🧠 brain] [⬇ update] [☁ sync]        [⚙ settings] [─ □ ×] │
 ├─ Sidebar (180–480px, redimensionable) ──┬─ Editor area ─────────────┤
-│  [🔍 Search...        ] [📅]            │  [Tabs sección] [⚙]        │
-│  [All] [Today] [Week] [Month]           │  Título de nota            │
-│  (📅 → calendario para elegir día)      │  tags de nota              │
+│  [🔍 Search...        ] [⮜]            │  [Tabs sección] [⚙]        │
+│  [▦ All content]                        │  Título de nota            │
 │  ─ Tags ─────────────────────           │  19/03/2026 · 21:00        │
 │  [tag1] [tag2] [tag3] ...               │  ──────────────────────── │
 │  [+ New note]  [+ New group]            │                            │
@@ -61,9 +60,9 @@ Iconos del TitleBar:
 - **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
   + panel derecho. Secciones: **Appearance** (tema/fuente/acento/headings/escala), **Editor**
-  (fuente/tamaño/ancho), **Startup** (autostart + stickies), **Sync** (GitHub), **Data**
-  (export/import + carpeta de notas), **AI**, **Keyboard shortcuts** y **About** (versión +
-  updates + repo). Sustituye al antiguo menú desplegable y al botón de paleta (Appearance está
+  (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Startup** (autostart + stickies),
+  **Sync** (GitHub), **Data** (export/import + carpeta de notas), **AI**, **Keyboard shortcuts** y
+  **About** (versión + updates + repo). Sustituye al antiguo menú desplegable y al botón de paleta (Appearance está
   ahora dentro). Tamaño fijo proporcional a la ventana de la app.
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
 
@@ -212,8 +211,10 @@ vuelve al editor.
 sección en el editor).
 
 **Disposición** (misma estética mono-minimalista que la group overview):
-- Cabecera: candado si está cifrada + título de la nota + estrella de favorito (toggle) + contador
-  (`N sections · fecha`) + botón **"Add section"** + `✕`.
+- Cabecera: candado si está cifrada + **título de la nota editable inline** (click o lápiz al hacer
+  hover → input; commit en blur/Enter, `Esc` revierte; no editable si está bloqueada) + estrella de
+  favorito (toggle) + contador (`N sections · fecha`) + botón **"Add section"** + botón **borrar nota**
+  (papelera roja, con confirmación) + `✕`.
 - Cuadrícula de **tarjetas de ancho fijo**, una por sección.
 
 **Tarjeta de sección** — replica lo que verías al pinchar esa sección (de las pestañas hacia abajo):
@@ -228,9 +229,57 @@ sección en el editor).
 **Acciones:**
 - **Abrir sección** → click en la tarjeta (te lleva directo a esa sección en el editor).
 - **Add section** → crea una sección nueva y **navega al editor en ella** para escribir.
+- **Renombrar la nota** → click en el título de la cabecera (o el lápiz al hacer hover).
+- **Borrar la nota** → botón de papelera en la cabecera (con confirmación).
 - **Favorito** → toggle de la estrella en la cabecera.
+- **Selección múltiple de secciones** (igual que en la group overview): un **checkbox** aparece en la
+  esquina superior derecha de cada tarjeta al hacer hover; **click** en el checkbox lo marca,
+  **Ctrl/Cmd-click** sobre la tarjeta togglea, **Shift-click** selecciona el rango. Con ≥1 marcada
+  aparece una **barra de acciones flotante** anclada abajo: **Hide from AI / Show to AI** (oculta o
+  vuelve a indexar las secciones para la IA; solo en notas no cifradas), **Delete** (borra las
+  seleccionadas con confirmación — deshabilitado si están todas marcadas, para no dejar la nota
+  vacía) y **Clear**. `Esc` limpia la selección antes de cerrar la vista.
 - Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin previews) hasta desbloquear
   en el editor.
+
+---
+
+## Vista "All content" (índice global)
+
+Vista a pantalla completa (sustituye el editor; el sidebar sigue visible) que muestra **todo el
+contenido** del usuario de un vistazo, a modo de índice. Hermana de la vista de grupo y la de nota.
+
+**Cómo entrar:** botón **"View all content"** (icono de cuadrícula) en la cabecera del sidebar, justo
+debajo de "+ New note".
+
+**Disposición** (misma estética que la vista de grupo: cabecera fija + área scroll + tarjetas en grid):
+- **Favorites** — las notas marcadas como favoritas, como tarjetas de nota (mismas que la vista de grupo:
+  título + tags de sección clicables + fecha).
+- **Groups** — cada grupo como un **tile compacto** (barra de color + icono de carpeta tintado + nombre +
+  nº de notas). Los tiles son **desplegables en acordeón**: click en un tile lo **expande inline** (chevron
+  que gira) y abre, a lo ancho de la rejilla, un panel con sus notas sueltas y sus carpetas (cabecera de
+  carpeta colapsable + notas dentro), igual que el sidebar. Para abrir la group overview completa del grupo
+  está el botón **"Open group view"** (icono de maximizar) que aparece al pasar el ratón por el tile. La
+  expansión es **local a esta vista y arranca colapsada** (no se recuerda entre sesiones). Pueden expandirse
+  varios grupos a la vez.
+- **Notes** — las notas sueltas (sin grupo), como tarjetas de nota.
+- Si no hay nada, un **empty state** centrado.
+
+**Búsqueda:** input en la cabecera (placeholder "Search...", local a esta vista — no afecta al filtro del
+sidebar). Filtra favoritos y notas sueltas; un grupo se muestra si su nombre coincide o si contiene alguna
+nota que coincida. Con una búsqueda activa, los grupos (y sus carpetas) se **despliegan automáticamente** y
+solo muestran dentro las notas que coinciden, para revelar los resultados. Acepta el filtro `#sección` igual
+que la búsqueda del sidebar.
+
+**Filtro de fecha/calendario:** toolbar fija justo debajo de la cabecera (botones segmentados
+`All/Today/Week/Month` + toggle de **calendario** desplegable con marcadores de actividad por día). Vive
+**aquí** (antes estaba en el sidebar). Filtra por `updated` (o, con un día elegido, por creadas/modificadas
+ese día) y se combina con la búsqueda; afecta a las tres bandas (Favorites, Groups y su contenido, Notes).
+Ver "Filtros por fecha" más abajo.
+
+**Volver (back inteligente):** si entras a un grupo o a una nota **desde** esta vista, el botón cerrar/`Esc`
+de esa group/note overview te devuelve a "All content" (no al editor). Cerrar "All content" con la X o `Esc`
+vuelve al editor. Seleccionar cualquier nota (aquí o en el sidebar) también vuelve al editor.
 
 ---
 
@@ -242,8 +291,8 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 [Note ×] [Tasks ×] [Questions ×] [+]                    [⊞] [⭐] [⋯]
 ```
 
-(`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar, sticky,
-**ocultar a la IA**, archivar, cifrar, borrar nota)
+(`⊞` = note overview · `⭐` = favorito · `⋯` = menú de sección: raw/editor, copiar,
+**guardar como plantilla**, sticky, **ocultar a la IA**, archivar, cifrar, borrar nota)
 
 - **Agregar**: `Ctrl+T` o botón `+`.
 - **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
@@ -318,12 +367,14 @@ sin navegar.
 | Cursiva | `*texto*` | Ctrl+I |
 | Subrayado | — | Ctrl+U |
 | Tachado | `~~texto~~` | — |
+| Resaltado | `==texto==` | Toolbar |
 | Código inline | `` `code` `` | Ctrl+E |
 | Bloque de código | ` ```lang ` | Ctrl+Shift+B |
 | Heading H1–H3 | `#`, `##`, `###` | Toolbar |
 | Lista viñetas | `- item` | Toolbar |
 | Lista numerada | `1. item` | Toolbar |
 | Lista de tareas | `- [ ] tarea` | Toolbar |
+| Cita / Blockquote | `> texto` | Toolbar |
 | Tabla | — | Toolbar (menú contextual para filas/columnas) |
 | Link | `[texto](url)` | Toolbar |
 | Imagen | `![alt](src)` | Drag & drop / Paste |
@@ -533,13 +584,17 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   propia paleta y Enter abre el cerebro + chat y la envía directamente (en un chat nuevo). Si no
   hay proveedor LLM configurado, la pregunta queda en cola y se envía en cuanto configuras uno.
 
-### Filtros por fecha
+### Filtros por fecha (en la vista "All content")
 ```
 [All] [Today] [Week] [Month]   +   [📅 calendario]
 ```
-- Botones rápidos por fecha de modificación.
+- **Ubicación:** este filtro vive en la **vista "All content"** (toolbar fija bajo la cabecera), no
+  en el sidebar. El sidebar ya **no** tiene filtro de fecha (solo búsqueda, tags y archived).
+- Botones rápidos por fecha de modificación (`updated`).
 - El icono de calendario despliega un mes navegable para filtrar por un **día concreto** (marca
-  los días con actividad).
+  los días con actividad: punto verde = creadas, punto neutro = modificadas; elegir día filtra notas
+  creadas o modificadas ese día). Estado `filterDate` en el store + estado local del día/mes/expandido.
+- Se **combina** con la búsqueda local de la vista y afecta a Favorites, Groups (y su contenido) y Notes.
 
 ### Filtros por tags
 - Click en un tag del sidebar → filtra notas con ese tag. Click de nuevo → limpia.
@@ -641,6 +696,22 @@ La app vive en el system tray. Al cerrar con `×` se oculta (no termina).
 
 **Atajo global del sistema** (funciona aunque la ventana esté oculta):
 - `Ctrl+Shift+Space` → muestra/oculta NoteFlow.
+
+---
+
+## Plantillas de nota (Note Templates)
+
+Notas reutilizables con título + secciones predefinidas. Se guardan en `templates.json` (en el dir
+de notas, **se sincroniza** con GitHub como el resto de metadatos).
+
+- **Crear una plantilla:** menú `⋯` del editor → **Save as template**. Captura el título y las
+  secciones de la nota actual; un pequeño modal pide el nombre (default = título de la nota o
+  `Untitled template`). Oculto si la nota está **cifrada y bloqueada** (sin sesión desbloqueada).
+- **Usar una plantilla:** Settings → **Templates** lista las plantillas guardadas. Cada una tiene
+  **New note** (crea una nota a partir de la plantilla — regenera ids de sección frescos, navega a la
+  nota y cierra Ajustes), **rename** (botón ✎ o doble-click sobre el nombre) y **delete** (con
+  confirmación). Si la plantilla no tiene secciones, la nota nace con una sección `Notes` vacía.
+- Estado vacío: mensaje invitando a usar el menú `⋯` → Save as template.
 
 ---
 

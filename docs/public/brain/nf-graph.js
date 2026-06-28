@@ -167,9 +167,19 @@
     if (parts.length >= 3 && parts.every((n) => !Number.isNaN(n))) return [parts[0], parts[1], parts[2]];
     return [128, 128, 128];
   }
+  // The graph tags groups/notes with the site accent tokens (--accent, --purple, …), but the
+  // wireframe should glow in the saturated app palette. Remap those tokens to the --brain-*
+  // synapse colours; everything else (e.g. --text for favourites) reads through unchanged.
+  const BRAIN_ACCENTS = {
+    '--accent': '--brain-accent', '--accent-2': '--brain-accent-2', '--purple': '--brain-purple',
+    '--orange': '--brain-orange', '--cyan': '--brain-cyan', '--pink': '--brain-pink', '--red': '--brain-red',
+  };
   function readBrainPalette() {
     const cache = new Map();
-    const color = (cssVar) => { let c = cache.get(cssVar); if (!c) { c = readVar(cssVar); cache.set(cssVar, c); } return c; };
+    const color = (cssVar) => {
+      const v = BRAIN_ACCENTS[cssVar] || cssVar;
+      let c = cache.get(v); if (!c) { c = readVar(v); cache.set(v, c); } return c;
+    };
     return {
       bg: readVar('--brain-bg'),
       text: readVar('--brain-text'),

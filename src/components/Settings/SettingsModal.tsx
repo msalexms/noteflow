@@ -3,6 +3,7 @@ import {
   Database,
   Info,
   Keyboard,
+  LayoutTemplate,
   Monitor,
   Palette,
   Pencil,
@@ -19,10 +20,12 @@ import { DataPanel } from './DataPanel'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { AboutPanel } from './AboutPanel'
 import { AiPanel } from './AiPanel'
+import { TemplatesPanel } from './TemplatesPanel'
 
 export type SettingsSection =
   | 'appearance'
   | 'editor'
+  | 'templates'
   | 'startup'
   | 'sync'
   | 'data'
@@ -39,6 +42,7 @@ interface NavEntry {
 const NAV: NavEntry[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'editor', label: 'Editor', icon: Pencil },
+  { id: 'templates', label: 'Templates', icon: LayoutTemplate },
   { id: 'startup', label: 'Startup', icon: Monitor },
   { id: 'sync', label: 'Sync', icon: RefreshCw },
   { id: 'data', label: 'Data', icon: Database },
@@ -120,6 +124,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
             <div className="flex-1 overflow-y-auto px-5 pb-5">
               {section === 'appearance' && <AppearancePanel />}
               {section === 'editor' && <EditorPanel />}
+              {section === 'templates' && <TemplatesPanel onClose={onClose} />}
               {section === 'startup' && <StartupPanel />}
               {section === 'sync' && <SyncPanel />}
               {section === 'data' && <DataPanel onOpenExportImport={onOpenExportImport} />}

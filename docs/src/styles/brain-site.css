@@ -6,6 +6,10 @@
 :root {
   --accent: 96 166 150; --accent-2: 122 176 122; --purple: 158 138 222;
   --orange: 212 156 92; --cyan: 116 192 200; --pink: 206 132 166; --red: 210 120 110;
+  /* Saturated synapse palette for the wireframe + background mesh — the real NoteFlow
+     app colours (mirrors the "What is NoteFlow" note widget) so the brain pops. */
+  --brain-accent: 30 144 255; --brain-accent-2: 16 224 176; --brain-purple: 200 96 240;
+  --brain-orange: 255 112 16; --brain-cyan: 32 200 255; --brain-pink: 255 48 152; --brain-red: 255 56 56;
   --text: 236 234 224;
   --brain-bg: 12 12 17; --brain-text: 236 234 224;
   --bg: #0c0c11; --bg-soft: #101017; --card: #15151c; --card-2: #1b1b23;
@@ -20,6 +24,9 @@
 
 [data-theme="light"] {
   --text: 46 40 30; --brain-bg: 232 224 205; --brain-text: 46 40 30;
+  /* Arctic Day app palette — deep enough to read as wires on the parchment background. */
+  --brain-accent: 14 78 168; --brain-accent-2: 8 120 95; --brain-purple: 112 36 150;
+  --brain-orange: 156 58 2; --brain-cyan: 10 110 152; --brain-pink: 156 18 96; --brain-red: 184 28 36;
   --bg: #E7DFCC; --bg-soft: #EFE8D8; --card: #F5EFE0; --card-2: #EBE3D0;
   --ink: #2a2620; --ink-strong: #15110a; --ink-dim: #6c6656; --ink-faint: #968f7d;
   --line: rgba(40, 34, 24, .13); --line-2: rgba(40, 34, 24, .22);

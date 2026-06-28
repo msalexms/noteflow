@@ -85,6 +85,17 @@ export function htmlFromMarkdown(md: string): string {
       continue
     }
 
+    // ── Blockquote (`> …`) ────────────────────────────────────────────────────
+    // A block is a blockquote when its first meaningful line starts with `>`.
+    // Lists are checked above, so a `> ` prefix can't be confused with `-`/`*`/`+`
+    // bullets or `\d+.` ordered items (those never begin with `>`).
+    const isBlockquote = !!firstMeaningfulLine && /^\s*>\s?/.test(firstMeaningfulLine)
+
+    if (isBlockquote) {
+      htmlBlocks.push(mdBlockquoteToHtml(lines))
+      continue
+    }
+
     // ── Pipe table ──────────────────────────────────────────────────────────
     // Strict detection: line 1 must contain a |, line 2 must be a separator
     // row with only |, :, -, spaces; every cell ≥3 dashes; ≥2 cells. This
@@ -149,6 +160,20 @@ function blockElToMd(el: Element): string {
     return `\`\`\`${lang}\n${code.trimEnd()}\n\`\`\`\n\n`
   }
   if (tag === 'table') return tableElToMd(el) + '\n'
+  if (tag === 'blockquote') {
+    // Convert each child block to markdown, then prefix every line with `> `
+    // (blank lines between paragraphs become a bare `>`).
+    let inner = ''
+    for (const c of el.childNodes) {
+      if (c.nodeType === Node.ELEMENT_NODE) inner += blockElToMd(c as Element)
+    }
+    const quoted = inner
+      .replace(/\n+$/, '')
+      .split('\n')
+      .map(line => (line ? `> ${line}` : '>'))
+      .join('\n')
+    return `${quoted}\n\n`
+  }
   if (tag === 'ul' || tag === 'ol') return listElToMd(el, 0) + '\n'
   let out = ''
   for (const c of el.childNodes) {
@@ -169,6 +194,7 @@ function inlineElToMd(el: Element): string {
       if (tag === 'strong' || tag === 'b') result += `**${inlineElToMd(c)}**`
       else if (tag === 'em' || tag === 'i') result += `*${inlineElToMd(c)}*`
       else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
+      else if (tag === 'mark') result += `==${inlineElToMd(c)}==`
       else if (tag === 'code') result += `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\``
       else if (tag === 'br') result += '\n'
       else if (tag === 'img') {
@@ -271,6 +297,9 @@ function inlineToHtml(s: string): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/~~(.+?)~~/g, '<s>$1</s>')
+    // Highlight: `==text==` → <mark>. Non-greedy + global so multiple highlights
+    // on one line round-trip. `==` doesn't collide with **/*/__/~~ markers.
+    .replace(/==(.+?)==/g, '<mark>$1</mark>')
 }
 
 // ── Nested markdown list parsing (htmlFromMarkdown helpers) ──────────────────
@@ -384,6 +413,33 @@ function renderMdListItems(items: MdListItem[]): string {
 
 function mdListBlockToHtml(lines: string[]): string {
   return renderMdListItems(parseMdListItems(lines))
+}
+
+// ── Blockquote parsing (htmlFromMarkdown helper) ─────────────────────────────
+
+/**
+ * Render a `> …` markdown block as `<blockquote><p>…</p>…</blockquote>`.
+ * Each line's `>` prefix (with its optional single space) is stripped; runs of
+ * consecutive non-empty lines become one `<p>` (soft breaks as `<br>`), and an
+ * empty quote line (`>` alone) starts a new paragraph.
+ */
+function mdBlockquoteToHtml(lines: string[]): string {
+  const inner = lines.map(l => l.replace(/^\s*>\s?/, ''))
+  const paragraphs: string[][] = []
+  let current: string[] = []
+  for (const line of inner) {
+    if (line.trim() === '') {
+      if (current.length) { paragraphs.push(current); current = [] }
+    } else {
+      current.push(line)
+    }
+  }
+  if (current.length) paragraphs.push(current)
+  if (paragraphs.length === 0) return '<blockquote><p></p></blockquote>'
+  const html = paragraphs
+    .map(para => `<p>${para.map(inlineToHtml).join('<br>')}</p>`)
+    .join('')
+  return `<blockquote>${html}</blockquote>`
 }
 
 // ── Pipe table helpers ───────────────────────────────────────────────────────

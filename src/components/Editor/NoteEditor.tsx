@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNotesStore } from '../../stores/notesStore'
+import { useTemplatesStore } from '../../stores/templatesStore'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Editor } from './Editor'
@@ -10,7 +11,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
@@ -104,6 +105,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const [sectionUndo, setSectionUndo] = useState<SectionUndoState | null>(null)
   const [sectionMenuOpen, setSectionMenuOpen] = useState(false)
   const [encryptModalMode, setEncryptModalMode] = useState<'encrypt' | 'remove' | null>(null)
+  // null = modal closed; a string = the draft name being edited before saving the template
+  const [templateNameDraft, setTemplateNameDraft] = useState<string | null>(null)
 
   const titleRef = useRef<HTMLInputElement>(null)
   const pendingSectionRef = useRef<string | null>(null)
@@ -519,6 +522,18 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     navigator.clipboard.writeText(text)
   }
 
+  // Save the current note (title + sections) as a reusable template, then close the modal.
+  const saveAsTemplate = async () => {
+    const name = (templateNameDraft ?? '').trim()
+    if (!name) return
+    await useTemplatesStore.getState().createTemplate({
+      name,
+      title: note.title,
+      sections: note.sections.map((s) => ({ ...s })),
+    })
+    setTemplateNameDraft(null)
+  }
+
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedSectionId(id)
     e.dataTransfer.effectAllowed = 'move'
@@ -894,6 +909,56 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         />
       )}
 
+      {templateNameDraft !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setTemplateNameDraft(null)}
+        >
+          <div
+            className="w-80 bg-surface-1 border border-border rounded-lg shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 px-4 pt-4 pb-3 border-b border-border">
+              <LayoutTemplate size={15} className="text-text flex-shrink-0" />
+              <span className="text-sm font-mono font-semibold text-text">Save as template</span>
+            </div>
+            <div className="px-4 py-3">
+              <label className="text-[10px] font-mono text-text-muted uppercase tracking-widest">Template name</label>
+              <input
+                autoFocus
+                value={templateNameDraft}
+                onChange={(e) => setTemplateNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === 'Enter') { e.preventDefault(); void saveAsTemplate() }
+                  if (e.key === 'Escape') { e.preventDefault(); setTemplateNameDraft(null) }
+                }}
+                placeholder="Untitled template"
+                className="mt-1.5 w-full bg-surface-2 border border-border rounded px-2.5 py-1.5
+                           text-xs font-mono text-text focus:outline-none focus:border-text/30"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 px-4 pb-4">
+              <button
+                onClick={() => setTemplateNameDraft(null)}
+                className="px-3 py-1.5 rounded text-xs font-mono text-text-muted
+                           border border-border hover:border-text/25 hover:text-text transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveAsTemplate()}
+                disabled={!templateNameDraft.trim()}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20
+                           hover:bg-surface-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className="flex flex-col h-full"
         onMouseDownCapture={() => {
@@ -1084,6 +1149,19 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     <Copy size={13} />
                     Copy section text
                   </button>
+                  {!(note.encryption && !sessionPasswords[note.id]) && (
+                    <button
+                      onClick={() => {
+                        setSectionMenuOpen(false)
+                        setTemplateNameDraft(note.title || 'Untitled template')
+                      }}
+                      title="Save this note (title + sections) as a reusable template"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <LayoutTemplate size={13} />
+                      Save as template
+                    </button>
+                  )}
                   <button
                     onClick={() => { handleToggleAiHidden(); setSectionMenuOpen(false) }}
                     title={activeSection?.aiHidden

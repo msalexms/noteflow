@@ -53,6 +53,7 @@ noteflow/
 │   ├── stores/
 │   │   ├── notesStore.ts             # Estado de notas (Zustand) — loadNotes (batch), CRUD
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
+│   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── themeStore.ts             # Tema — lee/escribe settings.json vía IPC (sendSync)
 │   │   ├── editorSettingsStore.ts    # Tamaño de fuente del editor (localStorage)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
@@ -78,12 +79,16 @@ noteflow/
 │   │   │   ├── NoteFolderHeader.tsx     # Cabecera colapsable de carpeta (dentro de grupo)
 │   │   │   ├── SectionTabsRow.tsx       # Fila de tags de secciones en la tarjeta de nota
 │   │   │   └── useSidebarGroups.ts      # Hook: agrupa/ordena notas por grupo→carpeta
+│   │   ├── OverviewNoteCard.tsx         # Tarjeta de nota compartida (group + all-content) + formatCardDate
 │   │   ├── GroupOverview/
 │   │   │   └── GroupOverview.tsx        # Vista de grupo (sustituye editor): bandas por carpeta
 │   │   │                                #   + "No folder" + "Archived"; reutiliza useSidebarGroups
 │   │   ├── NoteOverview/
 │   │   │   └── NoteOverview.tsx         # Vista de nota (sustituye editor): una tarjeta por sección,
 │   │   │                                #   mini-mock del editor (envuelve SectionPreviewCard)
+│   │   ├── AllContentOverview/
+│   │   │   └── AllContentOverview.tsx   # Vista "All content" (sustituye editor): índice global —
+│   │   │                                #   Favorites + tiles de grupo + notas sueltas; back inteligente
 │   │   ├── SectionPreview/              # Previsualización de sección reutilizable
 │   │   │   ├── SectionPreviewCard.tsx   #   Tarjeta mini-mock pura (la usan NoteOverview, hover y cerebro)
 │   │   │   ├── HoverPreviewProvider.tsx #   Provider + popover flotante de hover (sidebar/grupos/editor/IA);
@@ -183,6 +188,7 @@ Renderer (React)
 | `folders:get` / `folders:set` | handle | Carpetas → `folders.json` (en dir de notas, se sincroniza) |
 | `section-colors:get` / `section-colors:set` | handle | Color por sección → `section-colors.json` (saneado, se sincroniza) |
 | `note-order:get` / `note-order:set` | handle | Orden manual de notas → `note-order.json` (en dir de notas, se sincroniza) |
+| `templates:get` / `templates:set` | handle | Plantillas de nota → `templates.json` (en dir de notas, se sincroniza) |
 | `notes:export` | handle | Exporta a `.noteflow`/`.json`/`.md`/`.txt` (diálogo de guardado) |
 | `notes:parse-import-file` | handle | Abre y parsea un archivo de importación (incluye `.md`/`.txt`) |
 | `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): abre diálogo carpeta/`.zip`, parsea con `electron/importers/` y devuelve un intermedio normalizado `ExternalNote[]` (`{title,format,body,tags?,created?,archived?,favorited?,relPath[]}`); NO serializa ni crea grupos (eso es del renderer) |
@@ -247,6 +253,7 @@ Contenido del dir de notas:
 - `folders.json` — definición de carpetas (subcarpetas de grupos).
 - `section-colors.json` — mapa `nombreSección(normalizado) → color CSS var`.
 - `note-order.json` — orden manual de notas por contexto (`Record<contextKey, string[]>`); contextKey: `'ungrouped'`, `'group:<id>'`, `'folder:<id>'`, `'favorites'`. Gestionado desde `groupsStore` (`noteOrder`, `setContextNoteOrder`).
+- `templates.json` — array de plantillas de nota (`NoteTemplate[]`: `{id,name,title,sections,createdAt}`). Gestionado desde `templatesStore`. Crear nota desde plantilla regenera ids de sección y usa `createPopulatedNote`; "Save as template" en el menú ⋯ del editor captura título + secciones (oculto si la nota está cifrada y bloqueada). UI en Settings → Templates.
 
 > El dir es configurable desde Settings → "Choose notes directory".
 

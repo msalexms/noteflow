@@ -27,7 +27,7 @@ La **documentación del proyecto** vive en `.claude/context/*.md` (abajo el mapa
 | Formato v2 (carpeta por nota) · migración v1→v2 · cifrado | `.claude/context/note-format.md` | Tocar el formato de nota (3 espejos), migración o cifrado |
 | GitHub Sync (push/pull, cola de mutaciones, invariantes) | `.claude/context/sync.md` | Tocar la sincronización con GitHub |
 | "El Cerebro": índice semántico · vista cerebro · LLM/chat agéntico · segundo cerebro · secciones ocultas a la IA | `.claude/context/ai.md` | Tocar embeddings, grafo, chat, tools del agente o perfil |
-| Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, sticky, alarmas, auto-update, macOS, CLI, temas) | `.claude/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
+| Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas) | `.claude/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
 | Release · electron-builder · CI/CD · artefactos · landing · tareas frecuentes | `.claude/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
 | Funcionalidades · UI · UX · atajos (producto/usuario) | skill `noteflow-features` | Discutir/diseñar features o entender la app desde el usuario |
 

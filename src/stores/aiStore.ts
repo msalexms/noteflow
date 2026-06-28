@@ -13,6 +13,9 @@ interface AiState {
   enabled: boolean
   modelId: string
   indexState: IndexState
+  // Notes changed since the last completed index — results are out of date until the
+  // incremental indexer catches up (clears itself on the next 'idle').
+  stale: boolean
   progress: IndexProgress | null
   relatedByKey: Record<string, RelatedNote[]>
   graphEdges: GraphEdge[]
@@ -32,6 +35,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   enabled: false,
   modelId: '',
   indexState: 'idle',
+  stale: false,
   progress: null,
   relatedByKey: {},
   graphEdges: [],
@@ -50,7 +54,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEnabled: async (value) => {
     const next: AiSettings = await window.noteflow.setAiSettings({ enabled: value })
     set({ enabled: next.enabled, modelId: next.modelId })
-    if (!value) set({ relatedByKey: {}, graphEdges: [], progress: null, indexState: 'idle' })
+    if (!value) set({ relatedByKey: {}, graphEdges: [], progress: null, indexState: 'idle', stale: false })
   },
 
   reindexAll: async () => {
@@ -91,13 +95,19 @@ export const useAiStore = create<AiState>((set, get) => ({
     const offProgress = window.noteflow.onAiReindexProgress((progress) => set({ progress }))
     const offState = window.noteflow.onAiIndexState((indexState) => {
       set({ indexState })
-      // When a (re)index finishes, drop cached related results so panels refetch fresh, and
-      // refresh the brain graph's content edges if it's open.
+      // When a (re)index finishes, the index is up to date again: clear the stale flag,
+      // drop cached related results so panels refetch fresh, and refresh the brain
+      // graph's content edges if it's open.
       if (indexState === 'idle') {
-        set({ relatedByKey: {} })
+        set({ relatedByKey: {}, stale: false })
         if (get().enabled) void get().fetchGraphEdges()
       }
     })
-    return () => { offProgress(); offState() }
+    // A note changed on disk → the on-disk index no longer matches the latest content until
+    // the incremental indexer (re)runs. Only relevant while AI is on.
+    const offNotes = window.noteflow.onNotesUpdated(() => {
+      if (get().enabled) set({ stale: true })
+    })
+    return () => { offProgress(); offState(); offNotes() }
   },
 }))

@@ -151,7 +151,7 @@ export function SyncPanel() {
             ? 'Already up to date'
             : `Pulled ${pullResult.pulled} note${pullResult.pulled !== 1 ? 's' : ''}`}
           {pullResult.errors.length > 0 && (
-            <div className="mt-1 text-[10px] text-red-400">{pullResult.errors.join(', ')}</div>
+            <div className="mt-1 text-[11px] text-red-400">{pullResult.errors.join(', ')}</div>
           )}
         </div>
       )}
@@ -244,7 +244,7 @@ export function SyncPanel() {
             The repo will be created automatically if it doesn&apos;t exist.
           </p>
           <div>
-            <label className="block text-[10px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
               Repository name
             </label>
             <input
@@ -255,7 +255,7 @@ export function SyncPanel() {
               disabled={isLoading}
               className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
             />
-            <p className="text-[10px] font-mono text-text-muted/60 mt-1">
+            <p className="text-[11px] font-mono text-text-muted/60 mt-1">
               Will be created as private if it doesn&apos;t exist.
             </p>
           </div>

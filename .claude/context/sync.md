@@ -28,8 +28,9 @@
   si el remoto es v2** (marcador presente y sin planos) — guard de transición. `updatedFiles`
   lleva paths de DIRECTORIOS.
 - **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
-  **note-order.json** (los dos en negrita se pusheaban pero NO se pulleaban — bug arreglado con
-  el cambio de formato).
+  **note-order.json**, templates.json (los dos en negrita se pusheaban pero NO se pulleaban — bug
+  arreglado con el cambio de formato). `templates.json` (plantillas de nota) sigue el mismo patrón
+  simple que note-order: push debounced + pull.
 - **Autosync:** pull cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado.
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
   árbol y borra cada blob bajo `<dir>/`; usado por borrar nota y notas expiradas).

@@ -115,7 +115,7 @@ export function AppearancePanel() {
       <div className="flex-1 space-y-5">
         {/* Theme */}
         <section>
-          <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Theme</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Theme</div>
           <div className="grid grid-cols-2 gap-2">
             {primaryThemes.map(renderThemeCard)}
           </div>
@@ -128,7 +128,7 @@ export function AppearancePanel() {
               )}
               <button
                 onClick={() => setShowAllThemes((v) => !v)}
-                className="mt-2 flex items-center gap-1 text-[10px] font-mono text-text-muted hover:text-text transition-colors"
+                className="mt-2 flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
                 <ChevronDown size={11} className={`transition-transform ${showAllThemes ? 'rotate-180' : ''}`} />
                 {showAllThemes ? 'Fewer themes' : `More themes (${moreThemes.length})`}
@@ -140,11 +140,11 @@ export function AppearancePanel() {
         {/* Font */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest">Font</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Font</div>
             {fontOverride !== null && (
               <button
                 onClick={() => setFontOverride(null)}
-                className="flex items-center gap-1 text-[10px] font-mono text-text-muted hover:text-text transition-colors"
+                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
                 <RotateCcw size={9} /> Theme default
               </button>
@@ -167,7 +167,7 @@ export function AppearancePanel() {
                   title={isOverride ? 'Selected' : f.label}
                 >
                   <div className="text-sm text-text leading-none mb-1">Ag</div>
-                  <div className={`text-[10px] truncate ${isEffective ? 'text-accent' : 'text-text-muted'}`}>{f.label}</div>
+                  <div className={`text-[11px] truncate ${isEffective ? 'text-accent' : 'text-text-muted'}`}>{f.label}</div>
                 </button>
               )
             })}
@@ -177,11 +177,11 @@ export function AppearancePanel() {
         {/* Accent */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest">Accent</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Accent</div>
             {accentOverride !== null && (
               <button
                 onClick={() => setAccentOverride(null)}
-                className="flex items-center gap-1 text-[10px] font-mono text-text-muted hover:text-text transition-colors"
+                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
                 <RotateCcw size={9} /> Theme default
               </button>
@@ -224,11 +224,11 @@ export function AppearancePanel() {
         {/* Headings */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest">Headings</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Headings</div>
             {headingsOverridden && (
               <button
                 onClick={resetHeadingOverrides}
-                className="flex items-center gap-1 text-[10px] font-mono text-text-muted hover:text-text transition-colors"
+                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
                 <RotateCcw size={9} /> Theme default
               </button>
@@ -294,7 +294,7 @@ export function AppearancePanel() {
 
         {/* Text size */}
         <section>
-          <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Text size</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Text size</div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => changeUiScale(-1)}
@@ -318,7 +318,7 @@ export function AppearancePanel() {
 
         {/* Brain view */}
         <section>
-          <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Brain view</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Brain view</div>
           <div className="grid grid-cols-2 gap-1.5">
             {([
               { value: true, label: '3D', desc: 'Immersive' },
@@ -337,12 +337,12 @@ export function AppearancePanel() {
                     <span className={`text-sm font-mono ${selected ? 'text-accent' : 'text-text'}`}>{opt.label}</span>
                     {selected && <Check size={12} className="text-accent flex-shrink-0" />}
                   </div>
-                  <div className="text-[10px] text-text-muted">{opt.desc}</div>
+                  <div className="text-[11px] text-text-muted">{opt.desc}</div>
                 </button>
               )
             })}
           </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-text-muted/80">
+          <p className="mt-2 text-[11px] leading-relaxed text-text-muted/80">
             3D looks better but uses more resources. If the brain feels slow, switch to 2D.
           </p>
         </section>
@@ -350,7 +350,7 @@ export function AppearancePanel() {
 
       {/* ── Live preview ─────────────────────────────────────────────────── */}
       <div className="w-[280px] flex-shrink-0 border-l border-border pl-4 flex flex-col gap-3">
-        <div className="text-[10px] font-mono text-text-muted/70 uppercase tracking-widest">Preview</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Preview</div>
         <div className="rounded-lg border border-border overflow-hidden bg-surface-0 shadow-inner">
           {/* fake titlebar */}
           <div className="flex items-center gap-1.5 px-2 py-1.5 bg-surface-2 border-b border-border">
@@ -375,7 +375,7 @@ export function AppearancePanel() {
             {/* editor */}
             <div className="flex-1 p-2 space-y-1.5 bg-surface-0 overflow-hidden">
               <div className="font-bold text-[12px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[0])})` }}>Heading</div>
-              <div className="text-[9px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[1])})` }}>Subheading</div>
+              <div className="text-[10px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[1])})` }}>Subheading</div>
               <div className="text-text/80 text-[8px] font-mono leading-relaxed">
                 The quick brown fox jumps over the lazy dog.
               </div>
@@ -387,7 +387,7 @@ export function AppearancePanel() {
         </div>
 
         {/* current selection summary */}
-        <div className="text-[10px] font-mono text-text-muted space-y-1 mt-auto">
+        <div className="text-[11px] font-mono text-text-muted space-y-1 mt-auto">
           <div className="flex justify-between gap-2">
             <span className="text-text-muted/60">Theme</span>
             <span className="text-text truncate">{theme.label}</span>

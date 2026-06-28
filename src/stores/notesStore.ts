@@ -46,6 +46,8 @@ interface NotesState {
   groupViewId: string | null  // when set, the main area shows the group overview instead of the editor
   noteViewId: string | null   // when set, the main area shows the single-note overview instead of the editor
   brainViewOpen: boolean      // when true, the main area shows the brain graph instead of the editor
+  allViewOpen: boolean        // when true, the main area shows the "All content" index instead of the editor
+  cameFromAllView: boolean    // true while a group/note overview was opened FROM the all-content view (smart back)
   notesDir: string
 
   // UI state
@@ -88,6 +90,10 @@ interface NotesState {
   setGroupView: (id: string | null) => void
   setNoteView: (id: string | null) => void
   setBrainView: (open: boolean) => void
+  setAllView: (open: boolean) => void
+  openGroupFromAll: (id: string) => void
+  openNoteFromAll: (id: string) => void
+  closeFullView: () => void   // smart back: returns to the all-content view if we came from it
   openNoteInSplit: (id: string) => void
   closeOpenNote: (id: string) => void
   setSearchQuery: (q: string) => void
@@ -119,6 +125,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   groupViewId: null,
   noteViewId: null,
   brainViewOpen: false,
+  allViewOpen: false,
+  cameFromAllView: false,
   notesDir: '',
   searchQuery: '',
   filterSection: 'all',
@@ -261,6 +269,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       groupViewId: null,
       noteViewId: null,
       brainViewOpen: false,
+      allViewOpen: false,
+      cameFromAllView: false,
     }))
     return note
   },
@@ -286,7 +296,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // Deliberately NOT setting newlyCreatedNoteId: we don't want the editor to auto-focus
       // and select the title field, which is what let a stale title draft overwrite this one.
       ...(activate
-        ? { activeNoteId: note.id, openNoteIds: [note.id], groupViewId: null, noteViewId: null, brainViewOpen: false }
+        ? { activeNoteId: note.id, openNoteIds: [note.id], groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
         : {}),
     }))
     return note
@@ -308,6 +318,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       groupViewId: null,
       noteViewId: null,
       brainViewOpen: false,
+      allViewOpen: false,
+      cameFromAllView: false,
     }))
     return note
   },
@@ -339,6 +351,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       groupViewId: null,
       noteViewId: null,
       brainViewOpen: false,
+      allViewOpen: false,
+      cameFromAllView: false,
     }))
     return note
   },
@@ -439,10 +453,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       }
     }
     set((s) => {
-      // Selecting a note always returns to the editor (closes the group / note / brain views)
-      if (!id) return { activeNoteId: null, groupViewId: null, noteViewId: null, brainViewOpen: false }
-      if (s.openNoteIds.includes(id)) return { activeNoteId: id, groupViewId: null, noteViewId: null, brainViewOpen: false }
-      return { activeNoteId: id, openNoteIds: [id], groupViewId: null, noteViewId: null, brainViewOpen: false }
+      // Selecting a note always returns to the editor (closes the group / note / brain / all views)
+      if (!id) return { activeNoteId: null, groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
+      if (s.openNoteIds.includes(id)) return { activeNoteId: id, groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
+      return { activeNoteId: id, openNoteIds: [id], groupViewId: null, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }
     })
     if (id) window.noteflow.setUiState({ activeNoteId: id })
   },
@@ -464,10 +478,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       )
     }, 0)
   },
-  // Group overview, note overview and brain view are mutually exclusive full-area views: opening one closes the others.
-  setGroupView: (id) => set({ groupViewId: id, noteViewId: null, brainViewOpen: false }),
-  setNoteView: (id) => set({ noteViewId: id, groupViewId: null, brainViewOpen: false }),
-  setBrainView: (open) => set((s) => ({ brainViewOpen: open, groupViewId: open ? null : s.groupViewId, noteViewId: open ? null : s.noteViewId })),
+  // Group overview, note overview, brain view and all-content view are mutually exclusive
+  // full-area views: opening one closes the others.
+  setGroupView: (id) => set({ groupViewId: id, noteViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }),
+  setNoteView: (id) => set({ noteViewId: id, groupViewId: null, brainViewOpen: false, allViewOpen: false, cameFromAllView: false }),
+  setBrainView: (open) => set((s) => ({ brainViewOpen: open, groupViewId: open ? null : s.groupViewId, noteViewId: open ? null : s.noteViewId, allViewOpen: open ? false : s.allViewOpen, cameFromAllView: open ? false : s.cameFromAllView })),
+  setAllView: (open) => set({ allViewOpen: open, groupViewId: null, noteViewId: null, brainViewOpen: false, cameFromAllView: false }),
+  // Drill into a group/note FROM the all-content view: remember it so "back" returns to the index.
+  openGroupFromAll: (id) => set({ groupViewId: id, allViewOpen: false, cameFromAllView: true, noteViewId: null, brainViewOpen: false }),
+  openNoteFromAll: (id) => set({ noteViewId: id, allViewOpen: false, cameFromAllView: true, groupViewId: null, brainViewOpen: false }),
+  closeFullView: () => {
+    if (get().cameFromAllView) get().setAllView(true)
+    else set({ groupViewId: null, noteViewId: null, brainViewOpen: false })
+  },
   setOpenNoteIds: (ids) => {
     set((s) => {
       const existing = new Set(s.notes.map((n) => n.id))
