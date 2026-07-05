@@ -69,15 +69,15 @@ chmod +x /Applications/NoteFlow.app/Contents/Resources/cli/noteflow.js
 #### Using the prebuilt package:
 ```bash
 # Install the prebuilt pacman package
-wget https://github.com/yagoid/noteflow/releases/latest/download/noteflow-1.5.6-x86_64.pkg.tar.zst
-sudo pacman -U noteflow-1.5.6-x86_64.pkg.tar.zst
+wget https://github.com/yagoid/noteflow/releases/latest/download/noteflow-2.0.0-x86_64.pkg.tar.zst
+sudo pacman -U noteflow-2.0.0-x86_64.pkg.tar.zst
 ```
 
 #### Using the AppImage (universal):
 ```bash
-wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-1.5.6-x86_64.AppImage
-chmod +x NoteFlow-1.5.6-x86_64.AppImage
-./NoteFlow-1.5.6-x86_64.AppImage
+wget https://github.com/yagoid/noteflow/releases/latest/download/NoteFlow-2.0.0-x86_64.AppImage
+chmod +x NoteFlow-2.0.0-x86_64.AppImage
+./NoteFlow-2.0.0-x86_64.AppImage
 ```
 
 #### From AUR (if available):
