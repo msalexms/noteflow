@@ -261,6 +261,24 @@ export interface GeneratedProfile {
   sections: Array<{ name: string; content: string }>
 }
 
+// ── NoteFlow account (Supabase Auth + entitlements) ─────────────────────────────
+
+// Which paid products the signed-in user has active (derived in main from the
+// subscriptions rows; a 'bundle' subscription grants both).
+export interface AccountEntitlements {
+  ai: boolean
+  cloud: boolean
+}
+
+// Renderer-safe view of the account session — never carries tokens.
+export interface AccountStatus {
+  configured: boolean   // false while the build has no Supabase project configured
+  signedIn: boolean
+  email?: string
+  entitlements: AccountEntitlements
+  entitlementsFetchedAt?: string  // ISO — last successful entitlements fetch
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -338,6 +356,13 @@ declare global {
       onSyncAuthComplete: (cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void) => () => void
       onSyncPushState: (cb: (state: 'pushing' | 'idle') => void) => () => void
       onSyncStatusChanged: (cb: () => void) => () => void
+      // NoteFlow account (Supabase Auth + entitlements)
+      getAccountStatus: () => Promise<AccountStatus>
+      accountRequestOtp: (email: string) => Promise<{ ok: boolean; error?: string }>
+      accountVerifyOtp: (email: string, code: string) => Promise<{ ok: boolean; error?: string }>
+      accountSignOut: () => Promise<{ ok: boolean; error?: string }>
+      accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
+      onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
       // AI / Semantic index
       getAiSettings: () => Promise<AiSettings>

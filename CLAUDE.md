@@ -29,6 +29,7 @@ La **documentación del proyecto** vive en `.claude/context/*.md` (abajo el mapa
 | "El Cerebro": índice semántico · vista cerebro · LLM/chat agéntico · segundo cerebro · secciones ocultas a la IA | `.claude/context/ai.md` | Tocar embeddings, grafo, chat, tools del agente o perfil |
 | Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas) | `.claude/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
 | Release · electron-builder · CI/CD · artefactos · landing · tareas frecuentes | `.claude/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
+| Monetización (Fase 4; 4.0 cuenta+entitlements implementada en cliente): cuenta NoteFlow · IA gestionada (proxy) · nube E2EE · pagos MoR · Supabase | `.claude/context/monetization.md` | Trabajar en suscripciones, cuenta, proxy LLM o NoteFlow Cloud |
 | Funcionalidades · UI · UX · atajos (producto/usuario) | skill `noteflow-features` | Discutir/diseñar features o entender la app desde el usuario |
 
 > Skills hermanas: `noteflow-features` (producto/UX), `noteflow-cli` (CLI companion), `noteflow-mobile`

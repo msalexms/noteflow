@@ -27,6 +27,10 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
+│   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
+│   │                    #   refresh token cifrado, entitlements) — ver monetization.md
+│   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase (placeholders hasta crearlo)
+│   ├── entitlements.ts  # computeEntitlements(rows) pura ({ai,cloud} desde subscriptions)
 │   └── ai/              # Índice semántico local + LLM ("El Cerebro" Fases 1-3)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
 │       ├── aiIndex.ts   #   Lifecycle del worker en el main (fork/respawn, debounce, API)
@@ -145,6 +149,8 @@ noteflow/
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
 │   └── types/
 │       └── index.ts             # Tipos TS + declaración global window.noteflow
+├── supabase/              # Backend de la cuenta NoteFlow (Fase 4): migrations/*.sql + README
+│                          #   del operador (crear proyecto, plantilla OTP) — ver monetization.md
 ├── dist-electron/         # Output compilado de electron/ (COMMITEADO — incluir en commits)
 ├── docs/                  # Landing page (GitHub Pages, servida desde /docs en main) — solo HTML/assets
 ├── public/                # Iconos, assets estáticos
@@ -204,6 +210,11 @@ Renderer (React)
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
 | `sync:pull` | handle | Pull manual desde el remoto |
+| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt}`) — **nunca** tokens |
+| `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
+| `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
+| `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado |
+| `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` |
 | `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
 | `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
 | `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
@@ -226,6 +237,7 @@ Renderer (React)
 `new-note`, `notes-updated` (filePath?, senderId?), `update:download-progress` (percent),
 `update:installing` (fase de instalación, post-descarga),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
+`account:status-changed` (broadcast del status público de la cuenta a todas las ventanas),
 `ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
 `ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
 `ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),
@@ -283,6 +295,11 @@ Estructura de `settings.json`:
     "owner": "username",
     "repo": "noteflow-notes",
     "lastSync": "2026-03-25T10:00:00.000Z"
+  },
+  "account": {
+    "email": "user@example.com",
+    "userId": "<uuid de auth.users>",
+    "encryptedRefreshToken": "<cifrado con safeStorage o base64 fallback>"
   },
   "ai": { "enabled": false, "modelId": "..." },
   "aiLlm": {

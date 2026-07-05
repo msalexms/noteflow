@@ -95,6 +95,18 @@ const api = {
         electron_1.ipcRenderer.on('sync:status-changed', wrapper);
         return () => electron_1.ipcRenderer.removeListener('sync:status-changed', wrapper);
     },
+    // NoteFlow account (Supabase Auth + entitlements) — public status only,
+    // tokens never cross this bridge.
+    getAccountStatus: () => electron_1.ipcRenderer.invoke('account:get-status'),
+    accountRequestOtp: (email) => electron_1.ipcRenderer.invoke('account:request-otp', email),
+    accountVerifyOtp: (email, code) => electron_1.ipcRenderer.invoke('account:verify-otp', email, code),
+    accountSignOut: () => electron_1.ipcRenderer.invoke('account:sign-out'),
+    accountRefreshEntitlements: () => electron_1.ipcRenderer.invoke('account:refresh-entitlements'),
+    onAccountStatusChanged: (cb) => {
+        const wrapper = (_event, status) => cb(status);
+        electron_1.ipcRenderer.on('account:status-changed', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('account:status-changed', wrapper);
+    },
     // Alarms
     scheduleAlarms: (alarms) => electron_1.ipcRenderer.send('alarms:schedule', alarms),
     // AI / Semantic index

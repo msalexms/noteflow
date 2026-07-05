@@ -10,8 +10,10 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  UserCircle,
   X,
 } from 'lucide-react'
+import { AccountPanel } from './AccountPanel'
 import { AppearancePanel } from './AppearancePanel'
 import { EditorPanel } from './EditorPanel'
 import { StartupPanel } from './StartupPanel'
@@ -30,6 +32,7 @@ export type SettingsSection =
   | 'sync'
   | 'data'
   | 'ai'
+  | 'account'
   | 'shortcuts'
   | 'about'
 
@@ -47,6 +50,7 @@ const NAV: NavEntry[] = [
   { id: 'sync', label: 'Sync', icon: RefreshCw },
   { id: 'data', label: 'Data', icon: Database },
   { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'account', label: 'Account', icon: UserCircle },
   { id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
   { id: 'about', label: 'About', icon: Info },
 ]
@@ -129,6 +133,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
               {section === 'sync' && <SyncPanel />}
               {section === 'data' && <DataPanel onOpenExportImport={onOpenExportImport} />}
               {section === 'ai' && <AiPanel onClose={onClose} />}
+              {section === 'account' && <AccountPanel />}
               {section === 'shortcuts' && <ShortcutsPanel />}
               {section === 'about' && <AboutPanel />}
             </div>

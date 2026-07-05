@@ -780,6 +780,23 @@ Settings → GitHub Sync.
 
 ---
 
+## Cuenta NoteFlow (Settings → Account)
+
+Cuenta opcional para las futuras suscripciones (**NoteFlow AI** y **NoteFlow Cloud**, Fase 4 de
+monetización). Todo lo gratuito sigue funcionando sin cuenta.
+
+- **Sign-in sin contraseña:** email → "Send code" → código de 6 dígitos por email → "Verify &
+  sign in" (misma UX de código que el Device Flow de GitHub). "Use a different email" vuelve atrás.
+- **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
+  Active/—), botón "Refresh" (relee las suscripciones) y "Sign out". Mientras no haya checkout,
+  el panel indica "Subscriptions are coming soon."
+- **Builds sin backend configurado** (aún no existe el proyecto Supabase): el panel solo muestra
+  "NoteFlow account services aren't available in this build yet."
+- Privacidad: la sesión (refresh token cifrado con `safeStorage`) vive en el proceso main y nunca
+  llega al renderer; detalle técnico en `.claude/context/monetization.md`.
+
+---
+
 ## Exportar / Importar notas
 
 Settings → Export / Import.

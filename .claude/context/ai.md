@@ -5,7 +5,8 @@ Subsistema de IA **100% local/offline** que indexa cada **sección** de cada not
 **embedding** (vector). El índice es un **artefacto derivado y reconstruible** desde los `.md` (si
 se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Related notes", hecha)
 → **Fase 2 (vista cerebro/grafo, hecha)** → **Fase 3 (panel IA: chat RAG + segundo cerebro, hecha;
-falta verificar en app real)** → Fase 4 (nube/monetización). **Principio: un índice, tres
+falta verificar en app real)** → **Fase 4 (nube/monetización — diseño cerrado en
+`.claude/context/monetization.md`)**. **Principio: un índice, tres
 consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
 `C:\Users\yagoi\.claude\plans\vamos-a-planificar-la-peaceful-manatee.md`.
 
@@ -201,4 +202,5 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   fragmentados por índice + turno de seguimiento con `role:'tool'`) y **adjuntos** (imagen →
   `content` array con `image_url`). El mock usa `res.on('close')`
   para limpiar el `setInterval` (con `req.on('close')` Node moderno lo mataba al consumir el body).
-- **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4).
+- **Pendiente:** verificación manual en app real (necesita key/Ollama); monetización/nube (Fase 4,
+  diseño en `.claude/context/monetization.md`).

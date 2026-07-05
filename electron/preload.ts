@@ -157,6 +157,37 @@ const api = {
     return () => ipcRenderer.removeListener('sync:status-changed', wrapper)
   },
 
+  // NoteFlow account (Supabase Auth + entitlements) — public status only,
+  // tokens never cross this bridge.
+  getAccountStatus: (): Promise<{
+    configured: boolean
+    signedIn: boolean
+    email?: string
+    entitlements: { ai: boolean; cloud: boolean }
+    entitlementsFetchedAt?: string
+  }> => ipcRenderer.invoke('account:get-status'),
+  accountRequestOtp: (email: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('account:request-otp', email),
+  accountVerifyOtp: (email: string, code: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('account:verify-otp', email, code),
+  accountSignOut: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('account:sign-out'),
+  accountRefreshEntitlements: (): Promise<{ ok: boolean; error?: string; entitlements: { ai: boolean; cloud: boolean } }> =>
+    ipcRenderer.invoke('account:refresh-entitlements'),
+  onAccountStatusChanged: (
+    cb: (status: {
+      configured: boolean
+      signedIn: boolean
+      email?: string
+      entitlements: { ai: boolean; cloud: boolean }
+      entitlementsFetchedAt?: string
+    }) => void
+  ) => {
+    const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)
+    ipcRenderer.on('account:status-changed', wrapper)
+    return () => ipcRenderer.removeListener('account:status-changed', wrapper)
+  },
+
   // Alarms
   scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) =>
     ipcRenderer.send('alarms:schedule', alarms),

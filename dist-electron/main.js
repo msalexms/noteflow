@@ -44,6 +44,7 @@ const os_1 = __importDefault(require("os"));
 const child_process_1 = require("child_process");
 const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
+const account = __importStar(require("./account"));
 const aiIndex = __importStar(require("./ai/aiIndex"));
 const llm = __importStar(require("./ai/llm"));
 const agentTools = __importStar(require("./ai/llm/tools"));
@@ -160,6 +161,13 @@ electron_1.ipcMain.on('alarms:schedule', (_event, incoming) => {
 function emitSyncStatusChanged() {
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
         win.webContents.send('sync:status-changed');
+    });
+}
+// Broadcasts the PUBLIC account status (never tokens) to every window.
+function emitAccountStatusChanged() {
+    const status = account.getAccountStatus();
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('account:status-changed', status);
     });
 }
 function broadcastPullResult(result) {
@@ -1369,6 +1377,24 @@ electron_1.ipcMain.handle('sync:pull', async () => {
     }
     return result;
 });
+// ── NoteFlow account (Supabase Auth + entitlements) ───────────────────────────
+// Session/tokens live in electron/account.ts (main-process only); the renderer
+// exchanges exclusively the public status.
+electron_1.ipcMain.handle('account:get-status', () => {
+    return account.getAccountStatus();
+});
+electron_1.ipcMain.handle('account:request-otp', (_event, email) => {
+    return account.requestOtp(email);
+});
+electron_1.ipcMain.handle('account:verify-otp', (_event, email, code) => {
+    return account.verifyOtp(email, code);
+});
+electron_1.ipcMain.handle('account:sign-out', () => {
+    return account.signOut();
+});
+electron_1.ipcMain.handle('account:refresh-entitlements', () => {
+    return account.refreshEntitlements();
+});
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {
@@ -2481,6 +2507,10 @@ electron_1.app.whenReady().then(async () => {
     githubSync.loadSyncSettings();
     githubSync.onStatusChanged(() => emitSyncStatusChanged());
     const connected = githubSync.getSyncStatus().connected;
+    // NoteFlow account: load the persisted session and refresh entitlements in
+    // the background (deferred inside initAccount — never blocks boot).
+    account.onStatusChanged(() => emitAccountStatusChanged());
+    account.initAccount();
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
     // Initial GitHub pull. In startup mode we block for up to 10s so sticky
