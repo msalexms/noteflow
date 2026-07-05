@@ -3,6 +3,7 @@ import type { NodeViewProps } from '@tiptap/react'
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, Flag } from 'lucide-react'
+import { getRootZoom } from '../../stores/themeStore'
 
 type Importance = 'low' | 'medium' | 'high'
 
@@ -118,11 +119,17 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
   function openPopover() {
     if (!triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
+    // Popover is `position: fixed` (zoomed/local space); the rect is device space.
+    // Divide by the root zoom so it lands in the same space as window.innerHeight.
+    const z = getRootZoom()
+    const rectTop = rect.top / z
+    const rectBottom = rect.bottom / z
+    const rectLeft = rect.left / z
     const popH = 148
-    const spaceBelow = window.innerHeight - rect.bottom
-    const top = spaceBelow > popH ? rect.bottom + 4 : rect.top - popH - 4
+    const spaceBelow = window.innerHeight - rectBottom
+    const top = spaceBelow > popH ? rectBottom + 4 : rectTop - popH - 4
     // Keep popover inside horizontal viewport
-    const left = Math.min(rect.left, window.innerWidth - 230)
+    const left = Math.min(rectLeft, window.innerWidth - 230)
     setPopoverPos({ top, left })
     // Prefill today when there's no existing deadline so the user only has to confirm.
     // This only seeds the draft; nothing is written to the node until "Done".
@@ -135,10 +142,16 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
   function openImpPopover() {
     if (!impTriggerRef.current) return
     const rect = impTriggerRef.current.getBoundingClientRect()
+    // Popover is `position: fixed` (zoomed/local space); the rect is device space.
+    // Divide by the root zoom so it lands in the same space as window.innerHeight.
+    const z = getRootZoom()
+    const rectTop = rect.top / z
+    const rectBottom = rect.bottom / z
+    const rectLeft = rect.left / z
     const popH = 132
-    const spaceBelow = window.innerHeight - rect.bottom
-    const top = spaceBelow > popH ? rect.bottom + 4 : rect.top - popH - 4
-    const left = Math.min(rect.left, window.innerWidth - 170)
+    const spaceBelow = window.innerHeight - rectBottom
+    const top = spaceBelow > popH ? rectBottom + 4 : rectTop - popH - 4
+    const left = Math.min(rectLeft, window.innerWidth - 170)
     setImpPopoverPos({ top, left })
     setPopoverOpen(false)
     setImpPopoverOpen(true)

@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.7.0
+version: 1.8.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -94,6 +94,7 @@ Añade texto a la nota diaria de hoy (título `DD-MM-YYYY`). Si no existe, la cr
 | `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
 | `--group <nombre>` | Asigna la nota a un grupo |
 | `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
+| `--raw` | Fuerza modo raw/markdown en la sección (default) |
 | `--rich` | La sección nueva se crea en modo rich text |
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
@@ -233,6 +234,22 @@ cat todo.md | noteflow set "Proyecto Alpha" Tasks --stdin
 noteflow set "Proyecto Alpha" Notas --file ./notas.txt
 ```
 
+> **⚠ Windows / PowerShell — contenido multilínea o complejo:** para texto de
+> **una sola línea** `--text` va bien. Para **varias líneas** o caracteres
+> conflictivos, **usa `--file <ruta>`** (la vía más fiable): al pasar un `--text`
+> con saltos de línea, PowerShell puede **truncarlo a la primera línea** sin avisar.
+> `--stdin` (pipe/here-string) también funciona; el CLI ya limpia el BOM que
+> PowerShell añade. Regla práctica para agentes: **contenido no trivial → `--file`.**
+
+**Editar una parte concreta de una sección grande:** el CLI edita a nivel de
+sección (no hay find-replace). El patrón es leer → modificar → sobrescribir:
+
+```bash
+noteflow read "Proyecto Alpha" Arquitectura > sec.md   # (en PowerShell, esto pasa a CRLF)
+# …editas sec.md…
+noteflow set "Proyecto Alpha" Arquitectura --file sec.md
+```
+
 ---
 
 ### `sections` — Ver secciones de una nota
@@ -333,13 +350,16 @@ noteflow move "Sprint 14" --ungroup
 
 ---
 
-### `pin` — Fijar/desfijar nota
+### `favorite` — Marcar/desmarcar como favorita
 
 ```bash
-noteflow pin <título>
+noteflow favorite <título>
+noteflow pin <título>        # alias
 ```
 
-Toggle: si está pinned la desfija, si no lo está la fija. La app de escritorio muestra las notas pinned en la parte superior de la lista.
+Toggle: si es favorita la desmarca, si no lo es la marca (campo `favorited`). La app
+de escritorio muestra las favoritas en la parte superior de la lista. `pin` es un
+alias histórico del mismo comando.
 
 ---
 
@@ -605,5 +625,13 @@ noteflow push
 - El CLI **no puede descifrar** tokens guardados por la app de escritorio con `safeStorage` de Electron. Requiere su propio `login`.
 - Notas encriptadas (`encryption:` en `note.md`) se **ignoran** en todos los comandos de lectura.
 - `NOTEFLOW_NOTES_DIR` (variable de entorno) redirige el directorio de notas — útil para scripts y tests.
-- El auto-sync de la app desktop (cada 5 min) puede sobreescribir cambios locales del CLI si ambos corren simultáneamente y el token de la app tiene acceso a GitHub.
-- `noteflow help <comando>` muestra ayuda detallada de un comando concreto.
+- **⚠ App de escritorio abierta ⇒ riesgo de perder cambios de grupos/carpetas.**
+  La app mantiene `groups.json`/`folders.json` en memoria y los **reescribe** en sus
+  propios ciclos (guardado / auto-sync cada 5 min), **pisando** los grupos y carpetas
+  creados desde el CLI mientras la app corre (los cambios a nivel de **nota** —
+  contenido, secciones, favorito, archivo — sí sobreviven, viven en carpetas por-nota).
+  El CLI ahora **avisa** por stderr si detecta `NoteFlow` en ejecución al mutar
+  grupos/carpetas. Para cambios fiables de estructura: **cierra la app** primero (o
+  hazlos desde la propia app). Silencia el aviso con `NOTEFLOW_NO_APP_CHECK=1`.
+- `noteflow help <comando>` muestra ayuda detallada de un comando concreto
+  (`help new`, `help favorite`, `help folder`, etc.).

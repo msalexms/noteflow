@@ -902,6 +902,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             + New note
           </button>
           <button
+            onClick={() => createTempNote()}
+            title="New temporary note (24h)"
+            className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
+                       hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
+          >
+            <Timer size={14} strokeWidth={2.5} />
+          </button>
+          <button
             onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
             title="New group"
             className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border

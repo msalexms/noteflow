@@ -288,6 +288,8 @@ declare global {
       setTheme: (id: string) => void
       getLoginItem: () => Promise<{ openAtLogin: boolean }>
       setLoginItem: (enabled: boolean) => Promise<void>
+      getSkillSync: () => Promise<{ enabled: boolean }>
+      setSkillSync: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       getStartupStickies: () => Promise<Array<{ noteId: string; sectionId: string }>>
       setStartupStickies: (stickies: Array<{ noteId: string; sectionId: string }>) => Promise<void>
       getUiState: () => Promise<{ activeNoteId?: string; activeSectionId?: string; collapsedGroupIds?: string[]; collapsedFolderIds?: string[] }>

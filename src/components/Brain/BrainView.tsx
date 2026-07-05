@@ -60,7 +60,15 @@ export function BrainView({ onClose }: { onClose: () => void }) {
   // WebGL support is fixed for the session; the 3D/2D preference is live (Settings → Appearance).
   const [webglSupported] = useState(detectWebGL)
   const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
+  const lowEnd = useBrainSettingsStore((s) => s.lowEnd)
+  const showLowEndPrompt = useBrainSettingsStore((s) => s.showLowEndPrompt)
+  const setPrefer3D = useBrainSettingsStore((s) => s.setPrefer3D)
+  const dismissLowEndPrompt = useBrainSettingsStore((s) => s.dismissLowEndPrompt)
   const use3D = webglSupported && prefer3D
+  // Offer 3D once on weak machines (where we defaulted to 2D). Requires WebGL —
+  // no point offering 3D it can't render. The Local AI dialog takes priority, so
+  // this only shows after that one is closed.
+  const showLowEndDialog = lowEnd && showLowEndPrompt && webglSupported && !showDialog
 
   // The AI panel can be collapsed to give the brain the full width (combined with
   // hiding the notes sidebar this yields a fullscreen brain). Resets on each entry.
@@ -317,6 +325,38 @@ export function BrainView({ onClose }: { onClose: () => void }) {
                     {enabling ? 'Enabling…' : 'Enable local AI'}
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* One-time nudge on low-powered devices: we defaulted to 2D, offer 3D */}
+        {showLowEndDialog && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+            <div className="w-[380px] max-w-[85%] rounded-lg border border-border bg-surface-1 p-5 shadow-2xl">
+              <div className="flex items-center gap-2 mb-2 text-text">
+                <Brain size={16} />
+                <h2 className="text-sm font-mono font-bold tracking-wide">Low-powered device detected</h2>
+              </div>
+              <p className="text-[12px] leading-relaxed text-text-muted font-mono mb-4">
+                This machine looks low on resources, so Brain is showing the lighter{' '}
+                <span className="text-text">2D view</span>, which uses less CPU and GPU. You can switch
+                to the <span className="text-text">3D view</span> for a more immersive brain — it looks
+                nicer but is heavier on your hardware.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={dismissLowEndPrompt}
+                  className="flex-1 flex items-center justify-center px-3 py-2 rounded border border-border text-text-muted text-xs font-mono hover:text-text hover:border-text/30 transition-colors"
+                >
+                  Keep 2D
+                </button>
+                <button
+                  onClick={() => setPrefer3D(true)}
+                  className="flex-1 flex items-center justify-center px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity"
+                >
+                  Use 3D
+                </button>
               </div>
             </div>
           </div>

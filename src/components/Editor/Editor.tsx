@@ -126,6 +126,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData('text/plain') ?? ''
         if (!text.trim()) return false
+        // Inside a code block markdown is literal source, not formatting — a `#`
+        // comment must stay `#`, not become a heading. Bail to the native handler
+        // (verbatim plain-text paste) whenever any ancestor of the selection is a
+        // code node. We probe `type.spec.code` instead of the node name so this
+        // holds for CodeBlockWithCopy regardless of its registered name.
+        const { $from } = view.state.selection
+        for (let depth = $from.depth; depth >= 0; depth--) {
+          if ($from.node(depth).type.spec.code) return false
+        }
         const html = event.clipboardData?.getData('text/html') ?? ''
         const richHtml = /<(a|strong|em|b|i|table|img|h[1-6]|blockquote)[\s>]/i.test(html)
         if (richHtml || !looksLikeMarkdown(text)) return false

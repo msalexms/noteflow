@@ -181,6 +181,10 @@
       {
         "from": "cli/noteflow.cmd",
         "to": "cli/noteflow.cmd"
+      },
+      {
+        "from": "cli/noteflow-cli",
+        "to": "cli/noteflow-cli"
       }
     ],
     "asarUnpack": [

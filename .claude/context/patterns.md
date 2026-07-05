@@ -190,6 +190,18 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   `mdBlockquoteToHtml` (líneas consecutivas → `<p>` con `<br>`; línea `>` vacía → nuevo párrafo) y el
   caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo `--accent-2`
   + texto atenuado. Botón en la toolbar (icono `Quote`).
+- **Bloque de código — selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
+  `CodeBlockLowlight` pinta a la izquierda (`top-2 left-2`) un botón con el lenguaje actual ("Plain
+  text" si `language` es null) y a la derecha el botón Copy. El botón izquierdo abre un dropdown
+  (portalado a `document.body` con `createPortal`, `position: fixed` para no recortarse con el
+  `overflow-x:auto` del `pre`) con buscador + "Plain text" (fija `language=null`) + los lenguajes de
+  `extension.options.lowlight.listLanguages()` (se filtra `plaintext`, ya cubierto por "Plain text"),
+  ordenados por label legible (`LANGUAGE_LABELS`, fallback = capitalizar id). **Se guarda siempre el id
+  real de lowlight** en `node.attrs.language` (no el label) para no romper resaltado ni round-trip. El
+  botón se muestra siempre sutil si hay lenguaje (`opacity-60`) o solo en hover si es plain text.
+  Posiciona con `getBoundingClientRect()/getRootZoom()` (mismo truco de zoom que `SlashCommands`);
+  cierra con click-fuera y Escape. No toca `markdownHtml.ts` ni el formato. Estilos `.code-lang-*` en
+  `index.css`.
 - **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → lista →
   blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings).
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
@@ -274,9 +286,16 @@ suspender/reanudar). `powerMonitor.on('resume')` reemite `notes-updated` con del
 
 ### Ventanas sticky (fold/unfold + shape)
 Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&sectionId=...`,
-`alwaysOnTop`, transparentes. En Windows se usa `win.setShape()` (región redondeada calculada
-píxel a píxel) porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado
-en el main (`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
+`alwaysOnTop`. En Windows se usa `win.setShape()` (región redondeada calculada píxel a píxel)
+porque el DWM ignora `border-radius` al perder foco. Plegado/desplegado animado en el main
+(`fold-to-corner`/`unfold`) apilando las píldoras en la esquina.
+
+**Transparencia dependiente de plataforma:** en **Linux/macOS** la ventana es `transparent: true`
+(`backgroundColor: '#00000000'`) y el redondeo lo da el CSS. En **Windows** se crea **opaca**
+(`transparent: false`, `backgroundColor: '#1e1e1e'`) a propósito: `transparent: true` dejó de
+componerse bien tras las actualizaciones de Windows 11 (24H2/25H2) y la ventana quedaba casi
+invisible; como en Windows el redondeo ya lo aporta `setShape()` (recorte de región DWM), la
+transparencia era redundante y se desactiva. Ver el comentario en `createStickyWindow()`.
 
 
 ### Motor de alarmas y notas temporales (en main)
@@ -355,6 +374,17 @@ agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decora
 **`set`** sobrescribe una sección (vs `add`, que solo añade al final). Detalle completo en
 `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
 
+**Auto-instalación de la skill.** Para que un agente (Claude Code) descubra la CLI sin descargar nada,
+la app copia `cli/noteflow-cli/SKILL.md` a `~/.claude/skills/noteflow-cli/SKILL.md`. La carpeta
+`cli/noteflow-cli` se bundlea vía `extraResources` (`package.json`) y en runtime `syncSkillToClaudeDir()`
+(`electron/main.ts`) resuelve el origen: empaquetado → `process.resourcesPath/cli/noteflow-cli/SKILL.md`,
+dev → `__dirname/../cli/noteflow-cli/SKILL.md` (`__dirname` = `dist-electron/`). Se ejecuta en cada
+arranque (fire-and-forget, best-effort con try/catch): copia solo si el contenido difiere (auto-cura y
+recoge updates sin reescribir en vano). Controlado por el setting local `exposeSkillToAgents` (default
+`true`) en `settings.json`; al desactivarlo borra el fichero y la carpeta `noteflow-cli` si queda vacía
+(nunca toca nada más de `~/.claude`). Toggle **"Expose CLI skill to AI agents"** en Settings → AI
+(sección "AI agents"), IPC `app:get-skill-sync` / `app:set-skill-sync`.
+
 ## Temas
 
 14 temas en `src/lib/themes.ts` (cada uno = set de CSS vars). Default: `noteflow-dark`.
@@ -367,3 +397,30 @@ Dark: Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, Gru
 Obsidian, Emerald Forest, Synthwave. Light: Arctic Day, Parchment. El tema se persiste en
 `settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`); usuarios
 existentes conservan el suyo, los nuevos arrancan en `noteflow-dark`.
+
+### UI text size (zoom global) y posicionamiento de popups `fixed`
+
+El "UI text size" (Settings → Appearance) escala toda la UI aplicando un CSS `zoom` sobre
+`document.documentElement` (`applyUiScale` en `src/stores/themeStore.ts`; pasos en `UI_SCALES`).
+**Gotcha:** bajo el `zoom` del root, un elemento `position: fixed` vive en el espacio de
+coordenadas *zoomeado* (local, el mismo que `window.innerWidth/innerHeight` y que las coords de
+ratón `clientX/clientY`), mientras que `getBoundingClientRect()` devuelve coords en espacio de
+*dispositivo* (multiplicadas por el zoom). Por eso un popup fixed posicionado a partir de un rect
+cae más abajo/desplazado cuanto mayor es el zoom.
+
+**Regla:** cualquier popup `position: fixed` que se posicione desde `getBoundingClientRect()` debe
+dividir las coords del rect (`rect.left/top/bottom`) por el factor de zoom antes de clampear contra
+`window.inner*` y de escribir `style.left/top`. Usa el helper `getRootZoom()` (exportado desde
+`themeStore.ts`, única fuente de verdad) — con zoom 1 es no-op. `offsetWidth/offsetHeight` del popup
+ya están en espacio local, no se tocan. Ejemplos aplicados: menú slash (`SlashCommands.ts`,
+`positionPopup`) y los popovers de fecha/importancia de tareas (`DeadlineTaskItemView.tsx`,
+`openPopover`/`openImpPopover`). Los menús posicionados desde coords de ratón (`ContextMenu`, menús
+de sidebar) o submenús `absolute` dentro de un menú ya zoomeado (`NoteContextMenu`) NO necesitan el
+ajuste.
+
+**Pendiente (scroll bajo zoom):** con `zoom` en el root y contenedores de scroll anidados
+(`flex-1 overflow-y-auto` del editor), a zoom alto el fondo del contenido puede quedar inalcanzable
+por el scroll. NO se arregla contra-escalando la altura del root (`calc(100% / scale)` deja una
+franja vacía por debajo — se probó y se revirtió). La solución de fondo es dejar de usar CSS `zoom`
+en el root y escalar la UI con la API nativa de Electron (`webFrame.setZoomFactor`), que maneja
+viewport y scroll correctamente.

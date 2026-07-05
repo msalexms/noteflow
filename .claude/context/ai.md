@@ -58,7 +58,11 @@ consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
     en `tunerState.ts` (`DEFAULT_LOOK`: bloom, `wireOpacity`, `dotOpacity`, fog…). Impulsos eléctricos:
     pulso único en hover (nodo→relacionada) + chispas ambientales aleatorias por el wireframe.
     `BrainTuner.tsx` es un panel dev de escultura (`SHOW_TUNER=false`). Click en nota → fly-in +
-    `openSection`. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`.
+    `openSection`. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`. En equipos de pocos recursos
+    (heurística en el renderer: `hardwareConcurrency <= 4` o `deviceMemory <= 4`) el cerebro arranca
+    por defecto en 2D y muestra un popup una-vez ofreciendo cambiar a 3D; la elección explícita del
+    usuario (o el legacy force-2D) se marca con `localStorage 'noteflow:brain-3d-chosen'` y ya no
+    vuelve a nudgear.
   - **`BrainCanvas.tsx` (2D, FALLBACK sin WebGL):** `<canvas>` 2D propio + `d3-force`
     (`useForceLayout.ts`) con pan/zoom/drag/hover.
   Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de

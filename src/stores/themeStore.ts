@@ -56,7 +56,18 @@ function nearestScale(value: number): number {
 
 function applyUiScale(scale: number) {
   // `zoom` is non-standard but supported in Chromium/Electron; 1 == no zoom.
-  ;(document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = String(scale)
+  const root = document.documentElement.style as CSSStyleDeclaration & { zoom: string }
+  root.zoom = String(scale)
+}
+
+// Current UI zoom factor applied on the document root by `applyUiScale`. Under a
+// root `zoom`, `position: fixed` elements live in the (zoomed) local coordinate
+// space, while `getBoundingClientRect()` reports device-space coords (multiplied
+// by the zoom). Popups positioned from a rect must divide by this factor to land
+// in the same space as `window.innerWidth/innerHeight`. Falls back to 1.
+export function getRootZoom(): number {
+  const z = parseFloat(getComputedStyle(document.documentElement).zoom)
+  return Number.isFinite(z) && z > 0 ? z : 1
 }
 
 // A theme provides a base palette + its own app font + accent. On top of that the

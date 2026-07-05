@@ -594,8 +594,13 @@ function schedulePoll(
           writeSettings(settings)
 
           await pullNotes(notesDir)
-          await pushAllNotes(notesDir)
           onComplete({ ok: true, owner, repo })
+
+          // Push local notes in the background; must not block the "connected"
+          // signal to the UI (pushAllNotes does one network request per file).
+          pushAllNotes(notesDir).catch((err) => {
+            console.error('[GitHubSync] initial pushAll failed:', String(err))
+          })
         } catch (err: unknown) {
           const error = err instanceof Error ? err.message : String(err)
           syncError = error

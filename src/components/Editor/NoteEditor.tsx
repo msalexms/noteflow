@@ -11,7 +11,7 @@ import type { GroupColor, NoteSection } from '../../types'
 import { nanoid } from 'nanoid'
 import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
-  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate,
+  Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
@@ -1316,10 +1316,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         </div>
 
 
-        <div className="px-4 pb-2 flex-shrink-0">
+        <div className="px-4 pb-2 flex-shrink-0 flex items-center gap-2">
           <span className="text-xs font-mono text-text-muted/50">
             {format(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
           </span>
+          {note.expiresAt && (
+            <span className="text-xs font-mono text-accent/70 flex items-center gap-1">
+              <span className="text-text-muted/40">·</span>
+              <Timer size={11} strokeWidth={2.5} />
+              Deletes {format(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm')}
+            </span>
+          )}
         </div>
 
         <div className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}>

@@ -61,6 +61,8 @@ function noteDirname(id, title) {
 function out(msg) { console.log(msg) }
 function err(msg) { console.error(`  Error: ${msg}`) }
 
+function lineCount(content) { return content ? content.split('\n').length : 0 }
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 function readSettings() {
@@ -231,6 +233,10 @@ function parseNoteYaml(yamlStr) {
     }
     i++
   }
+  // tags must always be an array (older notes may carry `tags: ""` or a bare string)
+  if (typeof note.tags === 'string')
+    note.tags = note.tags.trim() ? note.tags.split(',').map(t => unquote(t.trim())).filter(Boolean) : []
+  else if (!Array.isArray(note.tags)) note.tags = []
   return note
 }
 
@@ -415,8 +421,9 @@ async function resolveSetContent(opts) {
     catch (e) { err(`Cannot read --file: ${e.message}`); process.exit(1) }
   } else if (opts.stdin || !process.stdin.isTTY) raw = await readStdin()
   else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); process.exit(1) }
-  // Normalize newlines and trim a trailing newline so piped/echoed input round-trips cleanly.
-  return raw.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+  // Strip a leading BOM (PowerShell pipes/here-strings add one) and normalize
+  // CRLF/CR to LF so piped/echoed input round-trips cleanly.
+  return raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
 }
 
 // ── GitHub API ────────────────────────────────────────────────────────────────
@@ -564,10 +571,30 @@ function confirm(question) {
   })
 }
 
+/** Best-effort check: is the NoteFlow desktop app running? (it may overwrite CLI metadata edits) */
+function isDesktopAppRunning() {
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync('tasklist /FO CSV /NH', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+      return /"NoteFlow\.exe"/i.test(out)
+    }
+    const out = execSync('ps -A -o comm=', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return /(^|\/)noteflow$/im.test(out)
+  } catch { return false }
+}
+
+/** Warn (to stderr) before mutating shared metadata the desktop app may clobber. */
+function warnIfDesktopRunning(opts) {
+  if ((opts && opts.json) || process.env.NOTEFLOW_NO_APP_CHECK) return
+  if (isDesktopAppRunning())
+    console.error('  ⚠ NoteFlow desktop appears to be running — it may overwrite group/folder changes made here. Close it first, or these changes may be lost on its next sync.')
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 // noteflow add <text> [--title <t>] [--section <s>] [--tag <t>] [--group <g>] [--raw|--rich]
 async function cmdAdd(text, opts) {
+  text = text.replace(/^﻿+/, '').replace(/\r\n?/g, '\n')
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
 
   const targetTitle = opts.title || getTodayTitle()
@@ -850,7 +877,7 @@ function cmdSections(titleQuery) {
   const note = matches[0]
   out(`\n  Sections of "${note.title}":`)
   for (const s of note.sections || []) {
-    const lines = (s.content || '').split('\n').filter(Boolean).length
+    const lines = lineCount(s.content)
     out(`    ${s.name}  (${lines} lines${s.isRawMode ? ', raw/markdown' : ', rich'}${s.aiHidden ? ', hidden from AI' : ''})`)
   }
   out('')
@@ -898,7 +925,7 @@ async function cmdSet(titleQuery, sectionName, opts) {
   sec.content = content
   writeNoteFolder(note.dirname, note)
   if (created) out(`  Created section "${sec.name}"`)
-  out(`  Set "${note.title}" → ${sec.name}  (${content ? content.split('\n').length + ' lines' : 'empty'})`)
+  out(`  Set "${note.title}" → ${sec.name}  (${content ? lineCount(content) + ' lines' : 'empty'})`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
 }
 
@@ -964,6 +991,7 @@ function cmdGroups(opts) {
 
 // noteflow group create <name> [--color <color>]
 function cmdGroupCreate(name, opts) {
+  warnIfDesktopRunning(opts)
   const groups = readGroups()
   if (groups.find(g => g.name.toLowerCase() === name.toLowerCase())) {
     err(`Group "${name}" already exists`); process.exit(1)
@@ -980,6 +1008,7 @@ function cmdGroupCreate(name, opts) {
 
 // noteflow group delete <name> [--yes]
 async function cmdGroupDelete(name, opts) {
+  warnIfDesktopRunning(opts)
   const groups = readGroups()
   const g = groups.find(gr => gr.name.toLowerCase() === name.toLowerCase() || gr.id === name)
   if (!g) { err(`Group not found: "${name}"`); process.exit(1) }
@@ -1031,6 +1060,7 @@ function cmdFolders(opts) {
 
 // noteflow folder create <name> --group <group>
 function cmdFolderCreate(name, opts) {
+  warnIfDesktopRunning(opts)
   if (!opts.group) { err('A folder needs a group. Use: noteflow folder create <name> --group <group>'); process.exit(1) }
   const g = findGroup(opts.group)
   if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
@@ -1049,6 +1079,7 @@ function cmdFolderCreate(name, opts) {
 
 // noteflow folder rename <name> <new-name> [--group <g>]
 function cmdFolderRename(name, newName, opts) {
+  warnIfDesktopRunning(opts)
   const folder = resolveFolder(name, opts)
   const folders = readFolders()
   const g = readGroups().find(gr => gr.id === folder.groupId)
@@ -1061,6 +1092,7 @@ function cmdFolderRename(name, newName, opts) {
 
 // noteflow folder delete <name> [--group <g>] [--yes]
 async function cmdFolderDelete(name, opts) {
+  warnIfDesktopRunning(opts)
   const folder = resolveFolder(name, opts)
   if (!opts.yes) {
     const ok = await confirm(`Delete folder "${folder.name}"? (Notes inside fall back to the group root)`)
@@ -1419,6 +1451,9 @@ function cmdHelp(topic) {
     --raw               Force raw/markdown mode for the section (default: true)
     --rich              Use rich text mode for the section
 
+  On Windows PowerShell a multi-line --text may be truncated to its first line;
+  use --file <path> or --stdin for multi-line content.
+
   Examples:
     noteflow add "Fix: CORS issue"
     noteflow add "meeting notes" --title "Project Alpha" --section "Meetings"
@@ -1476,6 +1511,9 @@ function cmdHelp(topic) {
     --stdin              Read content from stdin (also auto-used when piped)
     --rich               Create a new section in rich-text mode (default: raw)
 
+  On Windows PowerShell a multi-line --text may be truncated to its first line;
+  use --file <path> or --stdin for multi-line content.
+
   Examples:
     noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
     cat notes.md | noteflow set "Project Alpha" Notes --stdin
@@ -1530,8 +1568,55 @@ function cmdHelp(topic) {
   goes to the group root. --folder requires the folder to exist in that group
   (create it first with 'noteflow folder create'). --ungroup clears both.
 `,
+    new: `
+  noteflow new <title> [--section <s>] [--group <g>] [--folder <f>] [--json]
+
+  Creates a new empty note with the given title. Optionally place it in a group
+  (and a folder of that group) and name its first section. --json prints the note.
+
+  Examples:
+    noteflow new "Sprint 14"
+    noteflow new "Sprint 14" --group backend --folder Planning --section Tasks
+`,
+    favorite: `
+  noteflow favorite <title>   (alias: pin)
+
+  Toggles the favorite flag on a note. Title can be partial.
+
+  Example:
+    noteflow favorite "Project Alpha"
+`,
+    archive: `
+  noteflow archive <title>
+
+  Toggles the archived flag on a note. Archived notes are hidden from 'list'
+  unless you pass --archived. Title can be partial.
+
+  Example:
+    noteflow archive "Old Project"
+`,
+    delete: `
+  noteflow delete <title> [--yes]   (alias: rm)
+
+  Deletes a note. Title can be partial; prompts for confirmation unless --yes.
+  With GitHub sync enabled the note is also removed from the repo.
+
+  Example:
+    noteflow delete "Scratch" --yes
+`,
+    rename: `
+  noteflow rename <old> <new>
+
+  Changes a note's title. The on-disk folder name is kept as-is (only the title
+  in the note's metadata changes). Old title can be partial.
+
+  Example:
+    noteflow rename "Projct Alpha" "Project Alpha"
+`,
   }
 
+  const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete' }
+  if (topic && aliases[topic]) topic = aliases[topic]
   if (topic && topics[topic]) { out(topics[topic]); return }
 
   out(`

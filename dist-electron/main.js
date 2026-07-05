@@ -511,14 +511,20 @@ function animateStickyWindow(win, from, to, duration, onComplete) {
     }, 16);
 }
 function createStickyWindow(noteId, sectionId) {
+    // On Windows, `transparent: true` stops compositing correctly after some Win11
+    // updates (24H2/25H2), leaving the sticky window near-invisible. The rounded
+    // corners come from setShape() (DWM region clip) there, so transparency is
+    // redundant: use an opaque neutral background instead. On Linux/macOS setShape()
+    // is a no-op and CSS rounding still needs transparency.
+    const isWin = process.platform === 'win32';
     const win = new electron_1.BrowserWindow({
         width: 300,
         height: 300,
         minWidth: 200,
         minHeight: 200,
         frame: false,
-        transparent: true,
-        backgroundColor: '#00000000',
+        transparent: !isWin,
+        backgroundColor: isWin ? '#1e1e1e' : '#00000000',
         titleBarStyle: 'hidden',
         show: false,
         alwaysOnTop: true,
@@ -1319,7 +1325,12 @@ electron_1.ipcMain.handle('sync:initiate', async (_event, repo) => {
             startAutoSync();
             // Fresh connection: make sure the remote carries the v2 format marker
             // (and convert any v1 leftovers if connecting to an old notes repo).
-            githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).catch((err) => {
+            githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
+                if (didMigrate) {
+                    // Remote-only notes may have been imported locally — full reload
+                    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+                }
+            }).catch((err) => {
                 console.error('[Sync] remote format migration failed:', String(err));
             });
         }
@@ -1337,7 +1348,12 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
 electron_1.ipcMain.handle('sync:pull', async () => {
     const result = await githubSync.pullNotes(NOTES_DIR);
     // Guarded no-op once the remote is already on format v2
-    githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).catch((err) => {
+    githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
+        if (didMigrate) {
+            // Remote-only notes may have been imported locally — full reload
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+        }
+    }).catch((err) => {
         console.error('[Sync] remote format migration failed:', String(err));
     });
     if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
@@ -2175,6 +2191,68 @@ electron_1.ipcMain.handle('app:set-login-item', (_event, enabled) => {
         return { ok: false, error: String(err) };
     }
 });
+// ── CLI skill exposure (~/.claude/skills/noteflow-cli) ────────────────────────
+// Installs the bundled noteflow-cli SKILL.md into the user's Claude skills dir so
+// AI agents (e.g. Claude Code) discover how to drive NoteFlow via the CLI without
+// any extra download. Controlled by the `exposeSkillToAgents` setting (default on)
+// and re-synced on every launch so skill updates propagate. Best-effort: never
+// throws into the startup path.
+function syncSkillToClaudeDir() {
+    try {
+        const enabled = (readSettings().exposeSkillToAgents ?? true);
+        const destDir = path_1.default.join(os_1.default.homedir(), '.claude', 'skills', 'noteflow-cli');
+        const destFile = path_1.default.join(destDir, 'SKILL.md');
+        if (!enabled) {
+            // Opt-out: remove our file (and the folder if we left it empty). Never
+            // touch anything else under ~/.claude.
+            try {
+                if (fs_1.default.existsSync(destFile))
+                    fs_1.default.unlinkSync(destFile);
+                if (fs_1.default.existsSync(destDir) && fs_1.default.readdirSync(destDir).length === 0)
+                    fs_1.default.rmdirSync(destDir);
+            }
+            catch (err) {
+                console.error('Failed to remove NoteFlow skill:', err);
+            }
+            return;
+        }
+        const srcFile = electron_1.app.isPackaged
+            ? path_1.default.join(process.resourcesPath, 'cli', 'noteflow-cli', 'SKILL.md')
+            : path_1.default.join(__dirname, '..', 'cli', 'noteflow-cli', 'SKILL.md');
+        if (!fs_1.default.existsSync(srcFile)) {
+            // Dev without a bundled skill, or an unexpected layout — not fatal.
+            console.error('NoteFlow skill source not found, skipping sync:', srcFile);
+            return;
+        }
+        const srcContent = fs_1.default.readFileSync(srcFile, 'utf-8');
+        // Copy only when missing or stale, so we self-heal and pick up skill
+        // changes on update without rewriting on every launch.
+        const current = fs_1.default.existsSync(destFile) ? fs_1.default.readFileSync(destFile, 'utf-8') : null;
+        if (current !== srcContent) {
+            fs_1.default.mkdirSync(destDir, { recursive: true });
+            fs_1.default.writeFileSync(destFile, srcContent, 'utf-8');
+        }
+    }
+    catch (err) {
+        console.error('Failed to sync NoteFlow skill:', err);
+    }
+}
+electron_1.ipcMain.handle('app:get-skill-sync', () => ({
+    enabled: (readSettings().exposeSkillToAgents ?? true),
+}));
+electron_1.ipcMain.handle('app:set-skill-sync', (_event, enabled) => {
+    const settings = readSettings();
+    settings.exposeSkillToAgents = enabled;
+    writeSettings(settings);
+    try {
+        syncSkillToClaudeDir();
+        return { ok: true };
+    }
+    catch (err) {
+        console.error('Failed to set skill sync:', err);
+        return { ok: false, error: String(err) };
+    }
+});
 electron_1.ipcMain.handle('settings:get-startup-stickies', () => {
     return (readSettings().startupStickies ?? []);
 });
@@ -2449,6 +2527,14 @@ electron_1.app.whenReady().then(async () => {
         catch (err) {
             console.error('Failed to refresh login item on startup:', err);
         }
+    }
+    // Keep the CLI skill in ~/.claude/skills in sync (install/update/remove) so AI
+    // agents discover it. Best-effort — must never block startup.
+    try {
+        syncSkillToClaudeDir();
+    }
+    catch (err) {
+        console.error('Failed to sync NoteFlow skill on startup:', err);
     }
     if (isStartupMode) {
         // Launched at system startup: always keep the main window hidden in tray

@@ -97,11 +97,14 @@ Iconos del TitleBar:
 
 ## Notas temporales
 
-- Se crean con `Ctrl+Shift+N` o desde el click-derecho en `+ New note`.
+- Se crean con `Ctrl+Shift+N`, desde el click-derecho en `+ New note`, o con el **botón-icono de
+  reloj** (`Timer`) que hay entre `+ New note` y el botón de nuevo grupo en el sidebar.
 - Llevan `expiresAt` en el frontmatter (24h desde su creación).
 - El proceso principal comprueba cada minuto y **borra automáticamente** las vencidas (también
   del repositorio remoto si hay sync).
 - En el sidebar se distinguen por un icono de reloj (⏱) junto a la hora.
+- Dentro del editor, junto a la fecha de actualización se muestra `Deletes <fecha · hora>` (con
+  icono de reloj, en tono de acento) indicando cuándo se autoeliminará.
 
 ---
 
@@ -414,7 +417,12 @@ Los items de lista de tareas (`- [ ]`) tienen soporte extendido:
 - Se guardan como base64 inline en el `.md`.
 
 ### Bloques de código
-- Botón de copiar integrado en cada bloque.
+- Botón de copiar integrado en cada bloque (arriba a la derecha, visible al pasar el ratón).
+- **Selector de lenguaje** (arriba a la izquierda): muestra el lenguaje actual ("Plain text" si no
+  hay ninguno). Al pulsarlo abre un desplegable con un buscador y la lista de lenguajes soportados;
+  la primera opción, **"Plain text"**, desactiva el resaltado. Si el bloque tiene lenguaje asignado, la
+  etiqueta se ve siempre (sutil) para saber el lenguaje sin hover. Se cierra al hacer click fuera o
+  con Escape.
 - Syntax highlighting con Lowlight.
 
 ### Relacionar secciones (slash command `/`)
