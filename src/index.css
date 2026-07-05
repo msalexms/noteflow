@@ -295,16 +295,13 @@ button {
   border-left: 3px solid rgb(var(--accent-2));
   border-radius: 4px;
   padding: 1rem;
+  /* Reserve top room so neither the language label (has-language, always shown)
+     nor the hover-only label/Copy buttons of plain-text blocks overlap the first
+     code line. Applies to every block; laterals/bottom keep the 1rem padding. */
+  padding-top: 2.25rem;
   margin: 1rem 0;
   overflow-x: auto;
   position: relative;
-}
-
-/* When a language is assigned, its label is always visible (top-2 = 0.5rem tall
-   pill). Reserve extra top padding so the first code line clears the label.
-   Plain-text blocks (no language) keep the default 1rem padding. */
-.prose-editor .ProseMirror pre.has-language {
-  padding-top: 2.25rem;
 }
 
 .prose-editor .ProseMirror pre code {
@@ -312,6 +309,16 @@ button {
   border: none;
   padding: 0;
   font-size: 0.85em;
+  color: rgb(var(--text));
+}
+
+/* Plain-text blocks (no language) get auto-highlighted by lowlight's
+   highlightAuto, which colours tokens via .hljs-* spans. Force a uniform code
+   colour so unhighlighted blocks stay visually plain. Specificity (0,3,3) beats
+   the single-class .hljs-* rules (0,1,0), so no !important is needed. Search
+   highlights (.nf-search-match) stay visible since they colour the background. */
+.prose-editor .ProseMirror pre:not(.has-language) code,
+.prose-editor .ProseMirror pre:not(.has-language) code * {
   color: rgb(var(--text));
 }
 
