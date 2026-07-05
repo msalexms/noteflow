@@ -2,7 +2,7 @@
 # Contributor: callysthenes
 
 pkgname=noteflow
-pkgver=1.5.6
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="Fast notes for software engineers - Local files, optional private GitHub sync. No telemetry."
 arch=('x86_64')

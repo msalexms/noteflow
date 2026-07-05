@@ -74,7 +74,7 @@ Se dispara con tags `v*`. Dos jobs:
 2. **release** (ubuntu, tras build): descarga los tres artefactos y crea el GitHub Release con
    `generate_release_notes: true`, publicando:
    - Windows: `*.exe`, `*.exe.blockmap`, `latest.yml`
-   - Linux: `*.deb`, `*.AppImage`, `*.pkg.tar.zst`, `latest-linux.yml`
+   - Linux: `*.deb`, `*.AppImage`, `latest-linux.yml`
    - macOS: `*.dmg`, `*.dmg.blockmap`, `latest-mac.yml`
    - `prerelease: contains(github.ref_name, '-')` → un tag con sufijo (p. ej. `vX.Y.Z-mac.1`) sale como
      **prerelease** y el updater in-app (`/releases/latest`) lo ignora — útil para probar macOS sin
@@ -88,10 +88,10 @@ Se dispara con tags `v*`. Dos jobs:
 - **Windows:** `NoteFlow-X.Y.Z-Setup.exe` (NSIS) — añade `resources\cli` al PATH del usuario.
 - **Linux (Debian/Ubuntu/Mint):** `noteflow_X.Y.Z_amd64.deb` — setuid del sandbox + symlink
   `noteflow` en `/usr/local/bin`.
-- **Linux (Arch/CachyOS/Manjaro):** `noteflow-X.Y.Z-x86_64.pkg.tar.zst` (target `pacman` de
-  electron-builder). Hay además un `PKGBUILD` en la raíz para build manual/AUR (usa `electron` del
-  sistema y `NOTEFLOW_NATIVE=1`); licencia `LicenseRef-FSL-1.1-Apache-2.0`.
-- **Linux (universal):** `NoteFlow-X.Y.Z-x86_64.AppImage` — funciona en cualquier distro.
+- **Linux (Arch/CachyOS/Manjaro):** **no** se publica prebuilt (`linux.target = ["deb","appimage"]`,
+  sin `pacman`). Los usuarios de Arch compilan desde el `PKGBUILD` de la raíz (`makepkg -si`, usa
+  `electron` del sistema; recordar bumpear su `pkgver` en cada release) o usan el AppImage.
+- **Linux (universal):** `NoteFlow-X.Y.Z.AppImage` — funciona en cualquier distro.
 - **macOS (Apple Silicon):** `NoteFlow-X.Y.Z-arm64.dmg` — **sin firmar/notarizar** (firma ad-hoc).
   Gatekeeper avisa en el primer arranque; el usuario hace right-click → Open o
   `xattr -dr com.apple.quarantine /Applications/NoteFlow.app`. Solo arm64 (sin Intel). El CLI viaja en
@@ -117,7 +117,7 @@ Se dispara con tags `v*`. Dos jobs:
              "category": "public.app-category.productivity", "darkModeSupport": true,
              "hardenedRuntime": false, "artifactName": "${productName}-${version}-${arch}.${ext}" },
   "linux": {
-    "target": ["deb", "appimage", "pacman"], "category": "Utility", "icon": "public/icon.png",
+    "target": ["deb", "appimage"], "category": "Utility", "icon": "public/icon.png",
     "desktop": { "entry": { "Name": "NoteFlow", "Comment": "Fast notes for software engineers",
                             "Keywords": "notes;markdown;text;", "Categories": "Utility;TextEditor;" } }
   },
@@ -127,7 +127,7 @@ Se dispara con tags `v*`. Dos jobs:
     "afterInstall": "build/linux-postinstall.sh",
     "afterRemove":  "build/linux-postremove.sh"
   },
-  "pacman": {
+  "pacman": {   // config presente pero INACTIVA: "pacman" no está en linux.target, no se compila
     "depends": ["gtk3", "libnotify", "nss", "libxss", "libxtst", "xdg-utils",
                 "at-spi2-core", "libdrm", "libxkbcommon", "alsa-lib"],
     "packageName": "noteflow"
