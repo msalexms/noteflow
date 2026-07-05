@@ -164,9 +164,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
           ref={buttonRef}
           contentEditable={false}
           onClick={() => (open ? setOpen(false) : openDropdown())}
-          className={`code-lang-button absolute top-2 left-2 transition-opacity text-xs px-2 py-1 rounded ${
-            language ? 'opacity-60 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
+          className="code-lang-button absolute top-2 left-2 transition-opacity text-xs px-2 py-1 rounded opacity-60 group-hover:opacity-100"
           style={{
             background: 'rgb(var(--bg-2))',
             color: 'rgb(var(--text-muted))',
