@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isLowEndHardware } from '../lib/hardware'
 
 // Mirrors the legacy flag BrainView already honoured: '1' forces the 2D fallback.
 const FORCE_2D_KEY = 'noteflow:brain-force-2d'
@@ -6,12 +7,17 @@ const FORCE_2D_KEY = 'noteflow:brain-force-2d'
 // prompt, or the legacy force-2D flag). Used to avoid re-nudging on weak machines.
 const CHOSEN_KEY = 'noteflow:brain-3d-chosen'
 
-// Rough guess at a low-powered device, done purely in the renderer (no IPC): few
-// logical cores or little RAM. deviceMemory is coarse and capped by the browser
-// (max ~8, rounded to a power of two), but it's good enough as a nudge to default to
-// the lighter 2D render. Only trust truthy values so a 0/undefined reading from an
-// unsupported API doesn't produce a false positive.
+// Rough guess at a low-powered device. When the Electron preload exposes real
+// hardware info, trust that (see isLowEndHardware). Otherwise fall back to the
+// coarse renderer-only heuristic: few logical cores or little RAM. deviceMemory
+// is coarse and capped by the browser (max ~8, rounded to a power of two), but
+// it's good enough as a nudge to default to the lighter 2D render. Only trust
+// truthy values so a 0/undefined reading from an unsupported API doesn't produce
+// a false positive.
 function isLowEndDevice(): boolean {
+  const hw = window.noteflow?.hardware
+  if (hw) return isLowEndHardware(hw)
+
   const cores = navigator.hardwareConcurrency
   const memory = (navigator as { deviceMemory?: number }).deviceMemory
   return (!!cores && cores <= 4) || (!!memory && memory <= 4)

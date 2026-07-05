@@ -2396,6 +2396,15 @@ electron_1.ipcMain.on('window:minimize', (event) => {
 electron_1.ipcMain.on('window:get-id', (event) => {
     event.returnValue = event.sender.id;
 });
+electron_1.ipcMain.on('app:get-hardware', (event) => {
+    const cpus = os_1.default.cpus();
+    event.returnValue = {
+        logicalCores: cpus.length,
+        cpuModel: cpus[0]?.model ?? '',
+        cpuSpeedMHz: cpus[0]?.speed ?? 0,
+        totalMemGiB: os_1.default.totalmem() / (1024 ** 3),
+    };
+});
 electron_1.ipcMain.on('window:maximize', () => {
     if (mainWindow?.isMaximized())
         mainWindow.unmaximize();

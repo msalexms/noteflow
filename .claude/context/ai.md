@@ -59,10 +59,21 @@ consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
     pulso único en hover (nodo→relacionada) + chispas ambientales aleatorias por el wireframe.
     `BrainTuner.tsx` es un panel dev de escultura (`SHOW_TUNER=false`). Click en nota → fly-in +
     `openSection`. Forzar 2D: `localStorage 'noteflow:brain-force-2d'`. En equipos de pocos recursos
-    (heurística en el renderer: `hardwareConcurrency <= 4` o `deviceMemory <= 4`) el cerebro arranca
-    por defecto en 2D y muestra un popup una-vez ofreciendo cambiar a 3D; la elección explícita del
-    usuario (o el legacy force-2D) se marca con `localStorage 'noteflow:brain-3d-chosen'` y ya no
-    vuelve a nudgear.
+    el cerebro arranca por defecto en 2D y muestra un popup una-vez ofreciendo cambiar a 3D; la
+    elección explícita del usuario (o el legacy force-2D) se marca con `localStorage
+    'noteflow:brain-3d-chosen'` y ya no vuelve a nudgear.
+    La detección de gama baja (`isLowEndDevice` en `brainSettingsStore.ts`) usa **hardware real** del
+    proceso Electron: el preload expone `window.noteflow.hardware`, leído de forma **síncrona** en
+    carga del preload vía `ipcRenderer.sendSync('app:get-hardware')` (el handler en `main.ts` calcula
+    `os.cpus()` + `os.totalmem()`). Debe venir del proceso principal porque el preload corre
+    **sandboxed** (default de Electron 35) y ahí `node:os` no existe. La lógica pura vive en `src/lib/hardware.ts`
+    (`isLowEndHardware`, testeada en `tests/lib/hardware.test.ts`): marca gama baja si RAM ≤ 4.5 GiB, o
+    ≤ 4 núcleos lógicos, o clock base < 2.0 GHz (parseado del modelo `@ x.xxGHz`; NO se usa
+    `cpus().speed` porque en Linux reporta la frecuencia actual fluctuante, no el clock base), o el
+    modelo es un chip ULV de portátil (sufijo Intel U/Y o AMD serie U). Esto captura portátiles ULV
+    tipo i5-8250U (8 hilos, ~7,7 GiB) que la vieja heurística `navigator` (`hardwareConcurrency`/
+    `deviceMemory`) no detectaba. Si no hay `window.noteflow.hardware` (contexto sin bridge/tests), cae
+    al fallback `navigator` anterior.
   - **`BrainCanvas.tsx` (2D, FALLBACK sin WebGL):** `<canvas>` 2D propio + `d3-force`
     (`useForceLayout.ts`) con pan/zoom/drag/hover.
   Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de

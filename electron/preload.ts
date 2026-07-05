@@ -22,6 +22,16 @@ const api = {
   // Platform — lets the renderer adapt shortcut labels (⌘ vs Ctrl), etc.
   platform: process.platform as NodeJS.Platform,
 
+  // Real hardware info from the Node side (os module). Read synchronously from the
+  // main process at preload load so the renderer can access it without async IPC: the
+  // Brain store needs it at import time to decide 2D vs 3D. It must come from main
+  // because the preload runs sandboxed (Electron 35 default) and node:os is not
+  // available there. The browser's navigator.hardwareConcurrency (logical threads)
+  // and navigator.deviceMemory (coarse, power-of-two, capped ~8) are too blunt to spot
+  // low-power laptop chips; os.cpus() exposes the CPU model (with base clock) and
+  // os.totalmem() the real RAM.
+  hardware: ipcRenderer.sendSync('app:get-hardware'),
+
   // File system (folder-per-note: one dir per note, one .md per section)
   readAllNotes: (): Promise<NoteDirRecord[]> => ipcRenderer.invoke('fs:read-all-notes'),
   readNoteDir: (dir: string): Promise<NoteDirRecord | null> => ipcRenderer.invoke('fs:read-note-dir', dir),

@@ -266,6 +266,14 @@ declare global {
   interface Window {
     noteflow: {
       platform: string
+      // Real hardware info from the Node side (see preload). Optional so contexts
+      // or tests without the bridge still type-check.
+      hardware?: {
+        logicalCores: number
+        cpuModel: string
+        cpuSpeedMHz: number
+        totalMemGiB: number
+      }
       readAllNotes: () => Promise<NoteDirRecord[]>
       readNoteDir: (dir: string) => Promise<NoteDirRecord | null>
       writeNote: (payload: NoteWritePayload) => Promise<{ ok: boolean; error?: string }>

@@ -2408,6 +2408,15 @@ ipcMain.on('window:minimize', (event) => {
 ipcMain.on('window:get-id', (event) => {
   event.returnValue = event.sender.id
 })
+ipcMain.on('app:get-hardware', (event) => {
+  const cpus = os.cpus()
+  event.returnValue = {
+    logicalCores: cpus.length,
+    cpuModel: cpus[0]?.model ?? '',
+    cpuSpeedMHz: cpus[0]?.speed ?? 0,
+    totalMemGiB: os.totalmem() / (1024 ** 3),
+  }
+})
 ipcMain.on('window:maximize', () => {
   if (mainWindow?.isMaximized()) mainWindow.unmaximize()
   else mainWindow?.maximize()
