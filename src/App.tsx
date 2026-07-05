@@ -14,6 +14,7 @@ import { AllContentOverview } from './components/AllContentOverview/AllContentOv
 import { CommandPalette } from './components/CommandPalette/CommandPalette'
 import { GripVertical, PanelLeftOpen, X } from 'lucide-react'
 import { StickyApp } from './components/StickyApp'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { modKey } from './lib/platform'
 
@@ -453,10 +454,17 @@ export function App() {
   }, [extractDraggedNoteId, notes, clearDropUi])
 
   if (isSticky) {
-    return <StickyApp />
+    return (
+      <ErrorBoundary>
+        <HoverPreviewProvider>
+          <StickyApp />
+        </HoverPreviewProvider>
+      </ErrorBoundary>
+    )
   }
 
   return (
+    <ErrorBoundary>
     <HoverPreviewProvider>
     <div className="flex flex-col h-screen bg-surface-0 text-text overflow-hidden">
       <TitleBar />
@@ -667,6 +675,7 @@ export function App() {
       <CommandPalette />
     </div>
     </HoverPreviewProvider>
+    </ErrorBoundary>
   )
 }
 

@@ -284,6 +284,14 @@ de la sincronización desde otro dispositivo. Los writes propios se marcan en
 suspender/reanudar). `powerMonitor.on('resume')` reemite `notes-updated` con delays escalonados
 (1.5s…30s) por si el FS o el renderer tardan en recuperarse.
 
+Complementariamente, un **React error boundary** (`src/components/ErrorBoundary.tsx`) envuelve como
+componente más externo ambas ramas de `App.tsx` (principal y sticky). Una excepción de render que
+antes desmontaba todo el árbol y dejaba la ventana en blanco (sin poder moverla ni cerrarla, al ser
+frameless) ahora muestra un fallback a pantalla completa. Como las ventanas son frameless, el
+fallback **incluye su propia barra arrastrable + minimizar/cerrar** (`window.noteflow.minimize()` /
+`.close()`, mismo estilo que el `StickyTitleBar`) además de un botón "Reload"
+(`window.location.reload()`); si no, volveríamos a una ventana inmanejable.
+
 ### Ventanas sticky (fold/unfold + shape)
 Stickies = BrowserWindows extra que cargan la app con hash `#sticky?noteId=...&sectionId=...`,
 `alwaysOnTop`. En Windows se usa `win.setShape()` (región redondeada calculada píxel a píxel)
