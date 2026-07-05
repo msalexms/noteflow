@@ -300,6 +300,13 @@ button {
   position: relative;
 }
 
+/* When a language is assigned, its label is always visible (top-2 = 0.5rem tall
+   pill). Reserve extra top padding so the first code line clears the label.
+   Plain-text blocks (no language) keep the default 1rem padding. */
+.prose-editor .ProseMirror pre.has-language {
+  padding-top: 2.25rem;
+}
+
 .prose-editor .ProseMirror pre code {
   background: none;
   border: none;

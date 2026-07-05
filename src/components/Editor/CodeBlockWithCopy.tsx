@@ -159,7 +159,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
 
   return (
     <NodeViewWrapper className="group code-block-node">
-      <pre>
+      <pre className={language ? 'has-language' : undefined}>
         <button
           ref={buttonRef}
           contentEditable={false}
