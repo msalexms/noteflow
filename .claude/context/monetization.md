@@ -1,12 +1,14 @@
 # NoteFlow — Monetización (Fase 4): cuenta, IA gestionada, nube E2EE
 
-> **Estado: Fase 4.0 (parte cliente) IMPLEMENTADA** — cuenta NoteFlow en la app + lectura de
-> entitlements + esquema SQL + panel Settings → Account (ver "Fase 4.0 — implementación" abajo).
-> El proyecto Supabase real **aún no existe**: `electron/cloudConfig.ts` va con placeholders y todo
-> queda inerte (`configured === false`) hasta rellenarlo (pasos del operador en `supabase/README.md`).
+> **Estado: Fase 4.0 IMPLEMENTADA** — cuenta NoteFlow en la app + lectura de entitlements +
+> esquema SQL + panel Settings → Account (ver "Fase 4.0 — implementación" abajo). El **proyecto
+> Supabase real ya está conectado** (`electron/cloudConfig.ts` lleva la URL y la anon key reales) y
+> el **webhook de billing está implementado** (`supabase/functions/billing-webhook` + migración
+> 0002). Pendiente del operador: crear los productos en Lemon Squeezy y desplegar la función
+> (pasos en `supabase/README.md` § 5).
 > Decisiones tomadas con el usuario (2026-07): backend **Supabase**, pagos por **Merchant of
-> Record**, nube con **E2EE total**, IA gestionada con **OpenRouter** como único upstream. Las
-> opciones gratuitas actuales (IA local/API propia, GitHub Sync) **se mantienen**.
+> Record = Lemon Squeezy**, nube con **E2EE total**, IA gestionada con **OpenRouter** como único
+> upstream. Las opciones gratuitas actuales (IA local/API propia, GitHub Sync) **se mantienen**.
 
 ## Visión de producto
 
@@ -60,11 +62,25 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   poblada exclusivamente por los **webhooks del MoR** (Edge Function `billing-webhook`, valida
   firma). El cliente lee sus filas vía RLS (`user_id = auth.uid()`). Cambiar de proveedor de pago
   no toca el cliente.
-- **Merchant of Record:** Paddle o Lemon Squeezy (decidir al implementar; ambos ~5% + 0,50 por
-  transacción). Razón: como vendedor particular/autónomo en España, el MoR es el vendedor legal y
-  gestiona el **IVA por país de la UE** (con Stripe directo tocaría OSS/VIES y declarar IVA por
-  país). El checkout se abre en el navegador (`app:open-url`) con `user_id` en el custom data para
-  correlar el webhook.
+- **Merchant of Record: Lemon Squeezy** (decidido 2026-07; ~5% + 0,50 por transacción). Razón:
+  como vendedor particular/autónomo en España, el MoR es el vendedor legal y gestiona el **IVA por
+  país de la UE** (con Stripe directo tocaría OSS/VIES y declarar IVA por país). El checkout se
+  abre en el navegador (`app:open-url`) con `checkout[custom][user_id]=<uuid>` para correlar el
+  webhook (lo hará la app en la fase 4.1).
+- **Webhook de billing (implementado):** Edge Function `supabase/functions/billing-webhook`
+  (Deno, cero dependencias) — verifica la firma HMAC-SHA256 de la cabecera `X-Signature` contra el
+  body crudo (secret en `LEMONSQUEEZY_WEBHOOK_SECRET`; comparación constant-time vía
+  `crypto.subtle.verify`), traduce el variant ID de LS a nuestro `product` con el env
+  `LEMONSQUEEZY_VARIANT_MAP` (`"890123:ai,890124:cloud,..."`), mapea estados
+  (`on_trial|active|cancelled → 'active'` — la suscripción cancelada sigue pagada hasta `ends_at`,
+  coherente con el comentario de `electron/entitlements.ts`; `past_due|unpaid|paused →
+  'past_due'`; `expired → 'expired'`) y aplica el evento con la RPC idempotente
+  `apply_subscription_event` (migración 0002: upsert por índice único `(provider, provider_ref)` +
+  guard `p_event_at >= updated_at` contra entregas fuera de orden; sin `user_id` en custom_data
+  solo actualiza, nunca inserta). Eventos no procesables (variante desconocida, `data.type` ≠
+  `subscriptions`, payload malformado) → 200 `{ignored}` para no entrar en el bucle de reintentos
+  de LS. La lógica pura vive en `logic.ts` (agnóstica de Deno) y está testeada en
+  `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no manda JWT).
 
 ## 3. NoteFlow AI — plan de IA gestionada
 
@@ -144,7 +160,7 @@ files(user_id, path_key, path_ct, content_ct, updated_at, deleted,
 
 | Fase | Contenido |
 |---|---|
-| **4.0 Fundación** | ✅ **Parte cliente hecha** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS). Pendiente: crear el proyecto Supabase real y los webhooks del MoR elegido |
+| **4.0 Fundación** | ✅ **Hecha** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy). Pendiente del operador: productos/variantes en LS + deploy de la función |
 | **4.1 IA gestionada** | Edge Function `ai-proxy` + preset `noteflow` + cuotas/metering + UI de suscripción y consumo |
 | **4.2 Nube E2EE** | Jerarquía de claves + `cloudSync.ts` (interfaz `SyncProvider`) + Realtime + onboarding passphrase/recovery + coexistencia/migración desde GitHub Sync |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
