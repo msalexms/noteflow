@@ -28,8 +28,26 @@ supabase db push   # aplica supabase/migrations/*.sql
 
 1. Dashboard → **Authentication → Sign In / Providers**: habilitar el provider **Email**.
    - "Confirm email" puede quedar en el default; el flujo OTP verifica el email por sí mismo.
-2. Dashboard → **Authentication → Emails (Email Templates)** → plantilla **"Magic Link"**:
-   por defecto envía un **enlace**, no un código. Editarla para que envíe el token OTP, p. ej.:
+2. **SMTP propio — OBLIGATORIO, no solo para producción.** Con el SMTP integrado de Supabase
+   **no se pueden editar las plantillas de email** (ni asunto ni cuerpo) y la plantilla por
+   defecto de "Magic Link" solo manda el enlace (`{{ .ConfirmationURL }}`), nunca el código de
+   6 dígitos. Como el login de NoteFlow es **sin deep links** (el usuario teclea el código, no
+   abre un enlace), sin SMTP propio el flujo de login **no funciona ni en desarrollo**.
+
+   Opción rápida: **[Resend](https://resend.com)** (tier gratuito, sin dominio propio para
+   probar):
+   1. Dashboard de Resend → **API Keys** → crear una y copiarla.
+   2. Dashboard de Supabase → Authentication → sección **SMTP Settings** ("Set up custom SMTP"):
+      - Host: `smtp.resend.com`
+      - Port: `465` (SSL) o `587` (TLS)
+      - Username: `resend`
+      - Password: la API key de Resend
+      - Sender email: `onboarding@resend.dev` (válido para pruebas sin verificar dominio;
+        en producción, verificar un dominio propio en Resend)
+      - Sender name: `NoteFlow`
+   3. Guardar.
+3. Dashboard → **Authentication → Emails** → plantilla **"Magic Link"**: ahora que hay SMTP
+   propio, el editor de plantilla se desbloquea. Editar el cuerpo para que envíe el token OTP:
 
    ```html
    <h2>Your NoteFlow sign-in code</h2>
@@ -41,8 +59,6 @@ supabase db push   # aplica supabase/migrations/*.sql
    La clave es usar `{{ .Token }}` (el código de 6 dígitos) en lugar de `{{ .ConfirmationURL }}`.
    La app llama a `POST /auth/v1/otp` con `create_user: true`, así que el registro y el login
    comparten flujo y plantilla.
-3. (Recomendado, producción) **Authentication → SMTP**: configurar un SMTP propio — el email
-   integrado de Supabase tiene un rate limit muy bajo y es solo para desarrollo.
 
 ## 4. Conectar la app
 

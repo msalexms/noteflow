@@ -13,9 +13,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
 exports.isCloudConfigured = isCloudConfigured;
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
-exports.SUPABASE_URL = '';
+exports.SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co';
 /** Supabase anon (public) API key. */
-exports.SUPABASE_ANON_KEY = '';
+exports.SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx';
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {
     return exports.SUPABASE_URL.length > 0 && exports.SUPABASE_ANON_KEY.length > 0;

@@ -10,10 +10,10 @@
 // comes from Row Level Security policies and per-user Auth JWTs.
 
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
-export const SUPABASE_URL = ''
+export const SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co'
 
 /** Supabase anon (public) API key. */
-export const SUPABASE_ANON_KEY = ''
+export const SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx'
 
 /** True once the build carries a real Supabase project configuration. */
 export function isCloudConfigured(): boolean {
