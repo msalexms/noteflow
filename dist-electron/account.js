@@ -24,6 +24,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadAccountSettings = loadAccountSettings;
 exports.onStatusChanged = onStatusChanged;
 exports.getAccountStatus = getAccountStatus;
+exports.getUserId = getUserId;
 exports.requestOtp = requestOtp;
 exports.verifyOtp = verifyOtp;
 exports.getAccessToken = getAccessToken;
@@ -137,7 +138,14 @@ function getAccountStatus() {
         email: signedIn ? s.email : undefined,
         entitlements: signedIn ? entitlements : entitlements_1.NO_ENTITLEMENTS,
         entitlementsFetchedAt: signedIn ? entitlementsFetchedAt : undefined,
+        aiCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
     };
+}
+/** Supabase user id of the signed-in session (main-process only — used to tag
+ *  the Lemon Squeezy checkout; it never crosses to the renderer). */
+function getUserId() {
+    const s = accountSettings ?? loadAccountSettings();
+    return s.userId ?? null;
 }
 /** Emails a 6-digit one-time code (creates the account on first sign-in). */
 async function requestOtp(email) {

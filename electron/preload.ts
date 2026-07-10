@@ -45,6 +45,13 @@ const api = {
   // Settings
   getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),
   setTheme: (id: string)      => ipcRenderer.send('settings:set-theme', id),
+  getLanguage: (): 'en' | 'es' | 'system' => ipcRenderer.sendSync('settings:get-language'),
+  setLanguage: (setting: 'en' | 'es' | 'system') => ipcRenderer.send('settings:set-language', setting),
+  onLanguageChanged: (callback: (setting: 'en' | 'es' | 'system') => void) => {
+    const wrapper = (_event: any, setting: 'en' | 'es' | 'system') => callback(setting)
+    ipcRenderer.on('language-changed', wrapper)
+    return () => ipcRenderer.removeListener('language-changed', wrapper)
+  },
   getLoginItem: (): Promise<{ openAtLogin: boolean }> => ipcRenderer.invoke('app:get-login-item'),
   setLoginItem: (enabled: boolean): Promise<void> => ipcRenderer.invoke('app:set-login-item', enabled),
   getSkillSync: (): Promise<{ enabled: boolean }> => ipcRenderer.invoke('app:get-skill-sync'),
@@ -165,6 +172,7 @@ const api = {
     email?: string
     entitlements: { ai: boolean; cloud: boolean }
     entitlementsFetchedAt?: string
+    aiCheckoutConfigured: boolean
   }> => ipcRenderer.invoke('account:get-status'),
   accountRequestOtp: (email: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('account:request-otp', email),
@@ -174,6 +182,10 @@ const api = {
     ipcRenderer.invoke('account:sign-out'),
   accountRefreshEntitlements: (): Promise<{ ok: boolean; error?: string; entitlements: { ai: boolean; cloud: boolean } }> =>
     ipcRenderer.invoke('account:refresh-entitlements'),
+  // Opens the subscription checkout in the browser; the URL (with the user id)
+  // is built in main so the id never crosses the bridge.
+  accountOpenCheckout: (product: 'ai'): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('account:open-checkout', product),
   onAccountStatusChanged: (
     cb: (status: {
       configured: boolean
@@ -181,6 +193,7 @@ const api = {
       email?: string
       entitlements: { ai: boolean; cloud: boolean }
       entitlementsFetchedAt?: string
+      aiCheckoutConfigured: boolean
     }) => void
   ) => {
     const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)

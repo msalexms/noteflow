@@ -21,12 +21,14 @@ import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as account from './account'
+import { LEMONSQUEEZY_CHECKOUT_URLS } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
 import * as noteFormat from './noteFormat'
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
+import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
 
 
 function getIconPath(): string {
@@ -41,6 +43,9 @@ const isDev = process.env.NODE_ENV === 'development' || (!app.isPackaged && !pro
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+// Whether the global shortcut failed to register — changes the tray tooltip. Kept
+// as module state so the tooltip survives a language change (applyTrayMenu re-reads it).
+let shortcutUnavailable = false
 let isQuitting = false
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 
@@ -162,6 +167,50 @@ function emitAccountStatusChanged(): void {
   })
 }
 
+// Baseline for the 'ai' entitlement, established on the FIRST status observation of the
+// CURRENT signed-in identity (app boot with a persisted session, or right after sign-in) and
+// never used to trigger anything by itself — entitlements are re-fetched from scratch on every
+// boot (account.ts persists no entitlements), so a naive false→true edge on that first read
+// would force-switch the provider on every single launch for an already-subscribed user, even
+// one who deliberately kept a BYO-key provider active. Only a REAL transition seen LATER for
+// the SAME identity in the same run (e.g. the user subscribes, comes back and hits Refresh in
+// Settings → Account) should auto-activate the managed provider.
+// Keyed by identity (the signed-in email, or `null` while signed out) so that signing out and
+// signing back in — as the same account or a different one — always re-establishes a fresh
+// baseline instead of carrying over a stale `false` from a previous session: without this, an
+// account B that already had the entitlement before this process even started would look like
+// it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
+let aiEntitlementBaseline: boolean | null = null
+let aiEntitlementIdentity: string | null = null
+
+function handleAccountStatusChanged(): void {
+  const status = account.getAccountStatus()
+  const identity = status.signedIn ? (status.email ?? '') : null
+  const aiActive = status.entitlements.ai
+
+  if (identity !== aiEntitlementIdentity) {
+    // Identity changed since the last observation (fresh sign-in, switch to a different
+    // account, or signing out) — start a fresh baseline for it without triggering anything.
+    aiEntitlementIdentity = identity
+    aiEntitlementBaseline = identity === null ? null : aiActive
+  } else if (aiEntitlementBaseline !== null && !aiEntitlementBaseline && aiActive) {
+    // Same identity as before, real subscribe-while-running transition — auto-switch to the
+    // managed provider unless it's already active (avoid an unnecessary settings write).
+    // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
+    // to onAccountStatusChanged) already sees the new active provider.
+    const cfg = readLlmSettings()
+    if (cfg.active !== 'noteflow') {
+      cfg.active = 'noteflow'
+      writeLlmSettings(cfg)
+    }
+    aiEntitlementBaseline = aiActive
+  } else {
+    aiEntitlementBaseline = identity === null ? null : aiActive
+  }
+
+  emitAccountStatusChanged()
+}
+
 type PullResult = Awaited<ReturnType<typeof githubSync.pullNotes>>
 
 function broadcastPullResult(result: PullResult): void {
@@ -181,6 +230,15 @@ function startAutoSync(): void {
   if (autoSyncTimer) return
   autoSyncTimer = setInterval(async () => {
     if (!githubSync.getSyncStatus().connected) return
+    // Drain the journal of failed remote mutations BEFORE pulling: a pending
+    // upsert/delete that never landed would otherwise make the pull delete the
+    // note locally or resurrect it (retrySyncJournal awaits each op, so the
+    // mutation queue is drained when it returns).
+    try {
+      await githubSync.retrySyncJournal(NOTES_DIR)
+    } catch (err) {
+      console.error('[AutoSync] journal retry failed:', String(err))
+    }
     // Stand down while local writes/deletes are still draining to the remote: pulling
     // now could re-add a note whose remote delete hasn't landed yet (the next tick,
     // 5 min later, runs with the queue drained). Manual pulls are unaffected.
@@ -591,15 +649,40 @@ function createTray() {
   }
 
   tray = new Tray(icon)
-  tray.setToolTip('NoteFlow — quick notes')
+  applyTrayMenu()
+  tray.on('click', () => toggleWindow())
+}
+
+/** Resolves the active UI language from the persisted setting (lazy OS locale). */
+function currentTrayLang() {
+  const setting = readSettings().language as LanguageSetting | undefined
+  return resolveLang(setting, () => app.getLocale())
+}
+
+/**
+ * Full main-process message tree in the active language, resolved at call-time so
+ * notifications and native dialogs follow the current `language` setting live.
+ */
+function mainMessages() {
+  return getMessages(currentTrayLang())
+}
+
+/**
+ * (Re)builds the tray context menu + tooltip in the current language. Called on
+ * tray creation and whenever the language changes, so the menu switches live.
+ */
+function applyTrayMenu() {
+  if (!tray) return
+  const t = getTrayMessages(currentTrayLang())
+  tray.setToolTip(shortcutUnavailable ? t.tooltipShortcutUnavailable : t.tooltip)
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open NoteFlow',
+      label: t.open,
       click: () => toggleWindow(),
     },
     {
-      label: 'New Note',
+      label: t.newNote,
       accelerator: 'CmdOrCtrl+Shift+N',
       click: () => {
         showWindow()
@@ -608,12 +691,12 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Open notes folder',
+      label: t.openNotesFolder,
       click: () => shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)),
     },
     { type: 'separator' },
     {
-      label: 'Quit',
+      label: t.quit,
       click: () => {
         mainWindow?.webContents.session.flushStorageData()
         app.quit()
@@ -622,7 +705,6 @@ function createTray() {
   ])
 
   tray.setContextMenu(contextMenu)
-  tray.on('click', () => toggleWindow())
 }
 
 function showWindow() {
@@ -744,8 +826,10 @@ function registerGlobalShortcut() {
   if (!ret) {
     console.error('Failed to register global shortcut Ctrl+Shift+Space')
     // Update tray tooltip so the user knows the shortcut is unavailable
-    // (common on Linux when an input method or another app captures it)
-    tray?.setToolTip('NoteFlow — shortcut unavailable (Ctrl+Shift+Space)')
+    // (common on Linux when an input method or another app captures it).
+    // Recorded in module state so a later language change keeps this variant.
+    shortcutUnavailable = true
+    tray?.setToolTip(getTrayMessages(currentTrayLang()).tooltipShortcutUnavailable)
   }
 }
 
@@ -1085,9 +1169,10 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
       // app running so the user can read the instructions; they relaunch manually.
       await shell.openPath(dest)
       if (Notification.isSupported()) {
+        const n = mainMessages().notifications
         new Notification({
-          title: 'Update downloaded',
-          body: 'Drag NoteFlow to your Applications folder to finish updating, then reopen it.',
+          title: n.updateDownloadedTitle,
+          body: n.updateDownloadedBody,
         }).show()
       }
     } else {
@@ -1115,7 +1200,7 @@ ipcMain.handle('app:download-and-install', async (_event, url: string) => {
 ipcMain.handle('app:choose-notes-dir', async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
     properties: ['openDirectory'],
-    title: 'Choose notes folder',
+    title: mainMessages().dialogs.chooseNotesFolder,
   })
   return result.canceled ? null : result.filePaths[0]
 })
@@ -1133,7 +1218,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
       if (plain.length === 1) {
         const defaultName = safeHint ? `${safeHint}.${format}` : plain[0].filename
         const result = await dialog.showSaveDialog(mainWindow!, {
-          title: 'Export note',
+          title: mainMessages().dialogs.exportNote,
           defaultPath: path.join(os.homedir(), defaultName),
           filters: [{ name: format === 'txt' ? 'Plain Text' : 'Markdown', extensions: [format] }],
         })
@@ -1142,7 +1227,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
         return { ok: true, filePath: result.filePath }
       } else {
         const result = await dialog.showOpenDialog(mainWindow!, {
-          title: 'Choose destination folder',
+          title: mainMessages().dialogs.chooseDestinationFolder,
           properties: ['openDirectory'],
         })
         if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
@@ -1160,7 +1245,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
       ? `${safeHint}.noteflow`
       : `noteflow-export-${dateStr}.noteflow`
     const result = await dialog.showSaveDialog(mainWindow!, {
-      title: 'Export notes',
+      title: mainMessages().dialogs.exportNotes,
       defaultPath: path.join(os.homedir(), defaultNoteflowName),
       filters: [
         { name: 'NoteFlow Export', extensions: ['noteflow'] },
@@ -1186,7 +1271,7 @@ ipcMain.handle('notes:export', async (_event, entries: Array<{ filename: string;
 ipcMain.handle('notes:parse-import-file', async () => {
   try {
     const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Import notes',
+      title: mainMessages().dialogs.importNotes,
       filters: [
         { name: 'All supported', extensions: ['noteflow', 'json', 'txt', 'md'] },
         { name: 'NoteFlow Export', extensions: ['noteflow', 'json'] },
@@ -1262,14 +1347,14 @@ ipcMain.handle('notes:parse-external-import', async (_event, source: importers.I
     let srcPath: string
     if (source === 'md-folder') {
       const result = await dialog.showOpenDialog(mainWindow!, {
-        title: 'Choose a folder of Markdown notes',
+        title: mainMessages().dialogs.chooseMarkdownFolder,
         properties: ['openDirectory'],
       })
       if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
       srcPath = result.filePaths[0]
     } else {
       const result = await dialog.showOpenDialog(mainWindow!, {
-        title: source === 'notion' ? 'Import Notion export' : 'Import Google Keep export',
+        title: source === 'notion' ? mainMessages().dialogs.importNotion : mainMessages().dialogs.importGoogleKeep,
         filters: [{ name: 'Zip archive', extensions: ['zip'] }],
         properties: ['openFile'],
       })
@@ -1415,6 +1500,24 @@ ipcMain.handle('account:refresh-entitlements', () => {
   return account.refreshEntitlements()
 })
 
+// Opens the Lemon Squeezy checkout in the browser, tagged with the Supabase
+// user id (checkout[custom][user_id], URL-encoded) so the billing webhook can
+// attribute the purchase. Built here in main so the user id never crosses to
+// the renderer.
+ipcMain.handle('account:open-checkout', (_event, product: string) => {
+  const base = product === 'ai' ? LEMONSQUEEZY_CHECKOUT_URLS.ai : ''
+  if (!base) return { ok: false, error: 'Checkout is not available yet.' }
+  const userId = account.getUserId()
+  if (!userId) return { ok: false, error: 'Sign in to your NoteFlow account first.' }
+  const sep = base.includes('?') ? '&' : '?'
+  const url = parseHttpsUrl(`${base}${sep}checkout%5Bcustom%5D%5Buser_id%5D=${encodeURIComponent(userId)}`)
+  if (!url) return { ok: false, error: 'Invalid checkout URL.' }
+  shell.openExternal(url.toString()).catch((err) => {
+    console.error('Failed to open checkout URL:', err)
+  })
+  return { ok: true }
+})
+
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 
 function readSettings(): Record<string, unknown> {
@@ -1512,14 +1615,22 @@ ipcMain.handle('ai:llm-set-config', (_event, patch: {
 
 ipcMain.handle('ai:llm-list-models', async () => {
   try {
-    const models = await llm.getProvider(llm.resolveConfig(readLlmSettings())).listModels()
+    const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).listModels()
     return { ok: true, models }
   } catch (err) {
     return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) }
   }
 })
 
-ipcMain.handle('ai:llm-test', () => llm.getProvider(llm.resolveConfig(readLlmSettings())).test())
+ipcMain.handle('ai:llm-test', async () => {
+  try {
+    // resolveConfigAsync throws for the NoteFlow AI preset without a signed-in
+    // session — surface that through the same {ok, error} contract as test().
+    return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).test()
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+})
 
 // ── Chat (streaming over IPC events) ───────────────────────────────────────────
 
@@ -1691,7 +1802,7 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
   const stored = readLlmSettings()
   const pub = llm.toPublic(stored)
   if (!pub.configured) {
-    send('ai:chat-error', { requestId, error: 'No LLM provider configured' })
+    send('ai:chat-error', { requestId, error: llm.notConfiguredMessage(stored) })
     return
   }
   const caps = pub.capabilities
@@ -1705,7 +1816,7 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
     const { system, sources } = await buildChatContext(lastUser)
     if (sources.length > 0) send('ai:chat-sources', { requestId, sources })
 
-    const provider = llm.getProvider(llm.resolveConfig(stored))
+    const provider = llm.getProvider(await llm.resolveConfigAsync(stored))
     const ctx = buildToolContext()
 
     // Seed the agentic conversation from the renderer's messages, resolving each user message's
@@ -2033,7 +2144,7 @@ function extractJson(text: string): { title: string; sections: Array<{ name: str
   return null
 }
 
-ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, 'Add files to your profile'))
+ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, mainMessages().dialogs.addFilesToProfile))
 
 ipcMain.handle('ai:profile-remove-file', (_event, id: string) => {
   profileFiles.delete(id)
@@ -2041,7 +2152,7 @@ ipcMain.handle('ai:profile-remove-file', (_event, id: string) => {
 })
 
 // Chat attachments: same picker, but into the chat cache (kept across turns, not consumed).
-ipcMain.handle('ai:chat-pick-files', () => pickFilesIntoCache(chatFiles, 'Attach files to the chat'))
+ipcMain.handle('ai:chat-pick-files', () => pickFilesIntoCache(chatFiles, mainMessages().dialogs.attachFilesToChat))
 
 ipcMain.handle('ai:chat-remove-file', (_event, id: string) => {
   chatFiles.delete(id)
@@ -2050,8 +2161,13 @@ ipcMain.handle('ai:chat-remove-file', (_event, id: string) => {
 
 ipcMain.handle('ai:profile-generate', async (_event, req: { fields?: Array<{ label: string; value: string; section?: string }>; fileIds?: string[]; urls?: string[]; locale?: string }) => {
   const stored = readLlmSettings()
-  if (!llm.toPublic(stored).configured) return { ok: false, error: 'No LLM provider configured' }
-  const provider = llm.getProvider(llm.resolveConfig(stored))
+  if (!llm.toPublic(stored).configured) return { ok: false, error: llm.notConfiguredMessage(stored) }
+  let provider: llm.LlmProvider
+  try {
+    provider = llm.getProvider(await llm.resolveConfigAsync(stored))
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
   const locale = req.locale?.trim() || 'the language the user used'
 
   const parts: string[] = []
@@ -2175,6 +2291,21 @@ ipcMain.on('settings:set-theme', (_event, themeId: string) => {
   const settings = readSettings()
   settings.theme = themeId
   writeSettings(settings)
+})
+
+// Language is a local (non-synced) setting, like the theme. Setting it persists,
+// refreshes the tray in the new language, and broadcasts to every window (incl.
+// the sender and any open stickies) so the UI switches live without a reload.
+ipcMain.on('settings:get-language', (event) => {
+  event.returnValue = readSettings().language ?? 'system'
+})
+
+ipcMain.on('settings:set-language', (_event, setting: LanguageSetting) => {
+  const settings = readSettings()
+  settings.language = setting
+  writeSettings(settings)
+  applyTrayMenu()
+  BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('language-changed', setting))
 })
 
 ipcMain.handle('app:get-login-item', () => {
@@ -2531,7 +2662,7 @@ app.whenReady().then(async () => {
 
   // NoteFlow account: load the persisted session and refresh entitlements in
   // the background (deferred inside initAccount — never blocks boot).
-  account.onStatusChanged(() => emitAccountStatusChanged())
+  account.onStatusChanged(() => handleAccountStatusChanged())
   account.initAccount()
 
   const isStartupMode = process.argv.includes('--noteflow-startup')
@@ -2548,6 +2679,12 @@ app.whenReady().then(async () => {
         .pullNotes(NOTES_DIR)
         .then((result) => {
           broadcastPullResult(result)
+          // Drain remote mutations journaled in previous sessions (failed or
+          // interrupted pushes/deletes). Internally gated on the initial pull
+          // having succeeded, so this is a no-op if the pull above failed.
+          githubSync.retrySyncJournal(NOTES_DIR).catch((err) => {
+            console.error('[Startup] journal retry failed:', String(err))
+          })
           // One-time remote format migration (v1 flat files → folders + marker).
           // Internally guarded; no-op once the remote is already v2.
           githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {

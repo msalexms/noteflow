@@ -6,7 +6,21 @@
 // providers never mixes credentials. Base URLs are editable so users can point at regional
 // endpoints (e.g. MiniMax China) or self-hosted gateways.
 
+import { AI_PROXY_URL } from '../../cloudConfig'
+
 export type LlmImpl = 'anthropic' | 'openai'
+
+/**
+ * Curated OpenRouter model ids served by the managed NoteFlow AI plan (all
+ * tool-calling + vision capable). KEEP IN SYNC with DEFAULT_ALLOWED_MODELS in
+ * supabase/functions/ai-proxy/logic.ts — the proxy rejects anything else.
+ */
+export const NOTEFLOW_AI_MODELS = [
+  'openai/gpt-4o-mini',
+  'openai/gpt-4.1-mini',
+  'anthropic/claude-haiku-4.5',
+  'google/gemini-2.5-flash',
+]
 
 export interface LlmPreset {
   id: string
@@ -25,6 +39,9 @@ export interface LlmPreset {
 }
 
 export const PRESETS: LlmPreset[] = [
+  // NoteFlow AI: the managed plan (subscription). The "key" is a fresh Supabase access token of
+  // the signed-in NoteFlow account, resolved per request in resolveConfigAsync (llm/index.ts).
+  { id: 'noteflow',   label: 'NoteFlow AI',                  impl: 'openai',    baseUrl: AI_PROXY_URL,                     needsKey: false, editableBaseUrl: false, suggestedModels: NOTEFLOW_AI_MODELS },
   { id: 'anthropic',  label: 'Anthropic (Claude)',          impl: 'anthropic', baseUrl: '',                              needsKey: true,  editableBaseUrl: false, suggestedModels: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'] },
   { id: 'openai',     label: 'OpenAI',                       impl: 'openai',    baseUrl: 'https://api.openai.com/v1',      needsKey: true,  editableBaseUrl: true,  suggestedModels: ['gpt-4o', 'gpt-4o-mini'] },
   { id: 'deepseek',   label: 'DeepSeek',                     impl: 'openai',    baseUrl: 'https://api.deepseek.com/v1',    needsKey: true,  editableBaseUrl: true,  suggestedModels: ['deepseek-chat', 'deepseek-reasoner'], images: false },
@@ -39,5 +56,8 @@ export const PRESETS: LlmPreset[] = [
 export const PRESET_BY_ID: Record<string, LlmPreset> = Object.fromEntries(PRESETS.map((p) => [p.id, p]))
 
 export function presetOf(id: string): LlmPreset {
-  return PRESET_BY_ID[id] ?? PRESETS[0]
+  // Unknown/corrupted ids fall back to Anthropic (the historical default and
+  // DEFAULT_LLM_CONFIG.active) — deliberately NOT PRESETS[0], which is now the
+  // managed NoteFlow AI preset and must never hijack existing users' configs.
+  return PRESET_BY_ID[id] ?? PRESET_BY_ID['anthropic']
 }

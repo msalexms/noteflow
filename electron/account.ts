@@ -21,7 +21,7 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { encryptSecret, decryptSecret } from './ai/llm/secret'
-import { SUPABASE_URL, SUPABASE_ANON_KEY, isCloudConfigured } from './cloudConfig'
+import { SUPABASE_URL, SUPABASE_ANON_KEY, LEMONSQUEEZY_CHECKOUT_URLS, isCloudConfigured } from './cloudConfig'
 import { computeEntitlements, Entitlements, NO_ENTITLEMENTS, SubscriptionRow } from './entitlements'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,6 +38,8 @@ export interface AccountStatus {
   email?: string
   entitlements: Entitlements
   entitlementsFetchedAt?: string  // ISO — when entitlements were last fetched from the server
+  /** True when this build ships a Lemon Squeezy checkout URL for NoteFlow AI (gates the Subscribe button). */
+  aiCheckoutConfigured: boolean
 }
 
 export interface AccountOpResult {
@@ -173,7 +175,15 @@ export function getAccountStatus(): AccountStatus {
     email: signedIn ? s.email : undefined,
     entitlements: signedIn ? entitlements : NO_ENTITLEMENTS,
     entitlementsFetchedAt: signedIn ? entitlementsFetchedAt : undefined,
+    aiCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
   }
+}
+
+/** Supabase user id of the signed-in session (main-process only — used to tag
+ *  the Lemon Squeezy checkout; it never crosses to the renderer). */
+export function getUserId(): string | null {
+  const s = accountSettings ?? loadAccountSettings()
+  return s.userId ?? null
 }
 
 /** Emails a 6-digit one-time code (creates the account on first sign-in). */

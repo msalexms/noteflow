@@ -6,6 +6,8 @@ import { presetOf, type LlmPreset } from './presets'
 import { decryptSecret } from './secret'
 import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
+// No import cycle: account.ts only pulls ./secret and ./cloudConfig, never this module.
+import { getAccessToken, getAccountStatus } from '../../account'
 
 export type {
   LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ChatMessage,
@@ -28,7 +30,9 @@ function effectiveBaseUrl(cfg: LlmConfigStored): string {
   return ps.baseUrl?.trim() || preset.baseUrl
 }
 
-/** Decrypt the active preset's key and fill defaults — in-memory only, never persisted. */
+/** Decrypt the active preset's key and fill defaults — in-memory only, never persisted.
+ *  NOTE: for the managed `noteflow` preset this leaves apiKey empty — use
+ *  resolveConfigAsync wherever a provider is about to make real requests. */
 export function resolveConfig(cfg: LlmConfigStored): ResolvedLlmConfig {
   const preset = presetOf(cfg.active)
   const ps = cfg.byPreset[preset.id] ?? {}
@@ -38,6 +42,22 @@ export function resolveConfig(cfg: LlmConfigStored): ResolvedLlmConfig {
     baseUrl: effectiveBaseUrl(cfg),
     apiKey: ps.encryptedApiKey ? decryptSecret(ps.encryptedApiKey) : '',
   }
+}
+
+/**
+ * Like resolveConfig, but for the managed `noteflow` preset the credential is a
+ * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
+ * expire in ~1h, so it must be minted per request — never stored like an API
+ * key). Throws a user-facing error when there is no signed-in session.
+ */
+export async function resolveConfigAsync(cfg: LlmConfigStored): Promise<ResolvedLlmConfig> {
+  const resolved = resolveConfig(cfg)
+  if (presetOf(cfg.active).id !== 'noteflow') return resolved
+  const token = await getAccessToken()
+  if (!token) {
+    throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.')
+  }
+  return { ...resolved, apiKey: token }
 }
 
 /** Native attachment support per preset (the app never extracts text itself). */
@@ -54,14 +74,31 @@ export function toPublic(cfg: LlmConfigStored): LlmConfigPublic {
   const ps = cfg.byPreset[preset.id] ?? {}
   const model = effectiveModel(cfg)
   const hasKey = !!ps.encryptedApiKey
+  let configured = (!preset.needsKey || hasKey) && !!model
+  if (preset.id === 'noteflow') {
+    // The managed plan is only usable with a signed-in account AND an active
+    // 'ai' (or 'bundle') subscription — otherwise the proxy answers 401/403.
+    const status = getAccountStatus()
+    configured = configured && status.signedIn && status.entitlements.ai
+  }
   return {
     active: preset.id,
     model,
     baseUrl: effectiveBaseUrl(cfg),
     hasKey,
-    configured: (!preset.needsKey || hasKey) && !!model,
+    configured,
     capabilities: providerCapabilities(preset),
   }
+}
+
+/** User-facing reason why toPublic().configured is false — tailored for the managed preset. */
+export function notConfiguredMessage(cfg: LlmConfigStored): string {
+  if (presetOf(cfg.active).id === 'noteflow') {
+    const status = getAccountStatus()
+    if (!status.signedIn) return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.'
+    if (!status.entitlements.ai) return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.'
+  }
+  return 'No LLM provider configured'
 }
 
 export function getProvider(resolved: ResolvedLlmConfig): LlmProvider {

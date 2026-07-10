@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, Loader, LogOut, Mail, RefreshCw, UserCircle } from 'lucide-react'
+import { KeyRound, Loader, LogOut, Mail, RefreshCw, Sparkles, UserCircle } from 'lucide-react'
 import type { AccountStatus } from '../../types'
+import { tf } from '../../i18n/format'
+import { useT } from '../../i18n/useT'
 
 type Step = 'email' | 'code'
 
@@ -8,6 +10,7 @@ type Step = 'email' | 'code'
 // All session/token handling lives in the main process — this panel only ever
 // sees the public AccountStatus.
 export function AccountPanel() {
+  const t = useT()
   const [status, setStatus] = useState<AccountStatus | null>(null)
   const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState('')
@@ -31,7 +34,7 @@ export function AccountPanel() {
       setStep('code')
       setCode('')
     } else {
-      setError(result.error ?? 'Could not send the sign-in code.')
+      setError(result.error ?? t.settings.account.couldNotSendCode)
     }
   }
 
@@ -48,7 +51,7 @@ export function AccountPanel() {
       setCode('')
       setEmail('')
     } else {
-      setError(result.error ?? 'Could not verify the code.')
+      setError(result.error ?? t.settings.account.couldNotVerify)
     }
   }
 
@@ -63,7 +66,13 @@ export function AccountPanel() {
     setError(null)
     const result = await window.noteflow.accountRefreshEntitlements()
     setBusy(false)
-    if (!result.ok) setError(result.error ?? 'Could not refresh subscription status.')
+    if (!result.ok) setError(result.error ?? t.settings.account.couldNotRefresh)
+  }
+
+  async function handleSubscribeAi() {
+    setError(null)
+    const result = await window.noteflow.accountOpenCheckout('ai')
+    if (!result.ok) setError(result.error ?? t.settings.account.couldNotOpenCheckout)
   }
 
   async function handleSignOut() {
@@ -81,7 +90,7 @@ export function AccountPanel() {
     return (
       <div className="flex items-center gap-2 text-text-muted">
         <Loader size={12} className="animate-spin" />
-        <span className="text-xs font-mono">Loading...</span>
+        <span className="text-xs font-mono">{t.common.loading}</span>
       </div>
     )
   }
@@ -90,7 +99,7 @@ export function AccountPanel() {
   if (!status.configured) {
     return (
       <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-        NoteFlow account services aren&apos;t available in this build yet.
+        {t.settings.account.notAvailable}
       </p>
     )
   }
@@ -119,13 +128,32 @@ export function AccountPanel() {
 
           {status.entitlementsFetchedAt && (
             <p className="text-[11px] font-mono text-text-muted/60">
-              Last checked: {new Date(status.entitlementsFetchedAt).toLocaleString()}
+              {tf(t.settings.account.lastChecked, { time: new Date(status.entitlementsFetchedAt).toLocaleString() })}
             </p>
           )}
 
-          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            Subscriptions are coming soon.
-          </p>
+          {/* Subscribe to NoteFlow AI — only when the build carries a checkout
+              URL and the user does not have the entitlement yet. */}
+          {status.aiCheckoutConfigured && !status.entitlements.ai && (
+            <div className="space-y-2">
+              <button
+                onClick={handleSubscribeAi}
+                disabled={busy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
+              >
+                <Sparkles size={11} />
+                {t.settings.account.subscribeAi}
+              </button>
+              <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+                {t.settings.account.subscribeAiHint}
+              </p>
+            </div>
+          )}
+          {!status.aiCheckoutConfigured && (
+            <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+              {t.settings.account.subscriptionsSoon}
+            </p>
+          )}
 
           <div className="flex gap-2">
             <button
@@ -134,7 +162,7 @@ export function AccountPanel() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              Refresh
+              {t.settings.account.refresh}
             </button>
             <button
               onClick={handleSignOut}
@@ -142,7 +170,7 @@ export function AccountPanel() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
             >
               <LogOut size={11} />
-              Sign out
+              {t.settings.account.signOut}
             </button>
           </div>
         </>
@@ -152,12 +180,11 @@ export function AccountPanel() {
       {!status.signedIn && step === 'email' && (
         <div className="space-y-3 pt-1">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            Sign in with your email to access your NoteFlow account.
-            We&apos;ll send you a one-time code — no password needed.
+            {t.settings.account.signInDesc}
           </p>
           <div>
             <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              Email
+              {t.settings.account.email}
             </label>
             <input
               type="email"
@@ -175,7 +202,7 @@ export function AccountPanel() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? <Loader size={11} className="animate-spin" /> : <Mail size={11} />}
-            Send code
+            {t.settings.account.sendCode}
           </button>
         </div>
       )}
@@ -184,12 +211,13 @@ export function AccountPanel() {
       {!status.signedIn && step === 'code' && (
         <div className="space-y-3 pt-1">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            We sent a 6-digit code to <span className="text-text">{email.trim()}</span>.
-            Enter it below to sign in.
+            {t.settings.account.codeSentPrefix}
+            <span className="text-text">{email.trim()}</span>
+            {t.settings.account.codeSentSuffix}
           </p>
           <div>
             <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              Code
+              {t.settings.account.code}
             </label>
             <input
               type="text"
@@ -210,14 +238,14 @@ export function AccountPanel() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
-              Verify &amp; sign in
+              {t.settings.account.verifyAndSignIn}
             </button>
             <button
               onClick={handleUseDifferentEmail}
               disabled={busy}
               className="px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
             >
-              Use a different email
+              {t.settings.account.useDifferentEmail}
             </button>
           </div>
         </div>
@@ -227,12 +255,13 @@ export function AccountPanel() {
 }
 
 function PlanBadge({ name, active }: { name: string; active: boolean }) {
+  const t = useT()
   return (
     <div className="flex items-center justify-between px-3 py-2 rounded bg-surface-0 border border-border">
       <span className="text-xs font-mono text-text">{name}</span>
       {active ? (
         <span className="text-[11px] font-mono text-green-400 bg-green-500/10 border border-green-500/30 rounded px-2 py-0.5">
-          Active
+          {t.settings.account.active}
         </span>
       ) : (
         <span className="text-[11px] font-mono text-text-muted/60">—</span>

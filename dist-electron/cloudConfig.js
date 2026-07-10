@@ -10,12 +10,22 @@
 // embedded for the sync Device Flow): it grants nothing by itself — security
 // comes from Row Level Security policies and per-user Auth JWTs.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
+exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
 exports.isCloudConfigured = isCloudConfigured;
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
 exports.SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co';
 /** Supabase anon (public) API key. */
 exports.SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx';
+/** NoteFlow AI managed-LLM proxy (Edge Function ai-proxy, OpenAI-compatible). */
+exports.AI_PROXY_URL = `${exports.SUPABASE_URL}/functions/v1/ai-proxy`;
+/**
+ * Lemon Squeezy checkout URLs per product. Filled in once the products exist
+ * in the LS store (see supabase/README.md § 6). While a URL is empty, the
+ * corresponding "Subscribe" button in Settings → Account stays hidden.
+ */
+exports.LEMONSQUEEZY_CHECKOUT_URLS = {
+    ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',
+};
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {
     return exports.SUPABASE_URL.length > 0 && exports.SUPABASE_ANON_KEY.length > 0;

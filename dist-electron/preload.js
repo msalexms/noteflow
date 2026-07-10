@@ -26,6 +26,13 @@ const api = {
     // Settings
     getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
     setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),
+    getLanguage: () => electron_1.ipcRenderer.sendSync('settings:get-language'),
+    setLanguage: (setting) => electron_1.ipcRenderer.send('settings:set-language', setting),
+    onLanguageChanged: (callback) => {
+        const wrapper = (_event, setting) => callback(setting);
+        electron_1.ipcRenderer.on('language-changed', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('language-changed', wrapper);
+    },
     getLoginItem: () => electron_1.ipcRenderer.invoke('app:get-login-item'),
     setLoginItem: (enabled) => electron_1.ipcRenderer.invoke('app:set-login-item', enabled),
     getSkillSync: () => electron_1.ipcRenderer.invoke('app:get-skill-sync'),
@@ -102,6 +109,9 @@ const api = {
     accountVerifyOtp: (email, code) => electron_1.ipcRenderer.invoke('account:verify-otp', email, code),
     accountSignOut: () => electron_1.ipcRenderer.invoke('account:sign-out'),
     accountRefreshEntitlements: () => electron_1.ipcRenderer.invoke('account:refresh-entitlements'),
+    // Opens the subscription checkout in the browser; the URL (with the user id)
+    // is built in main so the id never crosses the bridge.
+    accountOpenCheckout: (product) => electron_1.ipcRenderer.invoke('account:open-checkout', product),
     onAccountStatusChanged: (cb) => {
         const wrapper = (_event, status) => cb(status);
         electron_1.ipcRenderer.on('account:status-changed', wrapper);

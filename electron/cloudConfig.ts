@@ -15,6 +15,18 @@ export const SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co'
 /** Supabase anon (public) API key. */
 export const SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx'
 
+/** NoteFlow AI managed-LLM proxy (Edge Function ai-proxy, OpenAI-compatible). */
+export const AI_PROXY_URL = `${SUPABASE_URL}/functions/v1/ai-proxy`
+
+/**
+ * Lemon Squeezy checkout URLs per product. Filled in once the products exist
+ * in the LS store (see supabase/README.md § 6). While a URL is empty, the
+ * corresponding "Subscribe" button in Settings → Account stays hidden.
+ */
+export const LEMONSQUEEZY_CHECKOUT_URLS: { ai: string } = {
+  ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',
+}
+
 /** True once the build carries a real Supabase project configuration. */
 export function isCloudConfigured(): boolean {
   return SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0

@@ -45,12 +45,14 @@ const child_process_1 = require("child_process");
 const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
 const account = __importStar(require("./account"));
+const cloudConfig_1 = require("./cloudConfig");
 const aiIndex = __importStar(require("./ai/aiIndex"));
 const llm = __importStar(require("./ai/llm"));
 const agentTools = __importStar(require("./ai/llm/tools"));
 const noteFormat = __importStar(require("./noteFormat"));
 const importers = __importStar(require("./importers"));
 const migration_1 = require("./migration");
+const i18n_1 = require("./i18n");
 function getIconPath() {
     if (process.platform === 'win32')
         return path_1.default.join(__dirname, '../public/icon.ico');
@@ -62,6 +64,9 @@ function getIconPath() {
 const isDev = process.env.NODE_ENV === 'development' || (!electron_1.app.isPackaged && !process.env.NOTEFLOW_NATIVE);
 let mainWindow = null;
 let tray = null;
+// Whether the global shortcut failed to register — changes the tray tooltip. Kept
+// as module state so the tooltip survives a language change (applyTrayMenu re-reads it).
+let shortcutUnavailable = false;
 let isQuitting = false;
 let autoSyncTimer = null;
 // Track paths recently written by the app so fs.watch can ignore them.
@@ -170,6 +175,48 @@ function emitAccountStatusChanged() {
         win.webContents.send('account:status-changed', status);
     });
 }
+// Baseline for the 'ai' entitlement, established on the FIRST status observation of the
+// CURRENT signed-in identity (app boot with a persisted session, or right after sign-in) and
+// never used to trigger anything by itself — entitlements are re-fetched from scratch on every
+// boot (account.ts persists no entitlements), so a naive false→true edge on that first read
+// would force-switch the provider on every single launch for an already-subscribed user, even
+// one who deliberately kept a BYO-key provider active. Only a REAL transition seen LATER for
+// the SAME identity in the same run (e.g. the user subscribes, comes back and hits Refresh in
+// Settings → Account) should auto-activate the managed provider.
+// Keyed by identity (the signed-in email, or `null` while signed out) so that signing out and
+// signing back in — as the same account or a different one — always re-establishes a fresh
+// baseline instead of carrying over a stale `false` from a previous session: without this, an
+// account B that already had the entitlement before this process even started would look like
+// it just "transitioned" the moment it signs in after account A (which lacked it) signs out.
+let aiEntitlementBaseline = null;
+let aiEntitlementIdentity = null;
+function handleAccountStatusChanged() {
+    const status = account.getAccountStatus();
+    const identity = status.signedIn ? (status.email ?? '') : null;
+    const aiActive = status.entitlements.ai;
+    if (identity !== aiEntitlementIdentity) {
+        // Identity changed since the last observation (fresh sign-in, switch to a different
+        // account, or signing out) — start a fresh baseline for it without triggering anything.
+        aiEntitlementIdentity = identity;
+        aiEntitlementBaseline = identity === null ? null : aiActive;
+    }
+    else if (aiEntitlementBaseline !== null && !aiEntitlementBaseline && aiActive) {
+        // Same identity as before, real subscribe-while-running transition — auto-switch to the
+        // managed provider unless it's already active (avoid an unnecessary settings write).
+        // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
+        // to onAccountStatusChanged) already sees the new active provider.
+        const cfg = readLlmSettings();
+        if (cfg.active !== 'noteflow') {
+            cfg.active = 'noteflow';
+            writeLlmSettings(cfg);
+        }
+        aiEntitlementBaseline = aiActive;
+    }
+    else {
+        aiEntitlementBaseline = identity === null ? null : aiActive;
+    }
+    emitAccountStatusChanged();
+}
 function broadcastPullResult(result) {
     if (result.hadDeletions || result.hadMetadataChanges) {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
@@ -189,6 +236,16 @@ function startAutoSync() {
     autoSyncTimer = setInterval(async () => {
         if (!githubSync.getSyncStatus().connected)
             return;
+        // Drain the journal of failed remote mutations BEFORE pulling: a pending
+        // upsert/delete that never landed would otherwise make the pull delete the
+        // note locally or resurrect it (retrySyncJournal awaits each op, so the
+        // mutation queue is drained when it returns).
+        try {
+            await githubSync.retrySyncJournal(NOTES_DIR);
+        }
+        catch (err) {
+            console.error('[AutoSync] journal retry failed:', String(err));
+        }
         // Stand down while local writes/deletes are still draining to the remote: pulling
         // now could re-add a note whose remote delete hasn't landed yet (the next tick,
         // 5 min later, runs with the queue drained). Manual pulls are unaffected.
@@ -586,14 +643,37 @@ function createTray() {
         icon = electron_1.nativeImage.createEmpty();
     }
     tray = new electron_1.Tray(icon);
-    tray.setToolTip('NoteFlow — quick notes');
+    applyTrayMenu();
+    tray.on('click', () => toggleWindow());
+}
+/** Resolves the active UI language from the persisted setting (lazy OS locale). */
+function currentTrayLang() {
+    const setting = readSettings().language;
+    return (0, i18n_1.resolveLang)(setting, () => electron_1.app.getLocale());
+}
+/**
+ * Full main-process message tree in the active language, resolved at call-time so
+ * notifications and native dialogs follow the current `language` setting live.
+ */
+function mainMessages() {
+    return (0, i18n_1.getMessages)(currentTrayLang());
+}
+/**
+ * (Re)builds the tray context menu + tooltip in the current language. Called on
+ * tray creation and whenever the language changes, so the menu switches live.
+ */
+function applyTrayMenu() {
+    if (!tray)
+        return;
+    const t = (0, i18n_1.getTrayMessages)(currentTrayLang());
+    tray.setToolTip(shortcutUnavailable ? t.tooltipShortcutUnavailable : t.tooltip);
     const contextMenu = electron_1.Menu.buildFromTemplate([
         {
-            label: 'Open NoteFlow',
+            label: t.open,
             click: () => toggleWindow(),
         },
         {
-            label: 'New Note',
+            label: t.newNote,
             accelerator: 'CmdOrCtrl+Shift+N',
             click: () => {
                 showWindow();
@@ -602,12 +682,12 @@ function createTray() {
         },
         { type: 'separator' },
         {
-            label: 'Open notes folder',
+            label: t.openNotesFolder,
             click: () => electron_1.shell.openPath(NOTES_DIR).catch(err => console.error('Failed to open notes folder:', err)),
         },
         { type: 'separator' },
         {
-            label: 'Quit',
+            label: t.quit,
             click: () => {
                 mainWindow?.webContents.session.flushStorageData();
                 electron_1.app.quit();
@@ -615,7 +695,6 @@ function createTray() {
         },
     ]);
     tray.setContextMenu(contextMenu);
-    tray.on('click', () => toggleWindow());
 }
 function showWindow() {
     if (!mainWindow)
@@ -750,8 +829,10 @@ function registerGlobalShortcut() {
     if (!ret) {
         console.error('Failed to register global shortcut Ctrl+Shift+Space');
         // Update tray tooltip so the user knows the shortcut is unavailable
-        // (common on Linux when an input method or another app captures it)
-        tray?.setToolTip('NoteFlow — shortcut unavailable (Ctrl+Shift+Space)');
+        // (common on Linux when an input method or another app captures it).
+        // Recorded in module state so a later language change keeps this variant.
+        shortcutUnavailable = true;
+        tray?.setToolTip((0, i18n_1.getTrayMessages)(currentTrayLang()).tooltipShortcutUnavailable);
     }
 }
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -1072,9 +1153,10 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
             // app running so the user can read the instructions; they relaunch manually.
             await electron_1.shell.openPath(dest);
             if (electron_1.Notification.isSupported()) {
+                const n = mainMessages().notifications;
                 new electron_1.Notification({
-                    title: 'Update downloaded',
-                    body: 'Drag NoteFlow to your Applications folder to finish updating, then reopen it.',
+                    title: n.updateDownloadedTitle,
+                    body: n.updateDownloadedBody,
                 }).show();
             }
         }
@@ -1103,7 +1185,7 @@ electron_1.ipcMain.handle('app:download-and-install', async (_event, url) => {
 electron_1.ipcMain.handle('app:choose-notes-dir', async () => {
     const result = await electron_1.dialog.showOpenDialog(mainWindow, {
         properties: ['openDirectory'],
-        title: 'Choose notes folder',
+        title: mainMessages().dialogs.chooseNotesFolder,
     });
     return result.canceled ? null : result.filePaths[0];
 });
@@ -1119,7 +1201,7 @@ electron_1.ipcMain.handle('notes:export', async (_event, entries, format, hint) 
             if (plain.length === 1) {
                 const defaultName = safeHint ? `${safeHint}.${format}` : plain[0].filename;
                 const result = await electron_1.dialog.showSaveDialog(mainWindow, {
-                    title: 'Export note',
+                    title: mainMessages().dialogs.exportNote,
                     defaultPath: path_1.default.join(os_1.default.homedir(), defaultName),
                     filters: [{ name: format === 'txt' ? 'Plain Text' : 'Markdown', extensions: [format] }],
                 });
@@ -1130,7 +1212,7 @@ electron_1.ipcMain.handle('notes:export', async (_event, entries, format, hint) 
             }
             else {
                 const result = await electron_1.dialog.showOpenDialog(mainWindow, {
-                    title: 'Choose destination folder',
+                    title: mainMessages().dialogs.chooseDestinationFolder,
                     properties: ['openDirectory'],
                 });
                 if (result.canceled || result.filePaths.length === 0)
@@ -1148,7 +1230,7 @@ electron_1.ipcMain.handle('notes:export', async (_event, entries, format, hint) 
             ? `${safeHint}.noteflow`
             : `noteflow-export-${dateStr}.noteflow`;
         const result = await electron_1.dialog.showSaveDialog(mainWindow, {
-            title: 'Export notes',
+            title: mainMessages().dialogs.exportNotes,
             defaultPath: path_1.default.join(os_1.default.homedir(), defaultNoteflowName),
             filters: [
                 { name: 'NoteFlow Export', extensions: ['noteflow'] },
@@ -1174,7 +1256,7 @@ electron_1.ipcMain.handle('notes:export', async (_event, entries, format, hint) 
 electron_1.ipcMain.handle('notes:parse-import-file', async () => {
     try {
         const result = await electron_1.dialog.showOpenDialog(mainWindow, {
-            title: 'Import notes',
+            title: mainMessages().dialogs.importNotes,
             filters: [
                 { name: 'All supported', extensions: ['noteflow', 'json', 'txt', 'md'] },
                 { name: 'NoteFlow Export', extensions: ['noteflow', 'json'] },
@@ -1248,7 +1330,7 @@ electron_1.ipcMain.handle('notes:parse-external-import', async (_event, source) 
         let srcPath;
         if (source === 'md-folder') {
             const result = await electron_1.dialog.showOpenDialog(mainWindow, {
-                title: 'Choose a folder of Markdown notes',
+                title: mainMessages().dialogs.chooseMarkdownFolder,
                 properties: ['openDirectory'],
             });
             if (result.canceled || result.filePaths.length === 0)
@@ -1257,7 +1339,7 @@ electron_1.ipcMain.handle('notes:parse-external-import', async (_event, source) 
         }
         else {
             const result = await electron_1.dialog.showOpenDialog(mainWindow, {
-                title: source === 'notion' ? 'Import Notion export' : 'Import Google Keep export',
+                title: source === 'notion' ? mainMessages().dialogs.importNotion : mainMessages().dialogs.importGoogleKeep,
                 filters: [{ name: 'Zip archive', extensions: ['zip'] }],
                 properties: ['openFile'],
             });
@@ -1395,6 +1477,26 @@ electron_1.ipcMain.handle('account:sign-out', () => {
 electron_1.ipcMain.handle('account:refresh-entitlements', () => {
     return account.refreshEntitlements();
 });
+// Opens the Lemon Squeezy checkout in the browser, tagged with the Supabase
+// user id (checkout[custom][user_id], URL-encoded) so the billing webhook can
+// attribute the purchase. Built here in main so the user id never crosses to
+// the renderer.
+electron_1.ipcMain.handle('account:open-checkout', (_event, product) => {
+    const base = product === 'ai' ? cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.ai : '';
+    if (!base)
+        return { ok: false, error: 'Checkout is not available yet.' };
+    const userId = account.getUserId();
+    if (!userId)
+        return { ok: false, error: 'Sign in to your NoteFlow account first.' };
+    const sep = base.includes('?') ? '&' : '?';
+    const url = parseHttpsUrl(`${base}${sep}checkout%5Bcustom%5D%5Buser_id%5D=${encodeURIComponent(userId)}`);
+    if (!url)
+        return { ok: false, error: 'Invalid checkout URL.' };
+    electron_1.shell.openExternal(url.toString()).catch((err) => {
+        console.error('Failed to open checkout URL:', err);
+    });
+    return { ok: true };
+});
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {
@@ -1480,14 +1582,23 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
 });
 electron_1.ipcMain.handle('ai:llm-list-models', async () => {
     try {
-        const models = await llm.getProvider(llm.resolveConfig(readLlmSettings())).listModels();
+        const models = await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).listModels();
         return { ok: true, models };
     }
     catch (err) {
         return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) };
     }
 });
-electron_1.ipcMain.handle('ai:llm-test', () => llm.getProvider(llm.resolveConfig(readLlmSettings())).test());
+electron_1.ipcMain.handle('ai:llm-test', async () => {
+    try {
+        // resolveConfigAsync throws for the NoteFlow AI preset without a signed-in
+        // session — surface that through the same {ok, error} contract as test().
+        return await llm.getProvider(await llm.resolveConfigAsync(readLlmSettings())).test();
+    }
+    catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+});
 // ── Chat (streaming over IPC events) ───────────────────────────────────────────
 const CHAT_SYSTEM_BASE = "You are NoteFlow's assistant — a second brain over the user's personal notes. " +
     "Answer directly and concisely, in the same language the user writes in. " +
@@ -1663,7 +1774,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
     const stored = readLlmSettings();
     const pub = llm.toPublic(stored);
     if (!pub.configured) {
-        send('ai:chat-error', { requestId, error: 'No LLM provider configured' });
+        send('ai:chat-error', { requestId, error: llm.notConfiguredMessage(stored) });
         return;
     }
     const caps = pub.capabilities;
@@ -1676,7 +1787,7 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
         const { system, sources } = await buildChatContext(lastUser);
         if (sources.length > 0)
             send('ai:chat-sources', { requestId, sources });
-        const provider = llm.getProvider(llm.resolveConfig(stored));
+        const provider = llm.getProvider(await llm.resolveConfigAsync(stored));
         const ctx = buildToolContext();
         // Seed the agentic conversation from the renderer's messages, resolving each user message's
         // attachment ids from the in-main cache: text/code files inline into the text, pdf/image go native.
@@ -2024,13 +2135,13 @@ function extractJson(text) {
     }
     return null;
 }
-electron_1.ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, 'Add files to your profile'));
+electron_1.ipcMain.handle('ai:profile-pick-files', () => pickFilesIntoCache(profileFiles, mainMessages().dialogs.addFilesToProfile));
 electron_1.ipcMain.handle('ai:profile-remove-file', (_event, id) => {
     profileFiles.delete(id);
     return { ok: true };
 });
 // Chat attachments: same picker, but into the chat cache (kept across turns, not consumed).
-electron_1.ipcMain.handle('ai:chat-pick-files', () => pickFilesIntoCache(chatFiles, 'Attach files to the chat'));
+electron_1.ipcMain.handle('ai:chat-pick-files', () => pickFilesIntoCache(chatFiles, mainMessages().dialogs.attachFilesToChat));
 electron_1.ipcMain.handle('ai:chat-remove-file', (_event, id) => {
     chatFiles.delete(id);
     return { ok: true };
@@ -2038,8 +2149,14 @@ electron_1.ipcMain.handle('ai:chat-remove-file', (_event, id) => {
 electron_1.ipcMain.handle('ai:profile-generate', async (_event, req) => {
     const stored = readLlmSettings();
     if (!llm.toPublic(stored).configured)
-        return { ok: false, error: 'No LLM provider configured' };
-    const provider = llm.getProvider(llm.resolveConfig(stored));
+        return { ok: false, error: llm.notConfiguredMessage(stored) };
+    let provider;
+    try {
+        provider = llm.getProvider(await llm.resolveConfigAsync(stored));
+    }
+    catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
     const locale = req.locale?.trim() || 'the language the user used';
     const parts = [];
     const fields = (req.fields ?? []).filter((f) => f.value?.trim());
@@ -2157,6 +2274,19 @@ electron_1.ipcMain.on('settings:set-theme', (_event, themeId) => {
     const settings = readSettings();
     settings.theme = themeId;
     writeSettings(settings);
+});
+// Language is a local (non-synced) setting, like the theme. Setting it persists,
+// refreshes the tray in the new language, and broadcasts to every window (incl.
+// the sender and any open stickies) so the UI switches live without a reload.
+electron_1.ipcMain.on('settings:get-language', (event) => {
+    event.returnValue = readSettings().language ?? 'system';
+});
+electron_1.ipcMain.on('settings:set-language', (_event, setting) => {
+    const settings = readSettings();
+    settings.language = setting;
+    writeSettings(settings);
+    applyTrayMenu();
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('language-changed', setting));
 });
 electron_1.ipcMain.handle('app:get-login-item', () => {
     const openAtLogin = (readSettings().openAtLogin ?? false);
@@ -2509,7 +2639,7 @@ electron_1.app.whenReady().then(async () => {
     const connected = githubSync.getSyncStatus().connected;
     // NoteFlow account: load the persisted session and refresh entitlements in
     // the background (deferred inside initAccount — never blocks boot).
-    account.onStatusChanged(() => emitAccountStatusChanged());
+    account.onStatusChanged(() => handleAccountStatusChanged());
     account.initAccount();
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
@@ -2523,6 +2653,12 @@ electron_1.app.whenReady().then(async () => {
             .pullNotes(NOTES_DIR)
             .then((result) => {
             broadcastPullResult(result);
+            // Drain remote mutations journaled in previous sessions (failed or
+            // interrupted pushes/deletes). Internally gated on the initial pull
+            // having succeeded, so this is a no-op if the pull above failed.
+            githubSync.retrySyncJournal(NOTES_DIR).catch((err) => {
+                console.error('[Startup] journal retry failed:', String(err));
+            });
             // One-time remote format migration (v1 flat files → folders + marker).
             // Internally guarded; no-op once the remote is already v2.
             githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {

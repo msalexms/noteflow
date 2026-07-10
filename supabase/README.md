@@ -46,8 +46,12 @@ supabase db push   # aplica supabase/migrations/*.sql
         en producción, verificar un dominio propio en Resend)
       - Sender name: `NoteFlow`
    3. Guardar.
-3. Dashboard → **Authentication → Emails** → plantilla **"Magic Link"**: ahora que hay SMTP
-   propio, el editor de plantilla se desbloquea. Editar el cuerpo para que envíe el token OTP:
+3. Dashboard → **Authentication → Emails** → editar **DOS plantillas**: **"Confirm signup"** y
+   **"Magic Link"**. Con "Confirm email" activado (el default), el primer OTP de una cuenta
+   **nueva** sale por la plantilla "Confirm signup" — no por "Magic Link", que solo se usa para
+   usuarios ya confirmados. Si solo se edita "Magic Link", los usuarios nuevos reciben el correo
+   de confirmación con enlace en vez del código. Ahora que hay SMTP propio, el editor se
+   desbloquea; poner en **ambas** el mismo cuerpo:
 
    ```html
    <h2>Your NoteFlow sign-in code</h2>
@@ -57,8 +61,9 @@ supabase db push   # aplica supabase/migrations/*.sql
    ```
 
    La clave es usar `{{ .Token }}` (el código de 6 dígitos) en lugar de `{{ .ConfirmationURL }}`.
-   La app llama a `POST /auth/v1/otp` con `create_user: true`, así que el registro y el login
-   comparten flujo y plantilla.
+   La app llama a `POST /auth/v1/otp` con `create_user: true` y verifica con `type: 'email'`
+   (acepta tanto el token de signup como el de login), así que el registro y el login comparten
+   flujo y ambas plantillas deben mandar el código.
 
 ## 4. Conectar la app
 
@@ -114,7 +119,47 @@ webhooks, verifica la firma HMAC y escribe en `public.subscriptions` vía la RPC
      `subscription_paused`, `subscription_unpaused`). Los `subscription_payment_*` y `order_*`
      pueden suscribirse o no: la función los ignora (responde 200).
 
-> **Correlación compra ↔ usuario:** el checkout debe abrirse con
-> `checkout[custom][user_id]=<uuid del usuario de Supabase>` (lo hará la app en la fase 4.1).
-> Las compras SIN ese dato no se pueden atribuir a ninguna cuenta: el webhook las loguea
-> (`console.warn`) y **no inserta** fila nueva (solo actualizaría una suscripción ya existente).
+> **Correlación compra ↔ usuario:** la app abre el checkout con
+> `checkout[custom][user_id]=<uuid del usuario de Supabase>` (handler `account:open-checkout`,
+> implementado en la fase 4.1). Las compras SIN ese dato no se pueden atribuir a ninguna cuenta:
+> el webhook las loguea (`console.warn`) y **no inserta** fila nueva (solo actualizaría una
+> suscripción ya existente).
+
+## 6. NoteFlow AI (proxy LLM)
+
+La Edge Function `supabase/functions/ai-proxy` expone un endpoint OpenAI-compatible
+(`POST .../ai-proxy/chat/completions` + `GET .../ai-proxy/models`) que valida la sesión de Supabase
+del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens, y reenvía a
+**OpenRouter** con la única key del servidor. El consumo se registra en `usage_events` (migración
+0003) leyendo el bloque `usage` que OpenRouter añade al final del stream. Pasos del operador:
+
+1. **Correr la migración 0003** (`supabase/migrations/0003_ai_usage.sql`), igual que las
+   anteriores (SQL Editor o `supabase db push`). Crea `usage_events` + la RPC `get_month_usage`
+   (solo invocable por el service role).
+
+2. **Crear una API key en [OpenRouter](https://openrouter.ai)** (con crédito o auto-topup) y
+   configurar los secretos de la función:
+
+   ```bash
+   supabase secrets set OPENROUTER_API_KEY=<sk-or-...>
+   # Opcionales (defaults en el código: 3.000.000 tokens/mes y la lista curada
+   # de supabase/functions/ai-proxy/logic.ts):
+   supabase secrets set AI_MONTHLY_TOKENS=3000000
+   supabase secrets set AI_ALLOWED_MODELS=openai/gpt-4o-mini,google/gemini-2.5-flash
+   ```
+
+   > Si se cambia `AI_ALLOWED_MODELS`, mantener en sync `NOTEFLOW_AI_MODELS` en
+   > `electron/ai/llm/presets.ts` (la lista de modelos sugeridos que ve el cliente).
+
+3. **Desplegar la función** — esta SÍ con verificación de JWT (el default; a diferencia del
+   webhook, aquí el caller es la app con el access token del usuario):
+
+   ```bash
+   supabase functions deploy ai-proxy
+   ```
+
+4. **Checkout de Lemon Squeezy:** copiar la URL de compra de la variante del producto AI
+   (dashboard de LS → producto → Share) y pegarla en `LEMONSQUEEZY_CHECKOUT_URLS.ai` de
+   `electron/cloudConfig.ts`. Mientras esté vacía, el botón "Subscribe to NoteFlow AI" de
+   Settings → Account queda oculto (se muestra "Subscriptions are coming soon."). La app añade
+   sola el parámetro `checkout[custom][user_id]` al abrirla.

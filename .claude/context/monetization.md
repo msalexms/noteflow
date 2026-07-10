@@ -1,11 +1,15 @@
 # NoteFlow — Monetización (Fase 4): cuenta, IA gestionada, nube E2EE
 
-> **Estado: Fase 4.0 IMPLEMENTADA** — cuenta NoteFlow en la app + lectura de entitlements +
-> esquema SQL + panel Settings → Account (ver "Fase 4.0 — implementación" abajo). El **proyecto
-> Supabase real ya está conectado** (`electron/cloudConfig.ts` lleva la URL y la anon key reales) y
-> el **webhook de billing está implementado** (`supabase/functions/billing-webhook` + migración
-> 0002). Pendiente del operador: crear los productos en Lemon Squeezy y desplegar la función
-> (pasos en `supabase/README.md` § 5).
+> **Estado: Fases 4.0 y 4.1 DESPLEGADAS Y OPERATIVAS** — no solo implementadas en código: producto
+> real en Lemon Squeezy (variantes mensual/anual), Edge Functions desplegadas (`billing-webhook` +
+> `ai-proxy`), webhook dado de alta, migraciones 0001-0003 corridas, y el flujo probado
+> **end-to-end** (alta de cuenta, checkout, entitlement aplicada, chat vía el preset `noteflow`)
+> — en **modo test** de Lemon Squeezy. **Único pendiente del operador: el paso a live mode**
+> cuando LS apruebe la verificación de la store (detalle en § 3, "Pendiente del operador"). Cuenta NoteFlow en la app + entitlements + esquema SQL + panel Settings → Account
+> (ver "Fase 4.0 — implementación" abajo) y la **IA gestionada**: `usage_events` + `get_month_usage`
+> + preset `noteflow` en el cliente + botón de suscripción en Settings → Account + auto-activación
+> del preset al suscribirse + sección dedicada en `LlmConfigView` (ver § 3, "implementación"). El
+> **proyecto Supabase real está conectado** (`electron/cloudConfig.ts`).
 > Decisiones tomadas con el usuario (2026-07): backend **Supabase**, pagos por **Merchant of
 > Record = Lemon Squeezy**, nube con **E2EE total**, IA gestionada con **OpenRouter** como único
 > upstream. Las opciones gratuitas actuales (IA local/API propia, GitHub Sync) **se mantienen**.
@@ -65,8 +69,9 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
 - **Merchant of Record: Lemon Squeezy** (decidido 2026-07; ~5% + 0,50 por transacción). Razón:
   como vendedor particular/autónomo en España, el MoR es el vendedor legal y gestiona el **IVA por
   país de la UE** (con Stripe directo tocaría OSS/VIES y declarar IVA por país). El checkout se
-  abre en el navegador (`app:open-url`) con `checkout[custom][user_id]=<uuid>` para correlar el
-  webhook (lo hará la app en la fase 4.1).
+  abre en el navegador vía el IPC `account:open-checkout` (main construye la URL con
+  `checkout[custom][user_id]=<uuid>` — la correlación del webhook — y la abre con
+  `shell.openExternal`; el userId nunca cruza al renderer). Implementado en la fase 4.1.
 - **Webhook de billing (implementado):** Edge Function `supabase/functions/billing-webhook`
   (Deno, cero dependencias) — verifica la firma HMAC-SHA256 de la cabecera `X-Signature` contra el
   body crudo (secret en `LEMONSQUEEZY_WEBHOOK_SECRET`; comparación constant-time vía
@@ -82,28 +87,82 @@ un dev solo); Cloudflare Workers para todo (fragmenta la infra: auth y DB seguir
   de LS. La lógica pura vive en `logic.ts` (agnóstica de Deno) y está testeada en
   `tests/supabase/billing-webhook.test.ts`. Deploy con `--no-verify-jwt` (LS no manda JWT).
 
-## 3. NoteFlow AI — plan de IA gestionada
+## 3. NoteFlow AI — IA gestionada (IMPLEMENTADA, fase 4.1)
 
 **Principio: el cliente ya sabe hablar con esto.** La capa LLM soporta proveedores
 OpenAI-compatible con `baseUrl` propio (`electron/ai/llm/presets.ts`), así que el plan gestionado
 es **un preset más**, no una implementación nueva.
 
-- **Servidor — Edge Function `ai-proxy`** exponiendo `/chat/completions` + `/models`
-  OpenAI-compatible: valida el JWT de Supabase → comprueba entitlement `ai` + cuota mensual →
-  reenvía a **OpenRouter** (key secreta del servidor, una sola) con **passthrough del streaming
-  SSE** → registra tokens del chunk final `usage` en `usage_events(user_id, model, tokens_in,
-  tokens_out, at)`.
+- **Servidor — Edge Function `supabase/functions/ai-proxy`** (Deno, cero dependencias; lógica pura
+  en `logic.ts`, testeada en `tests/supabase/ai-proxy.test.ts`) exponiendo `POST
+  .../ai-proxy/chat/completions` + `GET .../ai-proxy/models` OpenAI-compatible. Pipeline por
+  request: resuelve el access token del caller a `user_id` vía `/auth/v1/user` (401 si inválido) →
+  entitlement `ai`/`bundle` activo consultando `subscriptions` con el service role (403 con error
+  OpenAI-shaped si no) → cuota mensual vía RPC `get_month_usage` (429 si superada; cabeceras
+  `X-NoteFlow-Tokens-Used`/`X-NoteFlow-Tokens-Limit` en las respuestas) → allowlist de modelos
+  (400 si fuera) → forward a **OpenRouter** con la key del servidor inyectando `usage:
+  {include: true}` (extensión que añade el bloque `usage` al último chunk SSE) y **eliminando del
+  body los campos de enrutado/coste de OpenRouter** (`models`, `route`, `provider`, `plugins` —
+  la allowlist solo valida `model` y esos campos permitirían ejecutar modelos caros fuera de la
+  lista o comprar features extra con la key del operador; ver `buildUpstreamBody`). El stream se
+  devuelve en **passthrough** mientras un `tee()` lo escanea (`createSseUsageScanner`) y al acabar
+  inserta la fila en `usage_events` (migración 0003: tabla + RPC `get_month_usage`, solo service
+  role escribe/invoca) — registro **best-effort**, un fallo no rompe la respuesta. Se despliega
+  **con verify JWT** (default; a diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto),
+  `AI_MONTHLY_TOKENS` (default 3M) y `AI_ALLOWED_MODELS` (default: lista curada en `logic.ts`).
 - **Upstream OpenRouter:** una key, cientos de modelos, cambiar el catálogo sin tocar infra
-  (sobrecoste ~5%, asumido). Modelos **curados por plan** (baratos para el plan base; mejores si
-  hay tier premium) — el proxy rechaza modelos fuera de la lista.
-- **Cuotas:** presupuesto mensual por plan (tokens o coste estimado). Check previo al forward +
-  registro posterior; cabeceras de "restante" en la respuesta para que la UI muestre el consumo.
-- **Cliente:** preset `noteflow` en `presets.ts` (`impl: 'openai'`, `baseUrl` = URL del proxy,
-  `needsKey: false`, `editableBaseUrl: false`, `suggestedModels` = lista curada). En
-  `electron/ai/llm/index.ts`, la resolución de credencial para este preset obtiene un **access
-  token fresco de la sesión de cuenta** en vez de leer `encryptedApiKey`. Capabilities: imágenes
-  según los modelos curados; PDF no (sigue siendo anthropic-only). Todo lo demás — streaming,
-  tool-calling agéntico, adjuntos, RAG — funciona sin cambios.
+  (sobrecoste ~5%, asumido). Lista curada actual (tool-calling + visión, baratos):
+  `openai/gpt-4o-mini`, `openai/gpt-4.1-mini`, `anthropic/claude-haiku-4.5`,
+  `google/gemini-2.5-flash` — **duplicada a propósito** en `DEFAULT_ALLOWED_MODELS`
+  (`ai-proxy/logic.ts`) y `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener en sync.
+- **Cliente:** preset `noteflow` **primero** en `presets.ts` (`impl: 'openai'`, `baseUrl` =
+  `AI_PROXY_URL` de `cloudConfig.ts`, `needsKey: false`, `editableBaseUrl: false`).
+  ⚠️ `presetOf()` con id desconocido cae **explícitamente en `anthropic`** (ya no en `PRESETS[0]`)
+  y `DEFAULT_LLM_CONFIG.active` sigue siendo `'anthropic'` — usuarios existentes no cambian.
+  La credencial es un **access token fresco** por request: `resolveConfigAsync()` en
+  `llm/index.ts` (llama a `account.getAccessToken()`; lanza error accionable sin sesión) — main
+  la usa en chat/list-models/test/profile-generate; `resolveConfig` síncrona queda para el resto.
+  `toPublic().configured` para este preset exige sesión + entitlement `ai`, y
+  `notConfiguredMessage()` da el motivo exacto ("sign in" vs "requires subscription").
+  Capabilities: imágenes sí (modelos curados con visión); PDF no (anthropic-only).
+- **UI:** el preset **NoteFlow AI ya no aparece en el `<select>` de proveedores** de
+  `LlmConfigView` (se filtra explícitamente por id) — tiene su propia **card "premium"** (acento
+  de marca, `border-accent/50 bg-accent/15`) por encima de la lista normal, visible solo si
+  `account.entitlements.ai` está activa **o** si ya es el proveedor activo (caso de suscripción
+  perdida: sigue viendo la card para entender qué pasa y cambiar de proveedor desde el `<select>`).
+  La card tiene un botón "Use NoteFlow AI" (`changeProvider('noteflow')`) cuando no es el activo, o
+  un check "Active" cuando sí lo es; el aviso ámbar de sesión/suscripción faltante
+  (`noteflowSignIn`/`noteflowNeedsSubscription`) vive ahora dentro de esa card, no en la principal.
+  `LlmConfigView` refresca la config al cambiar el estado de cuenta (`onAccountStatusChanged`).
+  En `AccountPanel`, si hay sesión sin entitlement `ai` y `LEMONSQUEEZY_CHECKOUT_URLS.ai` no está
+  vacía, botón "Subscribe to NoteFlow AI" → IPC `account:open-checkout` (main construye la URL con
+  `checkout%5Bcustom%5D%5Buser_id%5D=<uuid>` y la abre con `shell.openExternal`; el userId
+  **no cruza al renderer**). URL vacía = botón oculto ("Subscriptions are coming soon.").
+- **Auto-activación al suscribirse:** `electron/main.ts` (junto a `account.onStatusChanged`)
+  detecta la transición real `entitlements.ai` `false→true` **dentro de la misma sesión de
+  cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
+  (si no lo era ya) antes de emitir `account:status-changed`, para que el renderer recargue ya
+  con el proveedor correcto.
+  **Matiz importante:** `entitlements` no se persiste (arranca en `NO_ENTITLEMENTS` en cada boot;
+  ver "implementación" abajo) — para no forzar el cambio en cada arranque de un usuario ya
+  suscrito, se fija una **baseline por identidad** (`aiEntitlementBaseline` + `aiEntitlementIdentity`
+  = el email de la sesión, o `null` en signed-out) en la PRIMERA observación de cada identidad
+  (boot con sesión persistida, justo tras `verifyOtp`, o tras un `signOut`) sin disparar nada;
+  solo una transición posterior **para la misma identidad** en el mismo proceso (p. ej. "Subscribe"
+  en el navegador → volver → "Refresh" en Settings → Account) dispara el auto-switch. **La
+  identidad se re-arma en cada cambio de `signedIn`/email** — necesario porque la UI permite
+  sign-out + sign-in sin reiniciar la app: sin este reset, una cuenta B que YA tenía la
+  entitlement antes de este proceso (y se loguea después de que la cuenta A, sin entitlement,
+  cierre sesión) heredaría la baseline `false` de A y se auto-switchearía indebidamente al
+  reflejar por primera vez su propia entitlement `true`. Nunca se auto-switchea al revés (perder
+  la entitlement no cambia de proveedor).
+- **Pendiente del operador:** solo el **paso a live mode de Lemon Squeezy** (la store está en
+  verificación; el circuito actual corre sobre el producto de **test mode**). Al aprobarse:
+  recrear producto + variantes en live (los variant IDs **cambian**) → actualizar el secret
+  `LEMONSQUEEZY_VARIANT_MAP` → dar de alta el webhook en live (mismo endpoint y signing secret) →
+  cambiar la URL de checkout en `cloudConfig.ts` + `npm run build`. Todo lo demás está: 0003
+  corrida, secrets puestos, `ai-proxy` desplegado, flujo probado end-to-end en test (ver
+  `supabase/README.md` §§ 5-6 para repetir el proceso en otro proyecto).
 - **Privacidad (documentar en UI/landing):** el índice RAG sigue siendo 100% local; lo que viaja
   al proxy es lo mismo que viajaría a cualquier proveedor con key propia (pregunta + chunks
   recuperados). Las secciones `aiHidden` y las notas cifradas ya quedan fuera del índice y por
@@ -160,8 +219,8 @@ files(user_id, path_key, path_ct, content_ct, updated_at, deleted,
 
 | Fase | Contenido |
 |---|---|
-| **4.0 Fundación** | ✅ **Hecha** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy). Pendiente del operador: productos/variantes en LS + deploy de la función |
-| **4.1 IA gestionada** | Edge Function `ai-proxy` + preset `noteflow` + cuotas/metering + UI de suscripción y consumo |
+| **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
 | **4.2 Nube E2EE** | Jerarquía de claves + `cloudSync.ts` (interfaz `SyncProvider`) + Realtime + onboarding passphrase/recovery + coexistencia/migración desde GitHub Sync |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
@@ -176,11 +235,13 @@ puro vía `fetch` desde el proceso main.
   (`auth.uid() = user_id`). Sin policies de escritura: solo el service role (webhook del MoR,
   fase 4.1+) escribirá.
 - **`supabase/README.md`** — pasos del operador: crear proyecto → correr migración → habilitar
-  provider Email y editar la plantilla **"Magic Link"** para enviar `{{ .Token }}` (por defecto
-  manda enlace, no código) → copiar URL + anon key a `cloudConfig.ts`.
-- **`electron/cloudConfig.ts`** — `SUPABASE_URL` / `SUPABASE_ANON_KEY` (placeholders vacíos) +
-  `isCloudConfigured()`. La anon key es pública por diseño (como el client ID de GitHub);
-  la seguridad la da RLS.
+  provider Email + SMTP propio y editar **DOS plantillas** — **"Confirm signup"** (usuarios
+  nuevos) y **"Magic Link"** (existentes) — para enviar `{{ .Token }}` (por defecto mandan
+  enlace, no código; con solo "Magic Link" editada, los usuarios nuevos reciben el enlace de
+  confirmación en vez del código) → copiar URL + anon key a `cloudConfig.ts`.
+- **`electron/cloudConfig.ts`** — `SUPABASE_URL` / `SUPABASE_ANON_KEY` (ya con los valores del
+  proyecto real) + `isCloudConfigured()`. La anon key es pública por diseño (como el client ID de
+  GitHub); la seguridad la da RLS.
 - **`electron/account.ts`** — capa de sesión, espejo estructural de `githubSync.ts`:
   - Persistencia en `settings.json` sección `account` = `{email, userId, encryptedRefreshToken}`;
     el refresh token se cifra reutilizando `encryptSecret/decryptSecret` de
@@ -204,6 +265,8 @@ puro vía `fetch` desde el proceso main.
   (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`,
   `accountRefreshEntitlements`, `onAccountStatusChanged`) y tipos `AccountStatus` /
   `AccountEntitlements` en `src/types/index.ts`.
-- **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`, UI en
-  inglés): no configurado → placeholder informativo; signed out → email → código de 6 dígitos;
-  signed in → email + badges de plan + Refresh + Sign out + "Subscriptions are coming soon.".
+- **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
+  textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
+  email → código de 6 dígitos; signed in → email + badges de plan + Refresh + Sign out + botón
+  "Subscribe to NoteFlow AI" (si hay sesión sin entitlement `ai` y `LEMONSQUEEZY_CHECKOUT_URLS.ai`
+  no está vacía; con la URL vacía se muestra "Subscriptions are coming soon.").

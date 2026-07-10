@@ -2,13 +2,17 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_LLM_CONFIG = exports.decryptSecret = exports.encryptSecret = exports.PRESETS = void 0;
 exports.resolveConfig = resolveConfig;
+exports.resolveConfigAsync = resolveConfigAsync;
 exports.providerCapabilities = providerCapabilities;
 exports.toPublic = toPublic;
+exports.notConfiguredMessage = notConfiguredMessage;
 exports.getProvider = getProvider;
 const presets_1 = require("./presets");
 const secret_1 = require("./secret");
 const anthropic_1 = require("./anthropic");
 const openaiCompatible_1 = require("./openaiCompatible");
+// No import cycle: account.ts only pulls ./secret and ./cloudConfig, never this module.
+const account_1 = require("../../account");
 var presets_2 = require("./presets");
 Object.defineProperty(exports, "PRESETS", { enumerable: true, get: function () { return presets_2.PRESETS; } });
 var secret_2 = require("./secret");
@@ -25,7 +29,9 @@ function effectiveBaseUrl(cfg) {
     const ps = cfg.byPreset[preset.id] ?? {};
     return ps.baseUrl?.trim() || preset.baseUrl;
 }
-/** Decrypt the active preset's key and fill defaults — in-memory only, never persisted. */
+/** Decrypt the active preset's key and fill defaults — in-memory only, never persisted.
+ *  NOTE: for the managed `noteflow` preset this leaves apiKey empty — use
+ *  resolveConfigAsync wherever a provider is about to make real requests. */
 function resolveConfig(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);
     const ps = cfg.byPreset[preset.id] ?? {};
@@ -35,6 +41,22 @@ function resolveConfig(cfg) {
         baseUrl: effectiveBaseUrl(cfg),
         apiKey: ps.encryptedApiKey ? (0, secret_1.decryptSecret)(ps.encryptedApiKey) : '',
     };
+}
+/**
+ * Like resolveConfig, but for the managed `noteflow` preset the credential is a
+ * FRESH Supabase access token of the NoteFlow account session (GoTrue tokens
+ * expire in ~1h, so it must be minted per request — never stored like an API
+ * key). Throws a user-facing error when there is no signed-in session.
+ */
+async function resolveConfigAsync(cfg) {
+    const resolved = resolveConfig(cfg);
+    if ((0, presets_1.presetOf)(cfg.active).id !== 'noteflow')
+        return resolved;
+    const token = await (0, account_1.getAccessToken)();
+    if (!token) {
+        throw new Error('NoteFlow AI needs your NoteFlow account. Sign in from Settings → Account and try again.');
+    }
+    return { ...resolved, apiKey: token };
 }
 /** Native attachment support per preset (the app never extracts text itself). */
 function providerCapabilities(preset) {
@@ -49,14 +71,32 @@ function toPublic(cfg) {
     const ps = cfg.byPreset[preset.id] ?? {};
     const model = effectiveModel(cfg);
     const hasKey = !!ps.encryptedApiKey;
+    let configured = (!preset.needsKey || hasKey) && !!model;
+    if (preset.id === 'noteflow') {
+        // The managed plan is only usable with a signed-in account AND an active
+        // 'ai' (or 'bundle') subscription — otherwise the proxy answers 401/403.
+        const status = (0, account_1.getAccountStatus)();
+        configured = configured && status.signedIn && status.entitlements.ai;
+    }
     return {
         active: preset.id,
         model,
         baseUrl: effectiveBaseUrl(cfg),
         hasKey,
-        configured: (!preset.needsKey || hasKey) && !!model,
+        configured,
         capabilities: providerCapabilities(preset),
     };
+}
+/** User-facing reason why toPublic().configured is false — tailored for the managed preset. */
+function notConfiguredMessage(cfg) {
+    if ((0, presets_1.presetOf)(cfg.active).id === 'noteflow') {
+        const status = (0, account_1.getAccountStatus)();
+        if (!status.signedIn)
+            return 'NoteFlow AI needs your NoteFlow account — sign in from Settings → Account.';
+        if (!status.entitlements.ai)
+            return 'NoteFlow AI requires an active subscription — manage your plan in Settings → Account.';
+    }
+    return 'No LLM provider configured';
 }
 function getProvider(resolved) {
     if (resolved.impl === 'anthropic')
