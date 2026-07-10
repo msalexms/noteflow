@@ -29,7 +29,7 @@ noteflow/
 │   │                    #   Trees API, migración remota, cifrado token)
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
-│   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase (placeholders hasta crearlo)
+│   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
 │   ├── entitlements.ts  # computeEntitlements(rows) pura ({ai,cloud} desde subscriptions)
 │   └── ai/              # Índice semántico local + LLM ("El Cerebro" Fases 1-3)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
@@ -59,6 +59,7 @@ noteflow/
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
 │   │   ├── themeStore.ts             # Tema — lee/escribe settings.json vía IPC (sendSync)
+│   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
 │   │   ├── editorSettingsStore.ts    # Tamaño de fuente del editor (localStorage)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
@@ -125,12 +126,15 @@ noteflow/
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
-│   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/headings/escala + preview (era ThemeSettingsModal)
-│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho (eran controles inline del menú)
-│   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar (era StartupSettingsModal)
-│   │   │   ├── SyncPanel.tsx            #   Conectar/desconectar GitHub, status, pull (era GitHubSyncModal)
+│   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/headings/escala + preview
+│   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho
+│   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
+│   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
+│   │   │   ├── SyncPanel.tsx            #   Conectar/desconectar GitHub, status, pull
+│   │   │   ├── AccountPanel.tsx         #   Cuenta NoteFlow (OTP, entitlements) — ver monetization.md
+│   │   │   ├── AiPanel.tsx              #   Toggle "Local AI" + reindex + skill del CLI para agentes
 │   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
-│   │   │   ├── ShortcutsPanel.tsx       #   Lista de atajos (era KeyboardShortcutsModal)
+│   │   │   ├── ShortcutsPanel.tsx       #   Lista de atajos (fuente de verdad de los atajos)
 │   │   │   └── AboutPanel.tsx           #   Versión (app:get-version) + check/instalar updates + repo
 │   │   ├── CommandPalette/             # Paleta de comandos
 │   │   ├── ConfirmModal.tsx            # Modal de confirmación genérico
@@ -147,17 +151,29 @@ noteflow/
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
 │   │   │                         #   usado por el editor TipTap y SectionPreviewCard (previews)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
+│   ├── i18n/                     # Sistema i18n propio (EN/ES, sin deps): en/ = fuente de verdad
+│   │                            #   del tipo Messages, es/ forzado a paridad; format.ts (tf/plural),
+│   │                            #   resolveLang/getMessages, hook useT(). Namespaces por área
+│   │                            #   (common, settings, sidebar, shell, editor, palette, aiPanel, brain…).
+│   │                            #   Constantes de módulo con labels → factories getXxx(t) (SlashCommands,
+│   │                            #   profileQuestions, chatSuggestions, comandos de CommandPalette).
+│   │                            #   Fechas: dateLocale.ts (Lang→Locale de date-fns) + formatDate.ts
+│   │                            #   (wrapper de format() que lee dateLocale del languageStore).
+│   │                            #   electron/i18n.ts es un espejo autónomo del proceso main (tray,
+│   │                            #   notificaciones y títulos de diálogos nativos; no comparte módulo
+│   │                            #   con src/), resuelto en call-time desde settings.json (mainMessages())
 │   └── types/
 │       └── index.ts             # Tipos TS + declaración global window.noteflow
 ├── supabase/              # Backend de la cuenta NoteFlow (Fase 4): migrations/*.sql + README
 │                          #   del operador (crear proyecto, plantilla OTP) — ver monetization.md
 ├── dist-electron/         # Output compilado de electron/ (COMMITEADO — incluir en commits)
-├── docs/                  # Landing page (GitHub Pages, servida desde /docs en main) — solo HTML/assets
+├── docs/                  # Web de marketing (proyecto Astro independiente, npm propio) — ver release.md
 ├── public/                # Iconos, assets estáticos
 ├── release/               # Output de electron-builder (gitignored)
 ├── PKGBUILD               # Build manual/AUR del paquete Arch (electron del sistema, NOTEFLOW_NATIVE)
 └── .github/workflows/
-    └── release.yml        # CI/CD: build matrix (win+linux+mac) + release al pushear un tag
+    ├── release.yml        # CI/CD: build matrix (win+linux+mac) + release al pushear un tag
+    └── pages.yml          # Build Astro de docs/ + deploy a GitHub Pages (push a main que toque docs/**)
 ```
 
 ## Arquitectura IPC (Electron)
@@ -188,6 +204,7 @@ Renderer (React)
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
 | `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) |
+| `settings:get-language` / `settings:set-language` | on (sync/async) | Idioma UI (`'system'\|'en'\|'es'`) en settings.json; el setter persiste, refresca el tray y hace broadcast `language-changed` a todas las ventanas (cambio en caliente) |
 | `settings:get-ui-state` / `settings:set-ui-state` | handle | Estado UI (nota/sección activa, grupos y carpetas colapsados) |
 | `settings:get-startup-stickies` / `settings:set-startup-stickies` | handle | Stickies que se abren al arrancar |
 | `groups:get` / `groups:set` | handle | Grupos → `groups.json` (en dir de notas, se sincroniza) |
@@ -197,7 +214,7 @@ Renderer (React)
 | `templates:get` / `templates:set` | handle | Plantillas de nota → `templates.json` (en dir de notas, se sincroniza) |
 | `notes:export` | handle | Exporta a `.noteflow`/`.json`/`.md`/`.txt` (diálogo de guardado) |
 | `notes:parse-import-file` | handle | Abre y parsea un archivo de importación (incluye `.md`/`.txt`) |
-| `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): abre diálogo carpeta/`.zip`, parsea con `electron/importers/` y devuelve un intermedio normalizado `ExternalNote[]` (`{title,format,body,tags?,created?,archived?,favorited?,relPath[]}`); NO serializa ni crea grupos (eso es del renderer) |
+| `notes:parse-external-import` | handle | Importa de otras apps (`'md-folder'\|'notion'\|'keep'`): solo IO en main, devuelve `ExternalNote[]` normalizado; la conversión html→md y grupos son del renderer (detalle en `patterns.md` → Importación) |
 | `notes:write-imported` | handle | Escribe las notas importadas (filenames saneados) |
 | `alarms:schedule` | on | Registra el set de alarmas en el motor del main; dispara las vencidas |
 | `window:minimize` / `maximize` / `close` | on | Controles de ventana (frameless) |
@@ -210,11 +227,12 @@ Renderer (React)
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
 | `sync:pull` | handle | Pull manual desde el remoto |
-| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt}`) — **nunca** tokens |
+| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt, aiCheckoutConfigured}`) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
 | `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` |
+| `account:open-checkout` | handle | Abre el checkout de Lemon Squeezy en el navegador con `checkout[custom][user_id]` (URL construida en main — el userId no cruza al renderer) |
 | `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
 | `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
 | `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
@@ -223,14 +241,13 @@ Renderer (React)
 | `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage` |
 | `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`) |
 | `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales |
-| `ai:chat` | handle | Chat **agéntico** con streaming: monta contexto RAG (`ai:search`+`ai:graph`) y corre un **bucle de tool-calling** (`provider.streamTurn` + `agentTools.executeTool`, máx. `MAX_AGENT_STEPS=12`); emite por eventos; resuelve al terminar. Cada mensaje de usuario puede llevar `attachmentIds[]`: main los resuelve de `chatFiles` (txt/md inline en el texto, pdf/img como `Attachment` nativos, capados por `capabilities`) |
-| `ai:chat-pick-files` / `ai:chat-remove-file` | handle | Adjuntos del chat: mismo file picker que el perfil (`pickFilesIntoCache`) pero a la caché `chatFiles` (NO se consume al enviar → siguen disponibles para preguntas de seguimiento). Devuelve metadatos `{id,name,kind,sizeBytes}` + `errors[]`; bytes NUNCA cruzan al renderer |
+| `ai:chat` | handle | Chat **agéntico** con streaming: contexto RAG + bucle de tool-calling, emite por eventos, admite `attachmentIds[]` (detalle en `ai.md` → Chat agéntico) |
+| `ai:chat-pick-files` / `ai:chat-remove-file` | handle | Adjuntos del chat a la caché `chatFiles` del main (persisten para preguntas de seguimiento); devuelve solo metadatos — los bytes NUNCA cruzan al renderer |
 | `ai:chat-cancel` | on | Aborta un `ai:chat` en vuelo por `requestId` (AbortController); también resuelve confirmaciones pendientes |
 | `ai:chat-confirm` | on | Resuelve la confirmación de una tool destructiva por `toolCallId` (`{toolCallId, approved}`) |
 | `ai:chats-load` / `ai:chats-save` | handle | Historial de chats en `userData/ai-chats.json` (local, NO se sincroniza) |
-| `ai:profile-pick-files` | handle | Segundo cerebro: file picker capado por capacidades del proveedor (PDF/img/txt/md). Lee a una **caché en main** (bytes NUNCA cruzan al renderer); devuelve solo metadatos `{id,name,kind,sizeBytes}` + `errors[]` |
-| `ai:profile-remove-file` | handle | Elimina un archivo de la caché del perfil por `id` |
-| `ai:profile-generate` | handle | Segundo cerebro: `{fields[], fileIds[], urls[], locale?}` → monta prompt (campos + txt/md inline + texto scrapeado de urls vía `fetchReadableText`) + adjunta PDF/imágenes nativos → LLM → `{title, sections[]}`. System prompt **infiere/expande** (no solo reformatea). Limpia la caché al terminar |
+| `ai:profile-pick-files` / `ai:profile-remove-file` | handle | Segundo cerebro: file picker capado por capacidades del proveedor a una caché en main (solo metadatos al renderer) |
+| `ai:profile-generate` | handle | Segundo cerebro: `{fields[], fileIds[], urls[], locale?}` → prompt + adjuntos nativos → LLM → `{title, sections[]}` (detalle en `ai.md` → Segundo cerebro) |
 | `ai:profile-get-status` / `ai:profile-set-completed` | handle | `settings.aiProfile` = `{completedAt, noteId?}` (cuestionario mostrado una vez + id de la nota de perfil generada, para enlazar/regenerar sin duplicar). `set-completed(noteId?)`: sin `noteId` = "Not now" (saltado) |
 
 **Eventos main → renderer** (suscripción vía `window.noteflow.on*`):
@@ -279,6 +296,7 @@ Estructura de `settings.json`:
 ```json
 {
   "theme": "carbon",
+  "language": "system",
   "openAtLogin": false,
   "uiState": {
     "activeNoteId": "xyz",

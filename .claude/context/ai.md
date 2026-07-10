@@ -5,10 +5,9 @@ Subsistema de IA **100% local/offline** que indexa cada **sección** de cada not
 **embedding** (vector). El índice es un **artefacto derivado y reconstruible** desde los `.md` (si
 se borra, se regenera). Plan maestro "El Cerebro": Fase 1 (índice + panel "Related notes", hecha)
 → **Fase 2 (vista cerebro/grafo, hecha)** → **Fase 3 (panel IA: chat RAG + segundo cerebro, hecha;
-falta verificar en app real)** → **Fase 4 (nube/monetización — diseño cerrado en
+falta verificar en app real)** → **Fase 4 (nube/monetización — ver
 `.claude/context/monetization.md`)**. **Principio: un índice, tres
-consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
-`C:\Users\yagoi\.claude\plans\vamos-a-planificar-la-peaceful-manatee.md`.
+consumidores** (related ✅, grafo ✅, chat ✅).
 
 - **3 procesos:** renderer (`aiStore` + `RelatedNotesPanel`) → main (`aiIndex`, lifecycle +
   debounce + progreso) → **`utilityProcess`** (`aiWorker`, no bloquea el main).
@@ -80,10 +79,11 @@ consumidores** (related ✅, grafo ✅, chat ✅). Plan de Fase 2:
   Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de
   grupo) + contenido tenue (resaltada al seleccionar/hover, con toggle). Excluye notas
   archivadas/cifradas/temporales. Smoke headless: `scripts/ai-graph-smoke.cjs`.
-- **Activación:** flag `settings.ai.enabled` (default `false`). **UI definitiva de activación: el
+- **Activación:** flag `settings.ai.enabled` (default `false`). **UI principal de activación: el
   overlay/CTA dentro de la vista cerebro** (con IA off el cerebro muestra solo estructura; activar
-  desde ahí descarga el modelo + reindexa con barra de progreso). Queda además el toggle temporal
-  "Local AI" en el menú del TitleBar. Arranque del worker diferido ~4s tras el boot (`primeSettings`).
+  desde ahí descarga el modelo + reindexa con barra de progreso). También hay toggle + "Reindex all"
+  en **Settings → AI** (`Settings/AiPanel.tsx`). Arranque del worker diferido ~4s tras el boot
+  (`primeSettings`).
 - **Deps nativas (IMPRESCINDIBLE):** `better-sqlite3` + `onnxruntime-node` + `sqlite-vec` son
   binarios nativos. `package.json` lleva **`"postinstall": "electron-builder install-app-deps"`**
   (recompila para el ABI de Electron tras cada `npm install`) y entradas en **`build.asarUnpack`**.
@@ -110,9 +110,16 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   API key se cifra por proveedor con `safeStorage` y **nunca llega al renderer** (solo `hasKey`).
 - **Proveedores (presets, `electron/ai/llm/presets.ts`):** dos implementaciones —
   `anthropic` (SDK oficial `@anthropic-ai/sdk`, `messages.stream`) y `openai` (fetch SSE a
-  `/chat/completions`). Presets: Anthropic, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter,
-  Ollama (local), Custom. **Cada preset guarda su propia key/modelo/baseUrl** (`aiLlm.byPreset`)
-  → cambiar de proveedor no mezcla credenciales. `baseUrl` editable salvo Anthropic.
+  `/chat/completions`). Presets: **NoteFlow AI** (gestionado, primero de la lista en `PRESETS`),
+  Anthropic, OpenAI, DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama (local), Custom. **Cada preset
+  guarda su propia key/modelo/baseUrl** (`aiLlm.byPreset`) → cambiar de proveedor no mezcla
+  credenciales. `baseUrl` editable salvo Anthropic y NoteFlow AI. El preset `noteflow` no usa API
+  key: su credencial es un access token fresco de la cuenta por request (`resolveConfigAsync`;
+  detalle en `.claude/context/monetization.md` § 3). `presetOf()` con id desconocido cae en
+  `anthropic`, no en `PRESETS[0]`. **En la UI** (`LlmConfigView`), NoteFlow AI **ya no aparece en
+  el `<select>` de proveedores** — tiene su propia card "premium" fuera de la lista, condicionada a
+  la entitlement `ai` (o a ser ya el activo); el `<select>` solo lista el resto de presets
+  (`PRESETS` filtrado por id, no la lista general).
 - **RAG (`ai:chat` en main):** embebe la pregunta vía `aiIndex.search` (híbrido) → expande vecinos
   con `aiIndex.graph` → lee secciones de disco (`noteFormat.parseNoteDir`) → monta system prompt con
   contexto → stream. Emite `ai:chat-sources` (notas usadas) antes de los deltas. **Privacidad:** solo
@@ -159,7 +166,12 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   de auto-descripción (enfoque **híbrido**). El usuario también puede **adjuntar archivos** y
   **enlaces**. Al generar, `ai:profile-generate` recibe `{fields (con `section`), fileIds, urls,
   locale}` (agrupa las respuestas por sección en el prompt) y el LLM **infiere/abstrae/organiza** en
-  una nota de perfil (creada por `notesStore` en el idioma del usuario). **Borrador persistente:** las
+  una nota de perfil (creada por `notesStore`). El `locale` (en qué idioma escribe el LLM el perfil) lo
+fija `detectLocale()` según el **ajuste de idioma de la app** (`languageStore`, no `navigator.language`),
+de modo que el perfil sigue el idioma de la UI (NO cambia el idioma del **chat**, que sigue detectando
+el idioma del texto del usuario). El **esquema del wizard** (labels/hints/opciones) es i18n vía la
+factory `getProfileQuestions(t)` (namespace `aiPanel.profileForm`); marcas en opciones (Notion, Figma,
+Python…) quedan literales. **Borrador persistente:** las
   respuestas del wizard viven en `aiChatStore.profileDraft` (no en `useState`) para sobrevivir al
   desmontaje de `ProfileFlow` al cambiar de pestaña (p. ej. ir a Settings a arreglar el proveedor tras un
   fallo y volver). Es **de sesión** (los bytes de los adjuntos viven en la caché del main, también de

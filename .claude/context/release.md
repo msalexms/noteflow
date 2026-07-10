@@ -153,12 +153,16 @@ Se dispara con tags `v*`. Dos jobs:
 > **Nota (electron-builder 26+):** las props del `.desktop` de Linux van dentro de
 > `desktop.entry`, NO directamente en `desktop`. Error conocido que rompió el release en v1.2.3.
 
-## Landing page (GitHub Pages)
+## Web pública (GitHub Pages)
 
-Servida directamente desde la carpeta `/docs` en `main` (sin workflow propio). Archivos:
-`docs/index.html` (landing), `docs/cli.html` (referencia CLI), `docs/mobile-privacy-policy.html`,
-`docs/style.css`, `docs/main.js`, `docs/sitemap.xml`, `docs/robots.txt`, `docs/screenshots/`.
-URL: https://yagoid.github.io/noteflow/. Actualizarla al añadir features visibles o screenshots.
+`docs/` es un **proyecto Astro independiente** que se despliega con el workflow **`pages.yml`**:
+cualquier push a `main` que toque `docs/**` construye el sitio y publica `docs/dist` en GitHub
+Pages vía Actions (no se sirve la carpeta en crudo). URL: https://yagoid.github.io/noteflow/.
+
+Todo lo demás (arquitectura del sitio, páginas `/cli` `/ai` `/features`, inventario de
+contenido ↔ fuente de verdad, gotchas de base path/hreflang/redirects, checklist de sincronización
+al cambiar la app) está en **`.claude/context/web.md`** — abrirlo antes de tocar la web o al cerrar
+una feature que la web documente.
 
 ## Tareas frecuentes
 

@@ -15,8 +15,11 @@ description: Funcionalidades, diseño de UI y experiencia de usuario de NoteFlow
 > literal (⌃)** porque `Cmd+Tab` es el conmutador del sistema. El renderer resuelve las etiquetas con
 > `src/lib/platform.ts` (`modKey`/`controlKey`/`keyLabel`, leyendo `window.noteflow.platform`).
 >
-> **Idioma de la UI:** todo el texto visible de la app va **en inglés** (labels, botones, placeholders,
-> tooltips, errores de UI). El contenido del usuario y las respuestas del LLM van en el idioma del usuario.
+> **Idioma de la UI:** la app soporta **idioma de interfaz configurable** (inglés y español) desde
+> **Ajustes → General**, con opción **System** (sigue el idioma del sistema operativo) y **cambio en
+> caliente** (sin reiniciar; incluye el menú del tray y diálogos nativos). Persiste en `settings.json`.
+> El inglés es la fuente de verdad de las traducciones (`src/i18n/`). El contenido del usuario y las
+> respuestas del LLM van en el idioma del usuario, con independencia del idioma de la interfaz.
 
 ## ¿Qué es NoteFlow?
 
@@ -59,11 +62,12 @@ Iconos del TitleBar:
   de descarga y luego un spinner "Installing…").
 - **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
-  + panel derecho. Secciones: **Appearance** (tema/fuente/acento/headings/escala), **Editor**
+  + panel derecho. Secciones: **General** (idioma de la interfaz: System/English/Español),
+  **Appearance** (tema/fuente/acento/headings/escala), **Editor**
   (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Startup** (autostart + stickies),
-  **Sync** (GitHub), **Data** (export/import + carpeta de notas), **AI**, **Keyboard shortcuts** y
-  **About** (versión + updates + repo). Sustituye al antiguo menú desplegable y al botón de paleta (Appearance está
-  ahora dentro). Tamaño fijo proporcional a la ventana de la app.
+  **Sync** (GitHub), **Data** (export/import + carpeta de notas), **AI**, **Account** (cuenta
+  NoteFlow), **Keyboard shortcuts** y **About** (versión + updates + repo). Tamaño fijo
+  proporcional a la ventana de la app.
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
 
 ---
@@ -473,10 +477,10 @@ derivado reconstruible desde los `.md`.
 - **Activación:** flag `settings.ai.enabled` (default **off**). La **UI definitiva de activación
   está en la vista cerebro** (ver abajo): con la IA off el cerebro muestra solo la estructura y un
   CTA "Activar IA local"; al activar descarga un modelo pequeño (~una vez) e indexa con barra de
-  progreso. Queda además un toggle **"Local AI"** en el menú de ajustes del TitleBar.
+  progreso. También hay un toggle **"Local AI"** en Settings → AI.
 - **Panel Related:** al cambiar de sección/nota, el panel actualiza las relacionadas; click en un
   resultado navega a esa sección. Las notas **cifradas se omiten** (no entran al índice).
-- **Reindexar:** botón "Reindex all notes" en el mismo menú (muestra progreso); el índice también
+- **Reindexar:** botón "Reindex all notes" en Settings → AI (muestra progreso); el índice también
   se mantiene al día solo al guardar (incremental, debounce).
 - Roadmap: este índice alimenta la **vista cerebro** (Fase 2 ✅) y el **chat RAG** (Fase 3 ✅, ver
   "Panel de IA" más abajo). Un índice, tres consumidores. Detalle técnico en `.claude/context/ai.md`.
@@ -564,6 +568,13 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API key** (BYO; gratis y privado),
   ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia key/modelo** —
   cambiar de proveedor no las mezcla. Las claves se guardan cifradas y nunca salen de tu máquina.
+  - **NoteFlow AI (suscripción):** si tienes la suscripción activa, encima del selector aparece una
+    **card dedicada** con acento de marca — sin API key ni Base URL (usa tu cuenta NoteFlow) y con
+    modelos curados. Botón "Use NoteFlow AI" para activarlo, o check "Active" si ya lo es. No sale
+    en el desplegable de proveedores, y la card no se muestra sin suscripción (salvo que sea el
+    proveedor activo y hayas perdido la suscripción: entonces muestra el aviso para que entiendas
+    el fallo y puedas cambiar de proveedor). **Al suscribirte** (Subscribe → pagar → Refresh en
+    Settings → Account), NoteFlow AI **se activa como proveedor automáticamente**.
 
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
@@ -624,8 +635,8 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
 
 | Modo | Temas |
 |---|---|
-| Dark | Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, GruvBox Dark, Obsidian, Emerald Forest, Synthwave |
-| Light | Arctic Day, Parchment |
+| Dark (11) | NoteFlow Dark, Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, GruvBox Dark, Obsidian, Emerald Forest, Synthwave |
+| Light (3) | NoteFlow Light, Arctic Day, Parchment |
 
 Persisten entre sesiones (`settings.json`). Definidos en `src/lib/themes.ts` como sets de CSS vars.
 
@@ -725,7 +736,7 @@ de notas, **se sincroniza** con GitHub como el resto de metadatos).
 
 ## Startup settings
 
-Settings → "Startup settings...":
+Settings → Startup:
 - **Launch on system startup**: NoteFlow arranca al iniciar sesión (oculto en el tray).
 - **Open as sticky at startup**: selecciona qué secciones se abren como sticky al arrancar (solo
   si el autostart está activo; las notas cifradas no aparecen).
@@ -754,7 +765,7 @@ Settings → "Startup settings...":
 
 ## GitHub Sync
 
-Settings → GitHub Sync.
+Settings → Sync.
 
 ### Conectar
 1. Introduce el nombre del repositorio privado donde se guardarán las notas.
@@ -765,9 +776,10 @@ Settings → GitHub Sync.
 ### Comportamiento tras conectar
 - **Al arrancar**: pull automático (solo sobreescribe si el remoto es más nuevo).
 - **Cada 5 min**: pull automático en segundo plano.
-- **Al guardar**: push automático con debounce (~3s). El icono ☁ indica cuándo está subiendo.
+- **Al guardar**: push automático con debounce (~5s). El icono ☁ indica cuándo está subiendo.
 - **Al borrar**: el archivo se elimina también del repo remoto.
-- Se sincronizan notas + `groups.json` + `folders.json` + `section-colors.json`.
+- Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
+  `templates.json`.
 - El repositorio se crea como **privado** automáticamente si no existe.
 
 ### Panel de sync
@@ -782,16 +794,18 @@ Settings → GitHub Sync.
 
 ## Cuenta NoteFlow (Settings → Account)
 
-Cuenta opcional para las futuras suscripciones (**NoteFlow AI** y **NoteFlow Cloud**, Fase 4 de
-monetización). Todo lo gratuito sigue funcionando sin cuenta.
+Cuenta opcional para las suscripciones (**NoteFlow AI**, ya comprable; **NoteFlow Cloud**, Fase
+4.2 futura). Todo lo gratuito sigue funcionando sin cuenta.
 
 - **Sign-in sin contraseña:** email → "Send code" → código de 6 dígitos por email → "Verify &
   sign in" (misma UX de código que el Device Flow de GitHub). "Use a different email" vuelve atrás.
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
-  Active/—), botón "Refresh" (relee las suscripciones) y "Sign out". Mientras no haya checkout,
-  el panel indica "Subscriptions are coming soon."
-- **Builds sin backend configurado** (aún no existe el proyecto Supabase): el panel solo muestra
-  "NoteFlow account services aren't available in this build yet."
+  Active/—), botón "Refresh" (relee las suscripciones) y "Sign out". Sin la suscripción AI,
+  botón **"Subscribe to NoteFlow AI"** → abre el checkout de Lemon Squeezy en el navegador; tras
+  pagar, "Refresh" activa el plan (badge AI) y **el proveedor NoteFlow AI se activa solo** en
+  Settings → AI. (En builds sin URL de checkout, el panel indica "Subscriptions are coming soon.")
+- **Builds sin backend configurado** (`cloudConfig.ts` vacío — no es el caso de las builds
+  actuales): el panel solo muestra "NoteFlow account services aren't available in this build yet."
 - Privacidad: la sesión (refresh token cifrado con `safeStorage`) vive en el proceso main y nunca
   llega al renderer; detalle técnico en `.claude/context/monetization.md`.
 
@@ -799,7 +813,7 @@ monetización). Todo lo gratuito sigue funcionando sin cuenta.
 
 ## Exportar / Importar notas
 
-Settings → Export / Import.
+Settings → Data → Export / Import.
 
 **Exportar**:
 - `.noteflow` (JSON con todas las notas).
@@ -841,7 +855,7 @@ Comandos principales: `add`, `new`, `list`, `get`, `delete`, `rename`, `sections
 
 ## Atajos de teclado completos
 
-Fuente de verdad: `src/components/KeyboardShortcutsModal.tsx`.
+Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 
 ### App
 | Atajo | Acción |
@@ -884,9 +898,10 @@ Fuente de verdad: `src/components/KeyboardShortcutsModal.tsx`.
 
 ## Persistencia y almacenamiento
 
-- Notas como `.md` en `~/noteflow-notes/` (Windows) / `~/.local/share/noteflow-notes/` (Linux).
-- Junto a ellas: `groups.json`, `folders.json`, `section-colors.json`, `note-order.json` (todo sincronizable).
+- Notas en `~/noteflow-notes/` (Windows/macOS) / `~/.local/share/noteflow-notes/` (Linux).
+- Junto a ellas: `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
+  `templates.json` (todo sincronizable).
 - Auto-save con debounce tras cada cambio.
-- Formato: YAML frontmatter + Markdown (el cuerpo = contenido de la primera sección).
-- Carpeta configurable desde Settings → "Choose notes directory".
+- Formato v2 (carpeta por nota): `note.md` con el frontmatter YAML + un `.md` por sección.
+- Carpeta configurable desde Settings → Data → "Choose notes directory".
 - Ajustes locales (tema, autostart, estado de UI, token de sync) en `settings.json` del userData.

@@ -10,8 +10,12 @@ La **documentación del proyecto** vive en `.claude/context/*.md` (abajo el mapa
 
 ## Reglas siempre-on
 
-- **Idioma de la UI = inglés** (labels, botones, placeholders, tooltips, errores de UI). El contenido
-  del usuario y las respuestas del LLM van en el idioma del usuario; la documentación va en español.
+- **Textos de UI = i18n en `src/i18n/`** (EN/ES, configurable en Ajustes → General). El **inglés es la
+  fuente de verdad** (`src/i18n/en/`, define el tipo `Messages`); el español (`src/i18n/es/`) es un espejo
+  que TypeScript obliga a mantener completo. Al añadir/editar cualquier label, botón, placeholder, tooltip,
+  aria-label o mensaje de UI: añade la clave en `en/` y su traducción en `es/`, y consúmela con `useT()`
+  (o `tf()`/`plural()` para variables). El proceso main tiene su propio espejo en `electron/i18n.ts`. El
+  contenido del usuario y las respuestas del LLM van en el idioma del usuario; la documentación va en español.
 - **Tras tocar `electron/`:** ejecutar `npm run build` y **commitear `dist-electron/`** (está versionado).
 - **Datos:** notas y ajustes sincronizables viven en el dir de notas; los ajustes locales en
   `settings.json` del `userData` (ver `.claude/context/architecture.md`).
@@ -28,7 +32,8 @@ La **documentación del proyecto** vive en `.claude/context/*.md` (abajo el mapa
 | GitHub Sync (push/pull, cola de mutaciones, invariantes) | `.claude/context/sync.md` | Tocar la sincronización con GitHub |
 | "El Cerebro": índice semántico · vista cerebro · LLM/chat agéntico · segundo cerebro · secciones ocultas a la IA | `.claude/context/ai.md` | Tocar embeddings, grafo, chat, tools del agente o perfil |
 | Patrones y decisiones (perf sidebar/búsqueda, imports, overviews, hover, relaciones, editor/markdown, sticky, alarmas, auto-update, macOS, CLI, temas) | `.claude/context/patterns.md` | Entender una decisión de diseño o tocar uno de esos subsistemas |
-| Release · electron-builder · CI/CD · artefactos · landing · tareas frecuentes | `.claude/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
+| Release · electron-builder · CI/CD · artefactos · tareas frecuentes | `.claude/context/release.md` | Hacer un release, tocar build/CI o tareas de mantenimiento |
+| Web pública (Astro en `docs/`): landing + páginas `/cli` `/ai` `/features` · inventario contenido↔fuente de verdad · estética "The Brain" · i18n EN/ES | `.claude/context/web.md` | Tocar la web, o al cambiar app/CLI/IA algo que la web documenta |
 | Monetización (Fase 4; 4.0 cuenta+entitlements implementada en cliente): cuenta NoteFlow · IA gestionada (proxy) · nube E2EE · pagos MoR · Supabase | `.claude/context/monetization.md` | Trabajar en suscripciones, cuenta, proxy LLM o NoteFlow Cloud |
 | Funcionalidades · UI · UX · atajos (producto/usuario) | skill `noteflow-features` | Discutir/diseñar features o entender la app desde el usuario |
 

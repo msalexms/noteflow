@@ -255,17 +255,15 @@ oculta en lugar de cerrarse (`win.hide()`); la app vive en el system tray. Atajo
 
 ### Ventana de Ajustes unificada (`src/components/Settings/`)
 El ⚙ del TitleBar abre `SettingsModal` (overlay in-app, NO un BrowserWindow): split **nav
-izquierda + panel derecho**, una sección por opción (Appearance, Editor, Startup, Sync, Data,
-Shortcuts, About; el usuario añadió además AI). Sustituye al antiguo dropdown del titlebar y al
-botón de paleta. Cada panel es el cuerpo extraído de los modales previos (`ThemeSettingsModal`,
-`StartupSettingsModal`, `GitHubSyncModal`, `KeyboardShortcutsModal` — **eliminados**, junto con
-`TitleBarMenu.tsx`); `ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback.
-Tamaño **fijo proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]` (no crece con el contenido;
-encoge si la ventana de la app es pequeña). Cada panel gestiona su propio estado/efectos — **sin
-store ni IPC nuevo** salvo `app:get-version` (panel About). El `CommandPalette` no cambió: sigue
-disparando los mismos eventos (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/
--export/-import`) y el TitleBar los reinterpreta para abrir la ventana en la sección correcta
-(export/import siguen abriendo el flujo `ExportImportModal` directo).
+izquierda + panel derecho**, una sección por panel (Appearance, Editor, Templates, Startup, Sync,
+Data, AI, Account, Shortcuts, About — un `.tsx` por panel en `src/components/Settings/`).
+Sustituyó al antiguo dropdown del titlebar y a los modales sueltos (eliminados);
+`ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback. Tamaño **fijo
+proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]`. Cada panel gestiona su propio
+estado/efectos. El `CommandPalette` dispara los mismos eventos de siempre
+(`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/-export/-import`) y el TitleBar
+los reinterpreta para abrir la ventana en la sección correcta (export/import siguen abriendo el
+flujo `ExportImportModal` directo).
 
 ### Single instance
 `app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente.
