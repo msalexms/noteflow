@@ -1,0 +1,605 @@
+---
+// The /features docs page (both locales render through this component — see
+// src/pages/features.astro and src/pages/es/features.astro). Layout + shell
+// behaviour come from DocsShell; all prose lives in src/i18n/docs/features.{en,es}.ts.
+// Structural, non-translatable data (colour tokens for the hierarchy mock, the
+// theme swatch palette pulled from src/lib/themes.ts) lives here.
+import DocsShell from '../../layouts/DocsShell.astro';
+import StickyMock from './StickyMock.astro';
+import { getFeaturesContent } from '../../i18n/docs/features';
+import { getRelativeLocaleUrl } from 'astro:i18n';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = getFeaturesContent(lang);
+
+// Cross-page links (locale-aware). Dict strings carry %AI_URL% / %CLI_URL%
+// placeholders so the prose stays plain data.
+const aiUrl = getRelativeLocaleUrl(lang, '/ai');
+const cliUrl = getRelativeLocaleUrl(lang, '/cli');
+const organizeWhy = t.organize.whyP.replace('%AI_URL%', `${aiUrl}#embeddings`);
+const fillPrivacy = (s: string) =>
+  s.replace(/%AI_URL%/g, `${aiUrl}#privacy`).replace(/%CLI_URL%/g, cliUrl);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: t.meta.title,
+  description: t.meta.description,
+  inLanguage: lang,
+  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+};
+
+// Mono section kicker: "01 / organize", numbered from the TOC order.
+const kickerFor = (id: string) => {
+  const i = t.toc.findIndex((item) => item.id === id);
+  return `${String(i + 1).padStart(2, '0')} / ${id.replace(/-/g, ' ')}`;
+};
+
+// Hierarchy mock: colour tokens are structural (names come from the dictionary).
+const groupToks = ['cyan', 'orange'];
+const tagToks = ['purple', 'accent', 'pink', 'cyan', 'orange'];
+const tagTok = (noteIdx: number, secIdx: number) => tagToks[(noteIdx + secIdx) % tagToks.length];
+
+// Theme swatches — palette values verbatim from src/lib/themes.ts (--bg-0 / --text / --accent).
+const themeSwatches = {
+  dark: [
+    { name: 'NoteFlow Dark', bg: '12 12 17', ink: '236 234 224', ac: '245 166 35' },
+    { name: 'Midnight Blue', bg: '9 12 17', ink: '212 212 212', ac: '78 158 255' },
+    { name: 'Carbon', bg: '9 9 9', ink: '212 212 212', ac: '78 158 255' },
+    { name: 'Tokyo Night', bg: '19 20 30', ink: '192 202 245', ac: '122 162 247' },
+    { name: 'VS Code Dark', bg: '38 38 40', ink: '212 212 212', ac: '86 156 214' },
+    { name: 'Dracula', bg: '30 31 41', ink: '248 248 242', ac: '189 147 249' },
+    { name: 'True Godot', bg: '26 26 26', ink: '224 224 224', ac: '71 140 191' },
+    { name: 'GruvBox Dark', bg: '29 28 26', ink: '235 219 178', ac: '69 133 136' },
+    { name: 'Obsidian', bg: '12 12 12', ink: '224 224 224', ac: '180 180 180' },
+    { name: 'Emerald Forest', bg: '10 20 14', ink: '210 230 215', ac: '100 200 130' },
+    { name: 'Synthwave', bg: '15 10 25', ink: '235 220 245', ac: '255 100 200' },
+  ],
+  light: [
+    { name: 'NoteFlow Light', bg: '231 223 204', ink: '42 38 32', ac: '184 117 20' },
+    { name: 'Arctic Day', bg: '220 230 242', ink: '26 38 64', ac: '26 111 204' },
+    { name: 'Parchment', bg: '220 220 218', ink: '42 38 32', ac: '75 118 188' },
+  ],
+};
+---
+
+<DocsShell
+  lang={lang}
+  page="features"
+  accent="orange"
+  title={t.meta.title}
+  description={t.meta.description}
+  kicker={t.hero.kicker}
+  h1={t.hero.h1}
+  tagline={t.hero.tagline}
+  toc={t.toc}
+  jsonLd={jsonLd}
+>
+  <!-- ── Organize ── -->
+  <section id="organize" data-reveal>
+    <div class="nf-sec-head">{kickerFor('organize')}</div>
+    <h2>{t.organize.title}</h2>
+    {t.organize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <!-- Hierarchy mock: colour-coded groups → folders → notes → section tags -->
+    <figure class="nf-tree nf-edge" role="img" aria-label={t.organize.tree.aria}>
+      <div class="nf-tree-cols">
+        {t.organize.tree.groups.map((g, gi) => (
+          <div class="nf-tree-group" style={`--gc:var(--${groupToks[gi % groupToks.length]});`}>
+            <div class="nf-tree-ghead"><span class="nf-tree-gdot" aria-hidden="true"></span>{g.name}</div>
+            {g.folders.map((f) => (
+              <div class="nf-tree-folder">
+                <div class="nf-tree-fhead">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                  {f.name}
+                </div>
+                <div class="nf-tree-fbody">
+                  {f.notes.map((n, ni) => (
+                    <div class="nf-tree-note">
+                      <span class="nf-tree-ndot" aria-hidden="true"></span>
+                      <span class="nf-tree-ntitle">{n.title}</span>
+                      <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni, si)});`}>{s}</span>)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {g.notes.map((n, ni) => (
+              <div class="nf-tree-note">
+                <span class="nf-tree-ndot" aria-hidden="true"></span>
+                <span class="nf-tree-ntitle">{n.title}</span>
+                <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni + 2, si)});`}>{s}</span>)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div class="nf-tree-group is-ungrouped">
+          <div class="nf-tree-ghead">{t.organize.tree.ungroupedLabel}</div>
+          {t.organize.tree.ungroupedNotes.map((n, ni) => (
+            <div class="nf-tree-note">
+              <span class="nf-tree-ndot" aria-hidden="true"></span>
+              <span class="nf-tree-ntitle">{n.title}</span>
+              <span class="nf-tree-ntags">{n.sections.map((s, si) => <span class="nf-tree-tag" style={`--tc:var(--${tagTok(ni + 4, si)});`}>{s}</span>)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <figcaption class="nf-tree-caption">{t.organize.tree.caption}</figcaption>
+    </figure>
+
+    <h3>{t.organize.sectionsH3}</h3>
+    {t.organize.sectionsP.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <p class="nf-docs-p" set:html={organizeWhy} />
+  </section>
+
+  <!-- ── Templates ── -->
+  <section id="templates" data-reveal>
+    <div class="nf-sec-head">{kickerFor('templates')}</div>
+    <h2>{t.templates.title}</h2>
+    {t.templates.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ol class="nf-feat-steps">
+      {t.templates.steps.map((s, i) => (
+        <li class="nf-feat-step">
+          <span class="nf-feat-step-num">{String(i + 1).padStart(2, '0')}</span>
+          <div class="nf-feat-step-body">
+            <h3>{s.title}</h3>
+            <p set:html={s.desc} />
+          </div>
+        </li>
+      ))}
+    </ol>
+    <p class="nf-docs-p" set:html={t.templates.syncP} />
+  </section>
+
+  <!-- ── Sticky notes ── -->
+  <section id="sticky" data-reveal>
+    <div class="nf-sec-head">{kickerFor('sticky')}</div>
+    <h2>{t.sticky.title}</h2>
+    {t.sticky.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <StickyMock
+      winTitle={t.sticky.mock.winTitle}
+      items={t.sticky.mock.items}
+      caption={t.sticky.mock.caption}
+      foldAria={t.sticky.mock.foldAria}
+      closeAria={t.sticky.mock.closeAria}
+    />
+
+    <ul class="nf-docs-ul">
+      {t.sticky.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <h3>{t.sticky.startupH3}</h3>
+    <p class="nf-docs-p" set:html={t.sticky.startupP} />
+  </section>
+
+  <!-- ── Section links ── -->
+  <section id="links" data-reveal>
+    <div class="nf-sec-head">{kickerFor('links')}</div>
+    <h2>{t.links.title}</h2>
+    {t.links.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <!-- Pill mock: a live pill in flowing text, a broken one, and the raw form -->
+    <div class="nf-linkmock nf-edge">
+      <p class="nf-linkmock-line">
+        {t.links.mock.before}<span class="nf-pill"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.pill}</span>{t.links.mock.after}
+      </p>
+      <p class="nf-linkmock-line is-note">
+        {t.links.mock.brokenLabel}
+        <span class="nf-pill is-broken"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>{t.links.mock.brokenPill}</span>
+      </p>
+      <div class="nf-linkmock-raw">
+        <span class="nf-linkmock-rawlabel">{t.links.mock.rawLabel}</span>
+        <code>{t.links.mock.raw}</code>
+      </div>
+    </div>
+
+    <ul class="nf-docs-ul">
+      {t.links.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <p class="nf-docs-p" set:html={t.links.rawP} />
+    <p class="nf-docs-p" set:html={t.links.brainP} />
+  </section>
+
+  <!-- ── Shortcuts ── -->
+  <section id="shortcuts" data-reveal>
+    <div class="nf-sec-head">{kickerFor('shortcuts')}</div>
+    <h2>{t.shortcuts.title}</h2>
+    {t.shortcuts.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <aside class="nf-feat-callout"><p set:html={t.shortcuts.macNote} /></aside>
+
+    {t.shortcuts.groups.map((g) => (
+      <div class="nf-keys-group">
+        <h3 class="nf-keys-label"><span class="nf-keys-dot" aria-hidden="true"></span>{g.label}</h3>
+        <table class="nf-ref-table nf-keys-table">
+          <thead><tr><th>{t.shortcuts.colShortcut}</th><th>{t.shortcuts.colAction}</th></tr></thead>
+          <tbody>
+            {g.rows.map((r) => (
+              <tr>
+                <td class="nf-keys-combo">
+                  {r.combos.map((combo, ci) => (
+                    <>
+                      {ci > 0 && <span class="nf-keys-sep">/</span>}
+                      <span class="nf-keys-kbds">{combo.map((k, ki) => (<>{ki > 0 && <span class="nf-keys-plus">+</span>}<kbd>{k}</kbd></>))}</span>
+                    </>
+                  ))}
+                </td>
+                <td>{r.desc}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ))}
+  </section>
+
+  <!-- ── Views ── -->
+  <section id="views" data-reveal>
+    <div class="nf-sec-head">{kickerFor('views')}</div>
+    <h2>{t.views.title}</h2>
+    {t.views.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-view-grid">
+      {t.views.cards.map((c) => (
+        <article class="nf-view-card nf-edge">
+          <div class="nf-view-tag">{c.tag}</div>
+          <h3>{c.name}</h3>
+          <p set:html={c.desc} />
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <!-- ── Temporary notes ── -->
+  <section id="temp" data-reveal>
+    <div class="nf-sec-head">{kickerFor('temp')}</div>
+    <h2>{t.temp.title}</h2>
+    {t.temp.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.temp.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+  </section>
+
+  <!-- ── Encryption ── -->
+  <section id="encryption" data-reveal>
+    <div class="nf-sec-head">{kickerFor('encryption')}</div>
+    <h2>{t.encryption.title}</h2>
+    {t.encryption.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.encryption.bullets.map((b) => <li set:html={fillPrivacy(b)} />)}
+    </ul>
+  </section>
+
+  <!-- ── Hide from AI ── -->
+  <section id="ai-hidden" data-reveal>
+    <div class="nf-sec-head">{kickerFor('ai-hidden')}</div>
+    <h2>{t.aiHidden.title}</h2>
+    {t.aiHidden.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.aiHidden.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <p class="nf-docs-p" set:html={fillPrivacy(t.aiHidden.moreP)} />
+  </section>
+
+  <!-- ── Personalize ── -->
+  <section id="personalize" data-reveal>
+    <div class="nf-sec-head">{kickerFor('personalize')}</div>
+    <h2>{t.personalize.title}</h2>
+    {t.personalize.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <div class="nf-swatch-rows">
+      {(['dark', 'light'] as const).map((mode) => (
+        <div class="nf-swatch-row">
+          <span class="nf-swatch-rowlabel">{mode === 'dark' ? t.personalize.darkLabel : t.personalize.lightLabel}</span>
+          <div class="nf-swatches">
+            {themeSwatches[mode].map((s) => (
+              <figure class="nf-swatch">
+                <div class="nf-swatch-tile" style={`--sb:${s.bg};--si:${s.ink};--sa:${s.ac};`}>
+                  <span class="nf-swatch-dot" aria-hidden="true"></span>
+                  <span class="nf-swatch-bar" aria-hidden="true"></span>
+                  <span class="nf-swatch-bar is-short" aria-hidden="true"></span>
+                </div>
+                <figcaption>{s.name}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <p class="nf-docs-p" set:html={t.personalize.moreP} />
+    <p class="nf-docs-p" set:html={t.personalize.widthP} />
+  </section>
+</DocsShell>
+
+<style is:global>
+  /* ── /features page-specific styles (shared widgets live in docs.css). Accent = orange. ── */
+
+  /* Hierarchy mock: groups → folders → notes → section tags */
+  .nf-tree {
+    margin: 24px 0 26px;
+    padding: 20px 22px 15px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .nf-tree-cols {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px 34px;
+  }
+  .nf-tree-group { flex: 1 1 240px; min-width: 220px; max-width: 330px; }
+  .nf-tree-ghead {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgb(var(--gc, 128 128 128));
+  }
+  .nf-tree-group.is-ungrouped .nf-tree-ghead { color: var(--ink-faint); }
+  .nf-tree-gdot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgb(var(--gc));
+    box-shadow: 0 0 10px rgb(var(--gc) / .65);
+  }
+  /* Folders inherit the group colour (like the app) */
+  .nf-tree-folder { margin: 0 0 8px 6px; padding-left: 12px; border-left: 1px solid rgb(var(--gc) / .35); }
+  .nf-tree-group.is-ungrouped .nf-tree-note { margin-left: 6px; }
+  .nf-tree-fhead {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 4px 0 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgb(var(--gc) / .9);
+  }
+  .nf-tree-fbody { padding-left: 6px; }
+  .nf-tree-note {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px 8px;
+    padding: 5px 0;
+    margin-left: 6px;
+  }
+  .nf-tree-ndot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgb(var(--gc, 128 128 128) / .85);
+    flex: 0 0 auto;
+  }
+  .nf-tree-group.is-ungrouped .nf-tree-ndot { background: var(--ink-faint); }
+  .nf-tree-ntitle { font-size: 14px; color: var(--ink); }
+  .nf-tree-ntags { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  /* Section tag — same recipe as the app: colour text + 0.12 fill + 0.28 border */
+  .nf-tree-tag {
+    font-size: 10.5px;
+    line-height: 1.5;
+    padding: 0.5px 6px;
+    border-radius: 5px;
+    color: rgb(var(--tc));
+    background: rgb(var(--tc) / .12);
+    border: 1px solid rgb(var(--tc) / .28);
+    white-space: nowrap;
+  }
+  .nf-tree-caption {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* Numbered steps (templates) — same language as the RAG steps on /ai */
+  .nf-feat-steps { margin: 18px 0 8px; padding: 0; list-style: none; max-width: 72ch; }
+  .nf-feat-step { display: flex; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+  .nf-feat-step:last-child { border-bottom: 0; }
+  .nf-feat-step-num {
+    flex: 0 0 auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    letter-spacing: .1em;
+    color: rgb(var(--orange));
+    padding-top: 2px;
+  }
+  .nf-feat-step-body h3 { margin: 0 0 5px; font-size: 15.5px; }
+  .nf-feat-step-body p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Highlighted callout (macOS keys note) */
+  .nf-feat-callout {
+    margin: 18px 0 22px;
+    padding: 15px 19px;
+    border: 1px solid var(--line-2);
+    border-left: 2px solid rgb(var(--orange));
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: 0 0 24px rgb(var(--orange) / .06);
+    max-width: 72ch;
+  }
+  .nf-feat-callout p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Section-link pill mock */
+  .nf-linkmock {
+    margin: 22px 0 24px;
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    background: var(--card);
+    max-width: 640px;
+  }
+  .nf-linkmock-line { margin: 0 0 12px; font-size: 15.5px; line-height: 1.9; color: var(--ink-dim); }
+  .nf-linkmock-line.is-note { font-size: 13.5px; color: var(--ink-faint); }
+  .nf-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 2px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgb(var(--orange));
+    background: rgb(var(--orange) / .12);
+    border: 1px solid rgb(var(--orange) / .32);
+    white-space: nowrap;
+    vertical-align: baseline;
+  }
+  .nf-pill svg { flex: 0 0 auto; opacity: .8; }
+  .nf-pill.is-broken {
+    color: var(--ink-faint);
+    background: var(--card-2);
+    border-color: var(--line-2);
+    text-decoration: line-through;
+    text-decoration-color: rgb(var(--red) / .6);
+  }
+  .nf-linkmock-raw {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 14px;
+    margin-top: 4px;
+    padding-top: 13px;
+    border-top: 1px dashed var(--line-2);
+  }
+  .nf-linkmock-rawlabel {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .nf-linkmock-raw code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    word-break: break-all;
+  }
+
+  /* Shortcut tables */
+  .nf-keys-group { margin-top: 26px; }
+  .nf-keys-label {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0 0 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .nf-keys-dot { width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--orange)); box-shadow: 0 0 9px rgb(var(--orange) / .6); }
+  .nf-keys-combo { width: 38%; min-width: 210px; white-space: nowrap; }
+  .nf-keys-kbds { display: inline-flex; align-items: center; gap: 3px; }
+  .nf-keys-plus, .nf-keys-sep { color: var(--ink-faint); font-size: 12px; }
+  .nf-keys-sep { margin: 0 7px; }
+  @media (max-width: 719px) {
+    .nf-keys-table thead { display: none; }
+    .nf-keys-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .nf-keys-table td { display: block; border-bottom: 0; padding: 2px 0; }
+    .nf-keys-combo { width: auto; min-width: 0; white-space: normal; }
+  }
+
+  /* Views cards */
+  .nf-view-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin: 20px 0 8px;
+  }
+  .nf-view-card {
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .nf-view-tag {
+    margin-bottom: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: rgb(var(--orange));
+  }
+  .nf-view-card h3 { margin: 0 0 8px; font-size: 16.5px; }
+  .nf-view-card p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Theme swatch strips */
+  .nf-swatch-rows { display: flex; flex-direction: column; gap: 20px; margin: 22px 0 24px; }
+  .nf-swatch-rowlabel {
+    display: block;
+    margin-bottom: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .nf-swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 12px;
+  }
+  .nf-swatch { margin: 0; }
+  .nf-swatch-tile {
+    position: relative;
+    height: 58px;
+    border-radius: 9px;
+    border: 1px solid var(--line-2);
+    background: rgb(var(--sb));
+    padding: 10px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: transform .22s ease, box-shadow .22s ease;
+  }
+  .nf-swatch:hover .nf-swatch-tile {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgb(var(--sa) / .22);
+  }
+  .nf-swatch-dot {
+    position: absolute;
+    top: 9px;
+    right: 9px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgb(var(--sa));
+    box-shadow: 0 0 8px rgb(var(--sa) / .7);
+  }
+  .nf-swatch-bar { width: 62%; height: 4px; border-radius: 2px; background: rgb(var(--si) / .82); }
+  .nf-swatch-bar.is-short { width: 38%; background: rgb(var(--si) / .4); }
+  .nf-swatch figcaption {
+    margin-top: 7px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .06em;
+    color: var(--ink-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Prose links on this page underline with the orange accent (mirrors CliPage/AiPage) */
+  .nf-docs-p a, .nf-docs-ul a, .nf-feat-callout a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--page-accent);
+    text-underline-offset: 3px;
+  }
+</style>

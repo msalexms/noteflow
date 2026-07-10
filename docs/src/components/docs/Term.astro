@@ -1,0 +1,98 @@
+---
+// Reusable terminal frame for the docs pages: a bar with three dots + a mono title,
+// then a <pre> body. Two ways to fill it:
+//   · `lines` — array of strings; lines starting with "$ " / "~ $ " render as commands
+//     (coloured prompt), "# " as comments, anything else as dim output. Required for
+//     the typing variant.
+//   · default slot — raw markup, rendered as-is (no typing).
+// `typing` animates the block when it enters the viewport: command lines are typed
+// character by character, output lines fade in line by line. Skipped entirely under
+// prefers-reduced-motion (the full text is always in the HTML, so no-JS still reads).
+// `copy` — when set, DocsShell injects a copy button; a non-empty string is copied
+// verbatim, an empty string means "copy the command lines" (prompt stripped).
+
+interface Props {
+  title?: string;
+  lines?: string[];
+  typing?: boolean;
+  /** Explicit clipboard payload; pass '' to copy the command lines of the block. */
+  copy?: string;
+  ariaLabel?: string;
+}
+
+const { title, lines, typing = false, copy, ariaLabel } = Astro.props;
+
+type Kind = 'cmd' | 'out' | 'comment' | 'blank';
+interface Parsed { kind: Kind; prompt?: string; text: string }
+
+function parseLine(l: string): Parsed {
+  if (!l.trim()) return { kind: 'blank', text: '' };
+  const m = l.match(/^(~ \$|\$) (.*)$/);
+  if (m) return { kind: 'cmd', prompt: `${m[1]} `, text: m[2] };
+  if (l.trimStart().startsWith('# ')) return { kind: 'comment', text: l };
+  return { kind: 'out', text: l };
+}
+
+const parsed = (lines ?? []).map(parseLine);
+---
+
+<figure class="nf-term" data-typing={typing ? '' : undefined} aria-label={ariaLabel}>
+  <figcaption class="nf-term-bar">
+    <span class="nf-term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    {title && <span class="nf-term-title">{title}</span>}
+  </figcaption>
+  {/* Kept on one line: whitespace inside <pre> is significant. */}
+  {lines
+    ? <pre data-copy={copy}><code>{parsed.map((p) => <span class={`nf-tl nf-tl-${p.kind}`}>{p.prompt && <span class="nf-prompt">{p.prompt}</span>}<span class="nf-tl-text">{p.text}</span></span>)}</code></pre>
+    : <pre data-copy={copy}><code><slot /></code></pre>}
+</figure>
+
+<script>
+  // Typing effect for .nf-term[data-typing]. Astro dedupes this module across instances.
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  document.querySelectorAll<HTMLElement>('.nf-term[data-typing]').forEach((term) => {
+    if (reduceMotion) return;
+    const lines = Array.from(term.querySelectorAll<HTMLElement>('.nf-tl'));
+    if (!lines.length) return;
+    lines.forEach((l) => l.classList.add('is-hidden'));
+
+    let started = false;
+    const run = async () => {
+      if (started) return;
+      started = true;
+      for (const line of lines) {
+        const txt = line.querySelector<HTMLElement>('.nf-tl-text');
+        if (line.classList.contains('nf-tl-cmd') && txt) {
+          const full = txt.textContent || '';
+          txt.textContent = '';
+          line.classList.remove('is-hidden');
+          line.classList.add('is-typing');
+          for (const ch of full) {
+            txt.textContent += ch;
+            await sleep(24);
+          }
+          await sleep(260);
+          line.classList.remove('is-typing');
+        } else {
+          line.classList.remove('is-hidden');
+          await sleep(36);
+        }
+      }
+    };
+
+    const io = new IntersectionObserver(
+      (ents) => {
+        ents.forEach((e) => {
+          if (e.isIntersecting) {
+            io.disconnect();
+            setTimeout(run, 240);
+          }
+        });
+      },
+      { threshold: 0.35 },
+    );
+    io.observe(term);
+  });
+</script>

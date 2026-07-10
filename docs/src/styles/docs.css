@@ -1,0 +1,309 @@
+/* NoteFlow docs pages (/cli, /ai, /features, /pricing) — layout + shared widgets.
+   Imported only by DocsShell.astro. Uses the design tokens from brain-site.css
+   (--bg --card --card-2 --ink* --line* --detail + the rgb accent triples).
+   Each page sets `--page-accent` (a full colour, e.g. rgb(var(--cyan))) on its root. */
+
+/* ── Page grid: content + TOC ─────────────────────────────────────────────── */
+.nf-docs-wrap {
+  position: relative;
+  z-index: 2;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 clamp(22px, 5vw, 64px) clamp(80px, 10vw, 130px);
+}
+/* Block flow by default (mobile: the TOC chips bar sticks inside the whole wrap);
+   two columns from 1100px, where the aside becomes a sticky right rail. */
+.nf-docs-grid { display: block; }
+@media (min-width: 1100px) {
+  .nf-docs-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    column-gap: 56px;
+    align-items: start;
+  }
+  .nf-docs-toc { grid-column: 2; grid-row: 1; }
+  .nf-docs-content { grid-column: 1; grid-row: 1; min-width: 0; }
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+.nf-docs-content section[id] {
+  padding: clamp(44px, 6vw, 68px) 0 clamp(10px, 2vw, 18px);
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 74px; /* clear the sticky mobile TOC bar */
+}
+.nf-docs-content section[id]:first-of-type { border-top: 0; padding-top: clamp(14px, 3vw, 26px); }
+.nf-docs-content h2, .nf-docs-content h3 { scroll-margin-top: 74px; }
+
+.nf-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 0 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.nf-sec-head::before { content: ''; width: 18px; height: 1px; background: var(--page-accent, var(--detail)); }
+
+.nf-docs-content section > h2 {
+  margin: 0 0 16px;
+  font-size: clamp(27px, 3.2vw, 38px);
+  line-height: 1.08;
+  letter-spacing: -.015em;
+  font-weight: 500;
+  color: var(--ink-strong);
+}
+.nf-docs-content h3 {
+  margin: 36px 0 10px;
+  font-size: 18.5px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--ink-strong);
+}
+
+.nf-docs-p { margin: 0 0 14px; max-width: 72ch; font-size: 16.5px; line-height: 1.62; color: var(--ink-dim); }
+.nf-docs-ul { margin: 0 0 14px; padding-left: 20px; max-width: 72ch; font-size: 16px; line-height: 1.62; color: var(--ink-dim); }
+.nf-docs-ul li { margin: 5px 0; }
+.nf-docs-ul li::marker { color: var(--page-accent, var(--detail)); }
+
+/* Inline code inside docs prose + tables */
+.nf-docs-content code:not(pre code) {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .85em;
+  color: var(--ink);
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1.5px 5px;
+}
+.nf-docs-content strong { color: var(--ink); font-weight: 600; }
+.nf-docs-content kbd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* ── Reference tables (man-page style) ────────────────────────────────────── */
+.nf-ref-table { width: 100%; border-collapse: collapse; margin: 16px 0 8px; font-size: 14.5px; }
+.nf-ref-table th {
+  text-align: left;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0 16px 9px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.nf-ref-table td {
+  vertical-align: top;
+  padding: 11px 16px 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-dim);
+  line-height: 1.55;
+}
+.nf-ref-table td:last-child, .nf-ref-table th:last-child { padding-right: 0; }
+.nf-ref-table td p { margin: 0 0 6px; }
+.nf-ref-table td p:last-child { margin-bottom: 0; }
+.nf-ref-mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--ink); white-space: nowrap; }
+
+/* ── Terminal frame (.nf-term) ────────────────────────────────────────────── */
+.nf-term {
+  position: relative;
+  margin: 18px 0 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .28);
+}
+[data-theme='light'] .nf-term { box-shadow: 0 14px 34px rgba(64, 52, 28, .14); }
+.nf-term-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card-2);
+}
+.nf-term-dots { display: inline-flex; gap: 6px; }
+.nf-term-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
+.nf-term-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nf-term pre {
+  margin: 0;
+  padding: 15px 18px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--ink);
+  tab-size: 2;
+}
+.nf-tl { display: block; min-height: 1.6em; min-height: 1lh; white-space: pre-wrap; }
+.nf-tl.is-hidden { visibility: hidden; }
+.nf-prompt { color: var(--detail); user-select: none; }
+.nf-tl-out .nf-tl-text { color: var(--ink-dim); }
+.nf-tl-comment .nf-tl-text { color: var(--ink-faint); }
+.nf-tl.is-typing .nf-tl-text::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: .95em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--detail);
+  animation: glowpulse 1s ease-in-out infinite;
+}
+
+/* Copy-to-clipboard button (injected by DocsShell for every pre[data-copy]) */
+.nf-copy {
+  margin-left: auto;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: border-color .25s ease, color .25s ease;
+}
+.nf-copy:hover { border-color: var(--detail); color: var(--ink); }
+.nf-copy.is-done { border-color: var(--page-accent, var(--detail)); color: var(--ink-strong); }
+.nf-copy-abs { position: absolute; top: 8px; right: 10px; margin: 0; background: var(--card-2); }
+
+/* ── TOC — desktop: sticky right rail with mini-soma nodes on a line ──────── */
+.nf-toc-label {
+  display: block;
+  margin: 0 0 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: .26em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.nf-toc-list { margin: 0; padding: 0; list-style: none; }
+.nf-toc-list li { margin: 0; padding: 0; }
+
+@media (min-width: 1100px) {
+  .nf-docs-toc { position: sticky; top: 84px; }
+  .nf-toc-list { position: relative; display: flex; flex-direction: column; }
+  /* the vertical "axon" the nodes sit on */
+  .nf-toc-list::before {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 14px;
+    bottom: 14px;
+    width: 1px;
+    background: var(--line-2);
+  }
+  .nf-toc-link {
+    position: relative;
+    display: block;
+    padding: 7px 0 7px 26px;
+    font-size: 13.5px;
+    line-height: 1.35;
+    color: var(--ink-dim);
+    transition: color .2s ease;
+  }
+  /* mini-soma: outer ring… */
+  .nf-toc-link::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--line-2);
+    background: var(--bg);
+    transition: border-color .25s ease, box-shadow .25s ease;
+  }
+  /* …and its nucleus, filled with the page accent when active */
+  .nf-toc-link::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 50%;
+    transform: translateY(-50%) scale(.4);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--page-accent, var(--detail));
+    opacity: 0;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  .nf-toc-link:hover { color: var(--ink); }
+  .nf-toc-link:hover::before { border-color: var(--ink-faint); }
+  .nf-toc-link.is-active { color: var(--ink-strong); }
+  .nf-toc-link.is-active::before {
+    border-color: var(--page-accent, var(--detail));
+    box-shadow: 0 0 9px color-mix(in srgb, var(--page-accent, var(--detail)) 55%, transparent);
+  }
+  .nf-toc-link.is-active::after { opacity: 1; transform: translateY(-50%) scale(1); }
+}
+
+/* ── TOC — mobile/tablet: sticky horizontal chips bar ─────────────────────── */
+@media (max-width: 1099px) {
+  .nf-docs-toc { position: sticky; top: 10px; z-index: 40; margin-bottom: 10px; }
+  .nf-toc-label { display: none; }
+  .nf-toc-list {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nf-toc-list::-webkit-scrollbar { display: none; }
+  .nf-toc-list li { flex: 0 0 auto; }
+  .nf-toc-link {
+    display: block;
+    padding: 6px 13px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    white-space: nowrap;
+    transition: color .2s ease, border-color .2s ease;
+  }
+  .nf-toc-link.is-active {
+    color: var(--ink-strong);
+    border-color: var(--page-accent, var(--detail));
+    box-shadow: 0 0 9px color-mix(in srgb, var(--page-accent, var(--detail)) 30%, transparent);
+  }
+}
+
+/* ── Docs rail: the active page's neuron reads as "fired" ─────────────────── */
+.nf-neuron[aria-current='page'] .nf-soma { filter: drop-shadow(0 0 9px var(--c)); }
+.nf-neuron[aria-current='page'] .nf-fill { opacity: .95 !important; }

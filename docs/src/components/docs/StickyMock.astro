@@ -1,0 +1,319 @@
+---
+// A NoteFlow sticky note (300 × 300) recreated in pure HTML/CSS for the /features
+// page. Theme-aware via the same `--nf-*` RGB-triple trick as the `.nf-notes` block
+// on the landing (Carbon palette in dark, Arctic Day in light). Interactive bits:
+//   · the checklist boxes really toggle (plain checkboxes, styled like the app),
+//   · the ─ button folds the note into a pill (`.is-folded`, ~450 ms transition),
+//     clicking the pill unfolds it,
+//   · a one-shot auto demo folds/unfolds it when it first enters the viewport
+//     (skipped after any user interaction and under prefers-reduced-motion),
+//   · the × is decorative — it just wobbles the note so the demo never disappears.
+interface Item {
+  done: boolean;
+  text: string;
+}
+
+interface Props {
+  winTitle: string;
+  items: Item[];
+  caption: string;
+  foldAria: string;
+  closeAria: string;
+}
+
+const { winTitle, items, caption, foldAria, closeAria } = Astro.props;
+---
+
+<div class="nf-sticky-scene" data-reveal>
+  <div class="nf-sticky-slot">
+    <div class="nf-sticky" data-sticky>
+      <div class="nf-sticky-bar">
+        <span class="nf-sticky-dot" aria-hidden="true"></span>
+        <span class="nf-sticky-title">{winTitle}</span>
+        <button type="button" class="nf-sticky-btn" data-sticky-fold aria-label={foldAria}>─</button>
+        <button type="button" class="nf-sticky-btn nf-sticky-close" data-sticky-close aria-label={closeAria}>×</button>
+      </div>
+      <div class="nf-sticky-body">
+        <ul class="nf-sticky-check">
+          {items.map((it) => (
+            <li>
+              <label>
+                <input type="checkbox" checked={it.done} />
+                <span class="nf-sticky-box" aria-hidden="true"></span>
+                <span class="nf-sticky-text">{it.text}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="nf-sticky-caption">{caption}</div>
+</div>
+
+<style is:global>
+  /* Scene: centres the mock and carries the app palette (same triples as the
+     landing's .nf-notes: Carbon in dark, Arctic Day under the light site theme). */
+  .nf-sticky-scene {
+    --nf-bg-0: 9 9 9; --nf-bg-1: 17 17 17; --nf-bg-2: 26 26 26; --nf-bg-3: 38 38 38;
+    --nf-border: 42 42 42;
+    --nf-text: 212 212 212; --nf-text-muted: 140 140 140;
+    --nf-accent: 30 144 255; --nf-red: 255 56 56; --nf-pink: 255 48 152;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    margin: 30px 0 26px;
+  }
+  /* Reserve the unfolded height so folding doesn't reflow the page around it. */
+  .nf-sticky-slot {
+    height: 300px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    max-width: 100%;
+  }
+  [data-theme='light'] .nf-sticky-scene {
+    --nf-bg-0: 220 230 242; --nf-bg-1: 237 243 252; --nf-bg-2: 226 234 247; --nf-bg-3: 208 220 238;
+    --nf-border: 176 196 220;
+    --nf-text: 26 38 64; --nf-text-muted: 74 94 122;
+    --nf-accent: 14 78 168; --nf-red: 184 28 36; --nf-pink: 156 18 96;
+  }
+
+  .nf-sticky {
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    max-width: 100%;
+    height: 300px;
+    border: 1px solid rgb(var(--nf-border));
+    border-radius: 12px;
+    background: rgb(var(--nf-bg-1));
+    overflow: hidden;
+    /* The heavy "always on top" drop — it floats over the page like over a desktop. */
+    box-shadow: 0 34px 74px -18px rgba(0, 0, 0, 0.62), 0 10px 26px rgba(0, 0, 0, 0.34);
+    transition:
+      height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+      width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+      border-radius 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  [data-theme='light'] .nf-sticky {
+    box-shadow: 0 30px 64px -20px rgba(40, 34, 24, 0.4), 0 10px 24px rgba(40, 34, 24, 0.18);
+  }
+
+  /* Title bar: group dot + title + fold / close */
+  .nf-sticky-bar {
+    flex: 0 0 36px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 8px 0 13px;
+    background: rgb(var(--nf-bg-2));
+    border-bottom: 1px solid rgb(var(--nf-border));
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .nf-sticky-dot {
+    flex: 0 0 auto;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgb(var(--nf-pink));
+    box-shadow: 0 0 10px rgb(var(--nf-pink) / 0.7);
+  }
+  .nf-sticky-title {
+    flex: 1;
+    min-width: 0;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: rgb(var(--nf-text) / 0.85);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nf-sticky-btn {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgb(var(--nf-text-muted));
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, opacity 0.25s ease, width 0.25s ease;
+  }
+  .nf-sticky-btn:hover { background: rgb(var(--nf-bg-3)); color: rgb(var(--nf-text)); }
+  .nf-sticky-close { font-size: 15px; }
+  .nf-sticky-close:hover { color: rgb(var(--nf-red)); }
+
+  /* Body: a real (toggleable) checklist, styled like the app's task list */
+  .nf-sticky-body {
+    flex: 1;
+    min-height: 0;
+    padding: 15px 16px;
+    overflow: hidden;
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transition: opacity 0.3s ease 0.12s, clip-path 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .nf-sticky-check {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .nf-sticky-check label {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    cursor: pointer;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14.5px;
+    line-height: 1.45;
+    color: rgb(var(--nf-text) / 0.88);
+  }
+  .nf-sticky-check input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .nf-sticky-box {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid rgb(var(--nf-border));
+    color: rgb(var(--nf-accent));
+    font-size: 11px;
+    transition: background 0.18s ease, border-color 0.18s ease;
+  }
+  .nf-sticky-check input:checked + .nf-sticky-box {
+    background: rgb(var(--nf-accent) / 0.16);
+    border-color: rgb(var(--nf-accent) / 0.6);
+  }
+  .nf-sticky-check input:checked + .nf-sticky-box::after { content: '✓'; }
+  .nf-sticky-check input:checked ~ .nf-sticky-text {
+    color: rgb(var(--nf-text-muted));
+    text-decoration: line-through;
+    text-decoration-color: rgb(var(--nf-accent) / 0.5);
+  }
+  .nf-sticky-check input:focus-visible + .nf-sticky-box {
+    outline: 2px solid rgb(var(--nf-accent) / 0.6);
+    outline-offset: 2px;
+  }
+
+  /* ── Folded: the whole note collapses into a pill (dot + truncated title) ── */
+  .nf-sticky.is-folded {
+    height: 36px;
+    width: 210px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .nf-sticky.is-folded .nf-sticky-bar { border-bottom-color: transparent; }
+  .nf-sticky.is-folded .nf-sticky-body {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    transition: opacity 0.2s ease, clip-path 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+    pointer-events: none;
+  }
+  .nf-sticky.is-folded .nf-sticky-btn {
+    width: 0;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  /* Decorative × feedback: a quick wobble instead of actually closing */
+  .nf-sticky.is-wobble { animation: nfStickyWobble 0.4s ease; }
+  @keyframes nfStickyWobble {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px) rotate(-0.6deg); }
+    60% { transform: translateX(4px) rotate(0.5deg); }
+  }
+
+  .nf-sticky-caption {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nf-sticky, .nf-sticky-body, .nf-sticky.is-folded .nf-sticky-body { transition: none; }
+    .nf-sticky.is-wobble { animation: none; }
+  }
+</style>
+
+<script>
+  // Fold/unfold behaviour + a one-shot auto demo. Astro dedupes this module.
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  document.querySelectorAll<HTMLElement>('.nf-sticky-scene').forEach((scene) => {
+    const sticky = scene.querySelector<HTMLElement>('[data-sticky]');
+    const foldBtn = scene.querySelector<HTMLElement>('[data-sticky-fold]');
+    const closeBtn = scene.querySelector<HTMLElement>('[data-sticky-close]');
+    if (!sticky || !foldBtn) return;
+
+    let interacted = false;
+    const folded = () => sticky.classList.contains('is-folded');
+    const setFolded = (on: boolean) => sticky.classList.toggle('is-folded', on);
+
+    foldBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      interacted = true;
+      setFolded(!folded());
+    });
+    // While folded, the whole pill is the unfold target (like the real sticky).
+    sticky.addEventListener('click', () => {
+      if (!folded()) return;
+      interacted = true;
+      setFolded(false);
+    });
+    // The × never removes the demo — it just shakes its head.
+    closeBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      interacted = true;
+      sticky.classList.remove('is-wobble');
+      void sticky.offsetWidth; // restart the animation
+      sticky.classList.add('is-wobble');
+    });
+    // Ticking a checkbox counts as interaction too (don't fold under the user).
+    scene.querySelectorAll('input[type="checkbox"]').forEach((c) =>
+      c.addEventListener('change', () => { interacted = true; })
+    );
+
+    // Auto demo: fold + unfold once, the first time the note enters the viewport.
+    if (reduceMotion || !('IntersectionObserver' in window)) return;
+    let played = false;
+    const io = new IntersectionObserver(
+      (ents) => {
+        ents.forEach((en) => {
+          if (!en.isIntersecting || played) return;
+          played = true;
+          io.disconnect();
+          setTimeout(() => {
+            if (interacted) return;
+            setFolded(true);
+            setTimeout(() => { if (!interacted) setFolded(false); }, 1500);
+          }, 1000);
+        });
+      },
+      { threshold: 0.55 },
+    );
+    io.observe(sticky);
+  });
+</script>

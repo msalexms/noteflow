@@ -1,0 +1,315 @@
+---
+// The /cli docs page (both locales render through this component — see
+// src/pages/cli.astro and src/pages/es/cli.astro). Layout + shell behaviour come
+// from DocsShell; the command table data lives in src/data/cli.ts and the prose
+// in src/i18n/docs/cli.{en,es}.ts.
+import DocsShell from '../../layouts/DocsShell.astro';
+import Term from './Term.astro';
+import { getCliContent } from '../../i18n/docs/cli';
+import { cliGroups, globalFlags, groupColors } from '../../data/cli';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = getCliContent(lang);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: t.meta.title,
+  description: t.meta.description,
+  inLanguage: lang,
+  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+};
+
+// Mono section kicker: "01 / install", numbered from the TOC order.
+const kickerFor = (id: string) => {
+  const i = t.toc.findIndex((item) => item.id === id);
+  return `${String(i + 1).padStart(2, '0')} / ${id.replace(/-/g, ' ')}`;
+};
+
+// "$ cmd" example lines → coloured prompt + command text.
+const splitPrompt = (l: string) => {
+  const m = l.match(/^(\$) (.*)$/);
+  return m ? { prompt: `${m[1]} `, text: m[2] } : { prompt: '', text: l };
+};
+---
+
+<DocsShell
+  lang={lang}
+  page="cli"
+  accent="cyan"
+  title={t.meta.title}
+  description={t.meta.description}
+  kicker={t.hero.kicker}
+  h1={t.hero.h1}
+  tagline={t.hero.tagline}
+  toc={t.toc}
+  jsonLd={jsonLd}
+>
+  <!-- Hero terminal: `noteflow --help`, typed -->
+  <div class="nf-cli-hero" data-reveal>
+    <Term title={t.hero.termTitle} lines={t.hero.termLines} typing />
+  </div>
+
+  <!-- ── Install ── -->
+  <section id="install" data-reveal>
+    <div class="nf-sec-head">{kickerFor('install')}</div>
+    <h2>{t.install.title}</h2>
+    {t.install.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <h3>{t.install.headlessH3}</h3>
+    <Term title={t.install.headlessTermTitle} lines={[`$ ${t.install.installCmd}`]} copy={t.install.installCmd} />
+    <h3>{t.install.desktopH3}</h3>
+    <p class="nf-docs-p" set:html={t.install.desktopP} />
+    <p class="nf-docs-p" set:html={t.install.reqP} />
+  </section>
+
+  <!-- ── Notes directory ── -->
+  <section id="notes-dir" data-reveal>
+    <div class="nf-sec-head">{kickerFor('notes-dir')}</div>
+    <h2>{t.notesDir.title}</h2>
+    {t.notesDir.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <table class="nf-ref-table">
+      <thead><tr><th>{t.notesDir.colPlatform}</th><th>{t.notesDir.colPath}</th></tr></thead>
+      <tbody>
+        {t.notesDir.rows.map((r) => (
+          <tr>
+            <td>{r.platform}</td>
+            <td><code>{r.path}</code></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <p class="nf-docs-p" set:html={t.notesDir.envP} />
+  </section>
+
+  <!-- ── Note format ── -->
+  <section id="format" data-reveal>
+    <div class="nf-sec-head">{kickerFor('format')}</div>
+    <h2>{t.format.title}</h2>
+    {t.format.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <Term title={t.format.termTitle} lines={t.format.treeLines} />
+    <ul class="nf-docs-ul">
+      {t.format.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <p class="nf-docs-p" set:html={t.format.migrateP} />
+  </section>
+
+  <!-- ── Commands ── -->
+  <section id="commands" data-reveal>
+    <div class="nf-sec-head">{kickerFor('commands')}</div>
+    <h2>{t.commands.title}</h2>
+    {t.commands.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    {cliGroups.map((group) => (
+      <div class="nf-cmd-group" style={`--tok:var(--${group.tok});`}>
+        <h3 class="nf-cmd-group-name"><span class="nf-cmd-dot" aria-hidden="true"></span>{group.label[lang]}</h3>
+        <table class="nf-ref-table nf-cmd-table">
+          <thead><tr><th>{t.commands.colCommand}</th><th>{t.commands.colDesc}</th></tr></thead>
+          <tbody>
+            {group.commands.map((cmd) => (
+              <tr id={`cmd-${cmd.id}`}>
+                <td class="nf-cmd-usage"><code class="nf-usage">{cmd.usage}</code></td>
+                <td>
+                  <p set:html={cmd.desc[lang]} />
+                  {cmd.flags && (
+                    <dl class="nf-cmd-flags">
+                      {cmd.flags.map((f) => (
+                        <div class="nf-cmd-flag">
+                          <dt><code>{f.flag}</code></dt>
+                          <dd set:html={f.desc[lang]} />
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {cmd.example && (
+                    <pre class="nf-cmd-ex" aria-label={t.commands.exampleLabel}><code>{cmd.example.map((l) => { const p = splitPrompt(l); return <span class="nf-tl">{p.prompt && <span class="nf-prompt">{p.prompt}</span>}<span class="nf-tl-text">{p.text}</span></span>; })}</code></pre>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ))}
+  </section>
+
+  <!-- ── Global flags · colors · env vars ── -->
+  <section id="flags" data-reveal>
+    <div class="nf-sec-head">{kickerFor('flags')}</div>
+    <h2>{t.flags.title}</h2>
+    {t.flags.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <table class="nf-ref-table nf-flags-table">
+      <thead><tr><th>{t.flags.colFlag}</th><th>{t.flags.colApplies}</th><th>{t.flags.colDesc}</th></tr></thead>
+      <tbody>
+        {globalFlags.map((f) => (
+          <tr>
+            <td><code>{f.flag}</code></td>
+            <td class="nf-flag-applies">{f.applies}</td>
+            <td set:html={f.desc[lang]} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    <h3>{t.flags.colorsH3}</h3>
+    <p class="nf-docs-p" set:html={t.flags.colorsP} />
+    <div class="nf-color-chips">
+      {groupColors.map((c) => (
+        <span class="nf-color-chip" style={`--chip:rgb(var(--${c}));`}><i aria-hidden="true"></i>{c}</span>
+      ))}
+    </div>
+
+    <h3>{t.flags.envH3}</h3>
+    <table class="nf-ref-table">
+      <thead><tr><th>{t.flags.colEnv}</th><th>{t.flags.colEnvDesc}</th></tr></thead>
+      <tbody>
+        {t.flags.envRows.map((r) => (
+          <tr>
+            <td><code>{r.name}</code></td>
+            <td set:html={r.desc} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── For AI agents ── -->
+  <section id="agents" data-reveal>
+    <div class="nf-sec-head">{kickerFor('agents')}</div>
+    <h2>{t.agents.title}</h2>
+    {t.agents.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <h3>{t.agents.flowH3}</h3>
+    <Term title={t.agents.flowTermTitle} lines={t.agents.flowLines} copy="" />
+    <h3>{t.agents.skillH3}</h3>
+    <p class="nf-docs-p" set:html={t.agents.skillP} />
+    <Term title={t.agents.skillTermTitle} lines={[`$ ${t.agents.skillCmd}`]} copy={t.agents.skillCmd} />
+  </section>
+
+  <!-- ── Caveats ── -->
+  <section id="caveats" data-reveal>
+    <div class="nf-sec-head">{kickerFor('caveats')}</div>
+    <h2>{t.caveats.title}</h2>
+    <div class="nf-caveats">
+      {t.caveats.items.map((item) => (
+        <article class="nf-caveat nf-edge">
+          <h3>{item.title}</h3>
+          <p set:html={item.html} />
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <!-- ── Troubleshooting ── -->
+  <section id="troubleshooting" data-reveal>
+    <div class="nf-sec-head">{kickerFor('troubleshooting')}</div>
+    <h2>{t.troubleshooting.title}</h2>
+    <dl class="nf-faq">
+      {t.troubleshooting.items.map((item) => (
+        <div class="nf-faq-item">
+          <dt>{item.q}</dt>
+          <dd set:html={item.a} />
+        </div>
+      ))}
+    </dl>
+  </section>
+</DocsShell>
+
+<style is:global>
+  /* ── /cli page-specific styles (shared widgets live in docs.css) ── */
+  .nf-cli-hero { max-width: 760px; margin-bottom: clamp(10px, 2vw, 22px); }
+
+  /* Command groups: a coloured dot + name, echoing the app's group dots. */
+  .nf-cmd-group { margin-top: 8px; }
+  .nf-cmd-group-name { display: flex; align-items: center; gap: 10px; }
+  .nf-cmd-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgb(var(--tok));
+    box-shadow: 0 0 9px rgb(var(--tok) / .55);
+  }
+  .nf-usage {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgb(var(--tok));
+    word-break: break-word;
+  }
+  .nf-cmd-usage { width: 34%; min-width: 220px; padding-right: 22px !important; }
+
+  /* Per-command option list */
+  .nf-cmd-flags { margin: 8px 0 0; }
+  .nf-cmd-flag { display: flex; gap: 12px; padding: 3px 0; align-items: baseline; }
+  .nf-cmd-flag dt { flex: 0 0 auto; margin: 0; }
+  .nf-cmd-flag dd { margin: 0; font-size: 13.5px; color: var(--ink-dim); }
+
+  /* Per-command example: a bare mini-terminal line, prompt in amber */
+  .nf-cmd-ex {
+    margin: 10px 0 2px;
+    padding: 10px 13px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--card);
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+
+  /* Stack the command table under 720px (usage on top, description below) */
+  @media (max-width: 719px) {
+    .nf-cmd-table thead { display: none; }
+    .nf-cmd-table tr { display: block; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .nf-cmd-table td { display: block; border-bottom: 0; padding: 0 0 7px; }
+    .nf-cmd-usage { width: auto; min-width: 0; }
+    .nf-cmd-flag { flex-direction: column; gap: 2px; }
+  }
+
+  .nf-flag-applies { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--ink-faint); }
+  @media (max-width: 719px) {
+    .nf-flags-table thead { display: none; }
+    .nf-flags-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .nf-flags-table td { display: block; border-bottom: 0; padding: 2px 0; }
+  }
+
+  /* Group-colour swatches */
+  .nf-color-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 6px; }
+  .nf-color-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 13px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    color: var(--ink-dim);
+  }
+  .nf-color-chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--chip); box-shadow: 0 0 8px color-mix(in srgb, var(--chip) 60%, transparent); }
+
+  /* Caveat cards */
+  .nf-caveats { display: flex; flex-direction: column; gap: 14px; margin-top: 6px; }
+  .nf-caveat {
+    border: 1px solid var(--line-2);
+    border-left: 2px solid var(--detail);
+    border-radius: 10px;
+    background: var(--card);
+    padding: 18px 20px;
+  }
+  .nf-caveat h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-caveat p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Troubleshooting FAQ */
+  .nf-faq { margin: 6px 0 0; }
+  .nf-faq-item { padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .nf-faq-item:last-child { border-bottom: 0; }
+  .nf-faq dt { margin: 0 0 7px; font-weight: 600; color: var(--ink-strong); font-size: 16px; }
+  .nf-faq dd { margin: 0; font-size: 15px; line-height: 1.62; color: var(--ink-dim); max-width: 72ch; }
+  .nf-faq dd a, .nf-caveat a, .nf-docs-p a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--page-accent); text-underline-offset: 3px; }
+</style>

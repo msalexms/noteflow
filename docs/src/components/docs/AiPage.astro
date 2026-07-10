@@ -1,0 +1,504 @@
+---
+// The /ai docs page (both locales render through this component — see
+// src/pages/ai.astro and src/pages/es/ai.astro). Layout + shell behaviour come from
+// DocsShell; all prose lives in src/i18n/docs/ai.{en,es}.ts. The two animated SVG
+// pipeline diagrams are drawn inline here (labels come from the dictionary so they
+// are i18n'd too); their edges pulse via stroke-dashoffset, echoing the synapse
+// fibres of the landing nav, and freeze under prefers-reduced-motion.
+import DocsShell from '../../layouts/DocsShell.astro';
+import { getAiContent } from '../../i18n/docs/ai';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = getAiContent(lang);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: t.meta.title,
+  description: t.meta.description,
+  inLanguage: lang,
+  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+};
+
+// Mono section kicker: "01 / providers", numbered from the TOC order.
+const kickerFor = (id: string) => {
+  const i = t.toc.findIndex((item) => item.id === id);
+  return `${String(i + 1).padStart(2, '0')} / ${id.replace(/-/g, ' ')}`;
+};
+
+const d1 = t.embeddings.diagram;
+const d2 = t.rag.diagram;
+---
+
+<DocsShell
+  lang={lang}
+  page="ai"
+  accent="purple"
+  title={t.meta.title}
+  description={t.meta.description}
+  kicker={t.hero.kicker}
+  h1={t.hero.h1}
+  tagline={t.hero.tagline}
+  toc={t.toc}
+  jsonLd={jsonLd}
+>
+  <!-- ── Providers ── -->
+  <section id="providers" data-reveal>
+    <div class="nf-sec-head">{kickerFor('providers')}</div>
+    <h2>{t.providers.title}</h2>
+    {t.providers.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-prov-grid">
+      {t.providers.cards.map((c) => (
+        <article class="nf-prov-card nf-edge">
+          <h3 class="nf-prov-name">{c.name}</h3>
+          <div class="nf-prov-endpoint">{c.endpoint}</div>
+          <p class="nf-prov-note" set:html={c.note} />
+          <div class="nf-badges">{c.badges.map((b) => <span class="nf-badge">{b}</span>)}</div>
+        </article>
+      ))}
+    </div>
+    <p class="nf-docs-p" set:html={t.providers.capsP} />
+    <aside class="nf-callout">
+      <h3>{t.providers.keysCallout.title}</h3>
+      <p set:html={t.providers.keysCallout.html} />
+    </aside>
+  </section>
+
+  <!-- ── Local semantic index ── -->
+  <section id="embeddings" data-reveal>
+    <div class="nf-sec-head">{kickerFor('embeddings')}</div>
+    <h2>{t.embeddings.title}</h2>
+    {t.embeddings.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <!-- Indexing pipeline diagram: note → sections → 768-d embedding → sqlite-vec/FTS5 -->
+    <figure class="nf-diag-fig" role="img" aria-label={d1.caption}>
+      <svg class="nf-diag" viewBox="0 0 720 156" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <!-- note: a markdown file -->
+        <rect class="nf-diag-box" x="10" y="36" width="132" height="56" rx="10" />
+        <path class="nf-diag-hint" d="M34 52h56 M34 64h84 M34 76h68" />
+        <!-- sections: three mini-rows inside a box -->
+        <rect class="nf-diag-box" x="206" y="24" width="132" height="80" rx="10" />
+        <rect class="nf-diag-row" x="218" y="34" width="108" height="16" rx="4" />
+        <rect class="nf-diag-row" x="218" y="56" width="108" height="16" rx="4" />
+        <rect class="nf-diag-row" x="218" y="78" width="108" height="16" rx="4" />
+        <!-- 768-d embedding node -->
+        <circle class="nf-diag-glow nf-diag-pulse" cx="424" cy="64" r="34" />
+        <circle class="nf-diag-node" cx="424" cy="64" r="22" />
+        <text class="nf-diag-num" x="424" y="68" text-anchor="middle">{d1.vector}</text>
+        <!-- store: a database cylinder -->
+        <path class="nf-diag-box" d="M500 36 v52 a105 13 0 0 0 210 0 v-52" />
+        <ellipse class="nf-diag-box" cx="605" cy="36" rx="105" ry="13" />
+        <path class="nf-diag-hint" d="M545 66h120 M545 80h92" />
+        <!-- edges -->
+        <path class="nf-diag-edge" d="M142 64 H198" />
+        <polygon class="nf-diag-arrow" points="198,59.5 206,64 198,68.5" />
+        <path class="nf-diag-edge" d="M326 42 C358 42 374 56 398 60" />
+        <path class="nf-diag-edge" d="M326 64 H398" />
+        <path class="nf-diag-edge" d="M326 86 C358 86 374 72 398 68" />
+        <path class="nf-diag-edge" d="M446 64 H492" />
+        <polygon class="nf-diag-arrow" points="492,59.5 500,64 492,68.5" />
+        <!-- labels -->
+        <text class="nf-diag-label" x="76" y="126" text-anchor="middle">{d1.note}</text>
+        <text class="nf-diag-sub" x="76" y="144" text-anchor="middle">{d1.noteSub}</text>
+        <text class="nf-diag-label" x="272" y="126" text-anchor="middle">{d1.sections}</text>
+        <text class="nf-diag-sub" x="272" y="144" text-anchor="middle">{d1.sectionsSub}</text>
+        <text class="nf-diag-label" x="424" y="126" text-anchor="middle">{d1.vectorLabel}</text>
+        <text class="nf-diag-sub" x="424" y="144" text-anchor="middle">{d1.vectorSub}</text>
+        <text class="nf-diag-label" x="605" y="126" text-anchor="middle">{d1.store}</text>
+        <text class="nf-diag-sub" x="605" y="144" text-anchor="middle">{d1.storeSub}</text>
+      </svg>
+      <figcaption class="nf-diag-caption">{d1.caption}</figcaption>
+    </figure>
+
+    <ul class="nf-docs-ul">
+      {t.embeddings.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+  </section>
+
+  <!-- ── Relations ── -->
+  <section id="relations" data-reveal>
+    <div class="nf-sec-head">{kickerFor('relations')}</div>
+    <h2>{t.relations.title}</h2>
+    {t.relations.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-rel-grid">
+      {t.relations.cards.map((c) => (
+        <article class="nf-rel-card nf-edge">
+          <h3>{c.title}</h3>
+          <p set:html={c.html} />
+        </article>
+      ))}
+    </div>
+    <p class="nf-docs-p" set:html={t.relations.layersP} />
+  </section>
+
+  <!-- ── RAG pipeline ── -->
+  <section id="rag" data-reveal>
+    <div class="nf-sec-head">{kickerFor('rag')}</div>
+    <h2>{t.rag.title}</h2>
+    {t.rag.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <ol class="nf-steps">
+      {t.rag.steps.map((s, i) => (
+        <li class="nf-step">
+          <span class="nf-step-num">{String(i + 1).padStart(2, '0')}</span>
+          <div class="nf-step-body">
+            <h3>{s.title}</h3>
+            <p set:html={s.desc} />
+          </div>
+        </li>
+      ))}
+    </ol>
+
+    <!-- RAG flow diagram: question → hybrid search → graph neighbours → context → LLM → answer -->
+    <figure class="nf-diag-fig" role="img" aria-label={d2.caption}>
+      <svg class="nf-diag" viewBox="0 0 720 300" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <!-- row 1 -->
+        <rect class="nf-diag-box" x="10" y="34" width="130" height="56" rx="10" />
+        <text class="nf-diag-label" x="75" y="66" text-anchor="middle">{d2.question}</text>
+        <rect class="nf-diag-box" x="210" y="34" width="170" height="56" rx="10" />
+        <text class="nf-diag-label" x="295" y="66" text-anchor="middle">{d2.search}</text>
+        <rect class="nf-diag-box" x="450" y="34" width="180" height="56" rx="10" />
+        <text class="nf-diag-label" x="540" y="66" text-anchor="middle">{d2.graph}</text>
+        <text class="nf-diag-sub" x="75" y="112" text-anchor="middle">{d2.questionSub}</text>
+        <text class="nf-diag-sub" x="295" y="112" text-anchor="middle">{d2.searchSub}</text>
+        <text class="nf-diag-sub" x="540" y="112" text-anchor="middle">{d2.graphSub}</text>
+        <path class="nf-diag-edge" d="M140 62 H202" />
+        <polygon class="nf-diag-arrow" points="202,57.5 210,62 202,66.5" />
+        <path class="nf-diag-edge" d="M380 62 H442" />
+        <polygon class="nf-diag-arrow" points="442,57.5 450,62 442,66.5" />
+        <!-- s-curve down to row 2 -->
+        <path class="nf-diag-edge" d="M540 90 C540 164 85 132 85 188" />
+        <polygon class="nf-diag-arrow" points="80.5,188 85,196 89.5,188" />
+        <!-- row 2 -->
+        <rect class="nf-diag-box" x="20" y="196" width="130" height="56" rx="10" />
+        <text class="nf-diag-label" x="85" y="228" text-anchor="middle">{d2.context}</text>
+        <circle class="nf-diag-glow nf-diag-pulse" cx="330" cy="224" r="38" />
+        <circle class="nf-diag-node" cx="330" cy="224" r="26" />
+        <text class="nf-diag-num" x="330" y="228" text-anchor="middle">{d2.llm}</text>
+        <rect class="nf-diag-box" x="470" y="196" width="230" height="56" rx="10" />
+        <text class="nf-diag-label" x="585" y="228" text-anchor="middle">{d2.answer}</text>
+        <text class="nf-diag-sub" x="85" y="276" text-anchor="middle">{d2.contextSub}</text>
+        <text class="nf-diag-sub" x="330" y="276" text-anchor="middle">{d2.llmSub}</text>
+        <text class="nf-diag-sub" x="585" y="276" text-anchor="middle">{d2.answerSub}</text>
+        <path class="nf-diag-edge" d="M150 224 H296" />
+        <polygon class="nf-diag-arrow" points="296,219.5 304,224 296,228.5" />
+        <path class="nf-diag-edge" d="M356 224 H462" />
+        <polygon class="nf-diag-arrow" points="462,219.5 470,224 462,228.5" />
+      </svg>
+      <figcaption class="nf-diag-caption">{d2.caption}</figcaption>
+    </figure>
+
+    <p class="nf-docs-p" set:html={t.rag.sourcesP} />
+    <p class="nf-docs-p" set:html={t.rag.profileP} />
+
+    <details class="nf-prompt-details">
+      <summary>{t.rag.prompt.summary}</summary>
+      <p class="nf-prompt-note" set:html={t.rag.prompt.note} />
+      <pre class="nf-prompt-pre"><code>{t.rag.prompt.text}</code></pre>
+    </details>
+  </section>
+
+  <!-- ── Second brain profile ── -->
+  <section id="profile" data-reveal>
+    <div class="nf-sec-head">{kickerFor('profile')}</div>
+    <h2>{t.profile.title}</h2>
+    {t.profile.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+
+    <details class="nf-prompt-details">
+      <summary>{t.profile.prompt.summary}</summary>
+      <p class="nf-prompt-note" set:html={t.profile.prompt.note} />
+      <pre class="nf-prompt-pre"><code>{t.profile.prompt.text}</code></pre>
+    </details>
+  </section>
+
+  <!-- ── Agent & tools ── -->
+  <section id="agent" data-reveal>
+    <div class="nf-sec-head">{kickerFor('agent')}</div>
+    <h2>{t.agent.title}</h2>
+    {t.agent.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.agent.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <table class="nf-ref-table nf-tools-table">
+      <thead><tr><th>{t.agent.colTool}</th><th>{t.agent.colDesc}</th></tr></thead>
+      <tbody>
+        {t.agent.tools.map((tool) => (
+          <tr>
+            <td class="nf-tool-name">
+              <code>{tool.name}</code>
+              {tool.destructive && <span class="nf-badge nf-badge-danger">{t.agent.destructiveBadge}</span>}
+            </td>
+            <td set:html={tool.desc} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Privacy ── -->
+  <section id="privacy" data-reveal>
+    <div class="nf-sec-head">{kickerFor('privacy')}</div>
+    <h2>{t.privacy.title}</h2>
+    {t.privacy.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-priv-list">
+      {t.privacy.items.map((item) => (
+        <article class="nf-priv-card nf-edge">
+          <h3>{item.title}</h3>
+          <p set:html={item.html} />
+        </article>
+      ))}
+    </div>
+    <p class="nf-docs-p" set:html={t.privacy.switchesP} />
+  </section>
+</DocsShell>
+
+<style is:global>
+  /* ── /ai page-specific styles (shared widgets live in docs.css). Accent = purple. ── */
+
+  /* Provider cards */
+  .nf-prov-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+    gap: 14px;
+    margin: 20px 0 18px;
+  }
+  .nf-prov-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 16px 17px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .nf-prov-card .nf-prov-name { margin: 0; font-size: 15.5px; font-weight: 600; color: var(--ink-strong); }
+  .nf-prov-endpoint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .05em;
+    color: rgb(var(--purple));
+    word-break: break-all;
+  }
+  .nf-prov-note { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-dim); flex: 1; }
+
+  /* Badge chips (providers + destructive tools) */
+  .nf-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .nf-badge {
+    display: inline-block;
+    padding: 2.5px 9px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+  .nf-badge-danger {
+    border-color: rgb(var(--red) / .55);
+    color: rgb(var(--red));
+    box-shadow: 0 0 9px rgb(var(--red) / .18);
+  }
+
+  /* Highlighted callout (encrypted keys) */
+  .nf-callout {
+    margin: 22px 0 6px;
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-left: 2px solid rgb(var(--purple));
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: 0 0 24px rgb(var(--purple) / .07);
+  }
+  .nf-callout h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-callout p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* ── Animated pipeline diagrams ── */
+  .nf-diag-fig { margin: 26px 0 22px; }
+  .nf-diag { display: block; width: 100%; height: auto; }
+  .nf-diag-caption {
+    margin-top: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .nf-diag-box { fill: var(--card); stroke: var(--line-2); stroke-width: 1.2; }
+  .nf-diag-row { fill: var(--card-2); stroke: var(--line); stroke-width: 1; }
+  .nf-diag-hint { stroke: var(--line-2); stroke-width: 1.6; stroke-linecap: round; }
+  .nf-diag-node { fill: color-mix(in srgb, rgb(var(--purple)) 16%, var(--card)); stroke: rgb(var(--purple)); stroke-width: 1.4; }
+  .nf-diag-glow { fill: rgb(var(--purple)); opacity: .13; }
+  .nf-diag-arrow { fill: rgb(var(--purple)); opacity: .8; }
+  .nf-diag-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    fill: var(--ink);
+  }
+  .nf-diag-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    fill: var(--ink-faint);
+  }
+  .nf-diag-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .08em;
+    fill: var(--ink-strong);
+  }
+  /* Synapse-style flowing dashes + a soft heartbeat on the glowing nodes */
+  .nf-diag-edge {
+    stroke: rgb(var(--purple));
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-dasharray: 5 7;
+    opacity: .75;
+    animation: nfDiagFlow 1.5s linear infinite;
+  }
+  .nf-diag-pulse { animation: nfDiagPulse 2.6s ease-in-out infinite; }
+  @keyframes nfDiagFlow { to { stroke-dashoffset: -24; } }
+  @keyframes nfDiagPulse { 0%, 100% { opacity: .09; } 50% { opacity: .2; } }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-diag-edge, .nf-diag-pulse { animation: none; }
+  }
+
+  /* Relations cards */
+  .nf-rel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 14px;
+    margin: 18px 0 16px;
+  }
+  .nf-rel-card {
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .nf-rel-card h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-rel-card p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* RAG numbered steps */
+  .nf-steps { margin: 18px 0 8px; padding: 0; list-style: none; max-width: 72ch; }
+  .nf-step {
+    display: flex;
+    gap: 18px;
+    padding: 15px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .nf-step:last-child { border-bottom: 0; }
+  .nf-step-num {
+    flex: 0 0 auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    letter-spacing: .1em;
+    color: rgb(var(--purple));
+    padding-top: 2px;
+  }
+  .nf-step-body h3 { margin: 0 0 5px; font-size: 15.5px; }
+  .nf-step-body p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Collapsible literal prompts */
+  .nf-prompt-details {
+    margin: 20px 0 8px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+    overflow: hidden;
+  }
+  .nf-prompt-details summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 17px;
+    cursor: pointer;
+    list-style: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink);
+    transition: color .2s ease;
+  }
+  .nf-prompt-details summary::-webkit-details-marker { display: none; }
+  .nf-prompt-details summary::before {
+    content: '+';
+    font-size: 14px;
+    color: rgb(var(--purple));
+    transition: transform .25s ease;
+  }
+  .nf-prompt-details[open] summary::before { transform: rotate(45deg); }
+  .nf-prompt-details summary:hover { color: var(--ink-strong); }
+  .nf-prompt-note {
+    margin: 0;
+    padding: 12px 17px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ink-faint);
+    background: var(--card-2);
+  }
+  .nf-prompt-pre {
+    margin: 0;
+    padding: 17px 19px;
+    border-top: 1px solid var(--line);
+    max-height: 460px;
+    overflow: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Tools table */
+  .nf-tools-table { margin-top: 22px; }
+  .nf-tool-name { width: 30%; min-width: 185px; padding-right: 22px !important; }
+  .nf-tool-name code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: rgb(var(--purple));
+    background: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .nf-tool-name .nf-badge-danger { display: inline-block; margin-top: 7px; }
+  @media (max-width: 719px) {
+    .nf-tools-table thead { display: none; }
+    .nf-tools-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .nf-tools-table td { display: block; border-bottom: 0; padding: 2px 0; }
+    .nf-tool-name { width: auto; min-width: 0; }
+    .nf-tool-name .nf-badge-danger { margin: 0 0 0 10px; }
+  }
+
+  /* Privacy cards */
+  .nf-priv-list { display: flex; flex-direction: column; gap: 14px; margin: 18px 0 18px; }
+  .nf-priv-card {
+    border: 1px solid var(--line-2);
+    border-left: 2px solid rgb(var(--purple));
+    border-radius: 10px;
+    background: var(--card);
+    padding: 18px 20px;
+  }
+  .nf-priv-card h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-priv-card p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Prose links on this page underline with the purple accent (mirrors CliPage) */
+  .nf-priv-card a, .nf-step-body a, .nf-docs-p a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--page-accent);
+    text-underline-offset: 3px;
+  }
+</style>
