@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Brain, Cloud, CloudOff, Download, Minus, RefreshCw, Settings, Square, X } from 'lucide-react'
 import { useNotesStore } from '../stores/notesStore'
+import { useT } from '../i18n/useT'
+import { tf } from '../i18n/format'
 import { ExportImportModal } from './ExportImportModal'
 import { SettingsModal } from './Settings/SettingsModal'
 import type { SettingsSection } from './Settings/SettingsModal'
 
 export function TitleBar() {
+  const t = useT()
   const brainViewOpen = useNotesStore((s) => s.brainViewOpen)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; downloadUrl: string } | null>(null)
@@ -84,7 +87,7 @@ export function TitleBar() {
   }, [])
 
   function formatLastSync(iso?: string) {
-    if (!iso) return 'Never'
+    if (!iso) return t.titleBar.never
     const d = new Date(iso)
     const now = new Date()
     const sameDay = d.toDateString() === now.toDateString()
@@ -138,7 +141,7 @@ export function TitleBar() {
               ? 'border-accent/60 bg-accent/15 text-accent'
               : 'border-text-muted/60 text-text-muted hover:text-text hover:border-text-muted hover:bg-surface-2'
           }`}
-          title={brainViewOpen ? 'Close brain view' : 'Open brain view'}
+          title={brainViewOpen ? t.titleBar.closeBrain : t.titleBar.openBrain}
         >
           <Brain size={12} />
           <span>brain</span>
@@ -150,10 +153,10 @@ export function TitleBar() {
             className="flex items-center gap-1 px-2 h-full text-text/70 hover:text-text transition-colors disabled:opacity-60"
             title={
               installing
-                ? 'Installing… NoteFlow will restart'
+                ? t.titleBar.installing
                 : downloading
-                ? `Downloading... ${downloadProgress > 0 ? `${downloadProgress}%` : ''}`
-                : `Update available: v${updateInfo.latestVersion}`
+                ? tf(t.titleBar.downloading, { progress: downloadProgress > 0 ? `${downloadProgress}%` : '' })
+                : tf(t.titleBar.updateAvailable, { version: updateInfo.latestVersion })
             }
           >
             {installing ? (
@@ -172,14 +175,14 @@ export function TitleBar() {
             className="flex items-center gap-1 px-2 h-full text-text-muted hover:text-text transition-colors disabled:opacity-60"
             title={
               syncing
-                ? 'Syncing...'
+                ? t.titleBar.syncing
                 : pushing
-                ? 'Uploading changes...'
+                ? t.titleBar.uploading
                 : syncStatus.initialPullStatus === 'failed'
-                ? `Sync bloqueado — los cambios no se subirán hasta reconectar.${syncStatus.error ? `\n${syncStatus.error}` : ''}\nClick para reintentar`
+                ? `${t.titleBar.syncBlocked}${syncStatus.error ? `\n${syncStatus.error}` : ''}\n${t.titleBar.clickToRetry}`
                 : syncStatus.error
-                ? `Sync error: ${syncStatus.error}`
-                : `${syncStatus.owner}/${syncStatus.repo} · Last sync: ${formatLastSync(syncStatus.lastSync)}\nClick to sync`
+                ? tf(t.titleBar.syncError, { error: syncStatus.error })
+                : tf(t.titleBar.syncIdle, { owner: syncStatus.owner ?? '', repo: syncStatus.repo ?? '', time: formatLastSync(syncStatus.lastSync) })
             }
           >
             {syncing ? (
@@ -198,7 +201,7 @@ export function TitleBar() {
         <button
           onClick={() => openSettings('appearance')}
           className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
-          title="Settings"
+          title={t.titleBar.settings}
         >
           <Settings size={12} />
         </button>
@@ -206,21 +209,21 @@ export function TitleBar() {
           <button
             onClick={() => window.noteflow.minimize()}
             className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
-            title="Minimize"
+            title={t.titleBar.minimize}
           >
             <Minus size={11} />
           </button>
           <button
             onClick={() => window.noteflow.maximize()}
             className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
-            title="Maximize"
+            title={t.titleBar.maximize}
           >
             <Square size={10} />
           </button>
           <button
             onClick={() => window.noteflow.close()}
             className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-red-500 hover:text-white transition-colors"
-            title="Close (hides to tray)"
+            title={t.titleBar.close}
           >
             <X size={13} />
           </button>

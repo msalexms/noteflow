@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronUp, ChevronDown, X, CaseSensitive } from 'lucide-react'
 import { buildSearchRegex } from '../../lib/searchUtils'
+import { useT } from '../../i18n/useT'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,7 @@ interface RawNoteSearchBarProps {
 }
 
 export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearchBarProps) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [matches, setMatches] = useState<Match[]>([])
@@ -197,7 +199,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Find in note"
+        placeholder={t.editor.search.findInNote}
         className="w-44 bg-transparent text-sm text-text placeholder:text-text-muted outline-none"
       />
 
@@ -212,7 +214,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
       <button
         type="button"
         onClick={() => setCaseSensitive((v) => !v)}
-        title="Match case"
+        title={t.editor.search.matchCase}
         aria-pressed={caseSensitive}
         className={`p-1 rounded hover:bg-surface-3 ${
           caseSensitive ? 'bg-surface-3 text-text' : 'text-text-muted'
@@ -225,7 +227,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
         type="button"
         onClick={prev}
         disabled={matchCount === 0}
-        title="Previous match (Shift+Enter)"
+        title={t.editor.search.previousMatch}
         className="p-1 rounded text-text-muted hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent"
       >
         <ChevronUp size={14} />
@@ -235,7 +237,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
         type="button"
         onClick={next}
         disabled={matchCount === 0}
-        title="Next match (Enter)"
+        title={t.editor.search.nextMatch}
         className="p-1 rounded text-text-muted hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent"
       >
         <ChevronDown size={14} />
@@ -244,7 +246,7 @@ export function RawNoteSearchBar({ textareaRef, content, onClose }: RawNoteSearc
       <button
         type="button"
         onClick={onClose}
-        title="Close (Escape)"
+        title={t.editor.search.close}
         className="p-1 rounded text-text-muted hover:bg-surface-3"
       >
         <X size={14} />

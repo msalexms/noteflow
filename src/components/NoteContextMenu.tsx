@@ -10,6 +10,8 @@ import { normalizeTagColorKey, TAG_COLOR_VARS } from '../lib/tagColors'
 import { ConfirmModal } from './ConfirmModal'
 import { EncryptionModal } from './EncryptionModal'
 import { ContextMenu } from './ContextMenu'
+import { useT } from '../i18n/useT'
+import { tf } from '../i18n/format'
 import type { Note, GroupColor } from '../types'
 
 const GROUP_COLORS: GroupColor[] = [...TAG_COLOR_VARS]
@@ -37,6 +39,7 @@ interface NoteContextMenuProps {
  * open starts with fresh submenu/input state.
  */
 export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
+  const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const deleteNote = useNotesStore((s) => s.deleteNote)
   const updateNote = useNotesStore((s) => s.updateNote)
@@ -70,9 +73,9 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
 
   const confirmDelete = (note: Note) => {
     setModal({
-      title: 'Delete note',
-      message: `"${note.title || 'Untitled'}" will be permanently deleted.`,
-      confirmLabel: 'Delete',
+      title: t.common.deleteNote,
+      message: tf(t.common.deleteNoteMessage, { title: note.title || t.common.untitled }),
+      confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => { setModal(null); deleteNote(note.id) },
     })
@@ -82,9 +85,9 @@ export function NoteContextMenu({ request, onClose }: NoteContextMenuProps) {
     const section = note.sections.find((s) => s.id === sectionId)
     if (!section) return
     setModal({
-      title: 'Delete section',
-      message: `"${section.name}" will be permanently deleted.`,
-      confirmLabel: 'Delete',
+      title: t.common.deleteSection,
+      message: tf(t.common.deleteSectionMessage, { name: section.name }),
+      confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => {
         setModal(null)
@@ -162,6 +165,7 @@ interface NoteMenuBodyProps {
 // The visible menu. Mounted fresh per open (keyed by request) so its submenu and
 // inline-input state always starts clean.
 function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSection, onUnlockThenDelete, onEncModal }: NoteMenuBodyProps) {
+  const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const updateNote = useNotesStore((s) => s.updateNote)
   const archiveNote = useNotesStore((s) => s.archiveNote)
@@ -214,14 +218,14 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             {note.favorited ? <StarOff size={12} /> : <Star size={12} />}
-            {note.favorited ? 'Remove from favorites' : 'Add to favorites'}
+            {note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
           </button>
           <button
             onClick={() => { archiveNote(note.id); onClose() }}
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <Archive size={12} />
-            {note.archived ? 'Unarchive' : 'Archive'}
+            {note.archived ? t.common.unarchive : t.common.archive}
           </button>
         </>
       )}
@@ -231,7 +235,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
           className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
         >
           <Unlock size={12} />
-          Unlock note
+          {t.noteMenu.unlockNote}
         </button>
       )}
       {note.encryption && !!sessionPasswords[note.id] && (
@@ -240,7 +244,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
           className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
         >
           <Lock size={12} />
-          Lock note
+          {t.noteMenu.lockNote}
         </button>
       )}
       {note.encryption && (
@@ -249,7 +253,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
           className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
         >
           <Unlock size={12} />
-          Remove encryption
+          {t.noteMenu.removeEncryption}
         </button>
       )}
       {!currentSection && (
@@ -259,14 +263,14 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <Columns2 size={12} />
-            Open alongside
+            {t.noteMenu.openAlongside}
           </button>
           <button
             onClick={() => { duplicateNote(note.id); onClose() }}
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <Copy size={12} />
-            Duplicate note
+            {t.noteMenu.duplicateNote}
           </button>
         </>
       )}
@@ -275,7 +279,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
         className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
       >
         <LayoutGrid size={12} />
-        Note overview
+        {t.noteMenu.noteOverview}
       </button>
 
       {currentSection && (
@@ -291,17 +295,15 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                 })
                 onClose()
               }}
-              title={currentSection.aiHidden
-                ? 'The AI will index and use this section again'
-                : 'The AI will never index, read or reference this section'}
+              title={currentSection.aiHidden ? t.noteMenu.aiShowTooltip : t.noteMenu.aiHideTooltip}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               {currentSection.aiHidden ? <Eye size={12} /> : <EyeOff size={12} />}
-              {currentSection.aiHidden ? 'Show to AI' : 'Hide from AI'}
+              {currentSection.aiHidden ? t.common.showToAI : t.common.hideFromAI}
             </button>
           )}
           <div className="px-3 pt-1 text-[10px] font-mono text-text-muted uppercase tracking-wider">
-            Section color
+            {t.noteMenu.sectionColor}
           </div>
           <div className="px-3 py-2">
             <div className="flex gap-1.5 flex-wrap">
@@ -330,7 +332,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                     : 'text-text border-text/25 bg-surface-2'
                 }`}
               >
-                Auto
+                {t.noteMenu.autoColor}
               </button>
             </div>
           </div>
@@ -363,7 +365,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Folder size={12} />
-              Move to folder
+              {t.noteMenu.moveToFolder}
               <ChevronRight size={10} className="ml-auto" />
             </button>
 
@@ -387,7 +389,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                       className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
                     >
                       <FolderMinus size={12} />
-                      Group root
+                      {t.common.groupRoot}
                     </button>
                   )}
                   {groupFolders.map((f) => (
@@ -405,14 +407,14 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                     </button>
                   ))}
                   {groupFolders.length === 0 && newFolderName === null && (
-                    <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">No folders yet</div>
+                    <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">{t.common.noFoldersYet}</div>
                   )}
                   {newFolderName === null ? (
                     <button
                       onClick={(e) => { e.stopPropagation(); setNewFolderName('') }}
                       className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
                     >
-                      + New folder…
+                      {t.common.newFolderInline}
                     </button>
                   ) : (
                     <input
@@ -429,7 +431,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                         if (e.key === 'Escape') setNewFolderName(null)
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      placeholder="Folder name…"
+                      placeholder={t.common.folderNamePlaceholder}
                       className="mx-3 my-1 px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text w-[calc(100%-1.5rem)] block placeholder-text-muted/40"
                     />
                   )}
@@ -443,7 +445,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <FolderMinus size={12} />
-            Remove from group
+            {t.noteMenu.removeFromGroup}
           </button>
         </>
       ) : (
@@ -472,7 +474,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <FolderPlus size={12} />
-              Add to group
+              {t.noteMenu.addToGroup}
               {groups.length > 0 && <ChevronRight size={10} className="ml-auto" />}
             </button>
 
@@ -510,7 +512,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                   }}
                   className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text transition-colors"
                 >
-                  + New group…
+                  {t.common.newGroupInline}
                 </button>
               </div>
             )}
@@ -533,7 +535,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
               }}
               onClick={(e) => e.stopPropagation()}
               className="mx-3 my-1 px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text w-[calc(100%-1.5rem)] block"
-              placeholder="Group name…"
+              placeholder={t.common.groupNamePlaceholder}
             />
           )}
         </>
@@ -553,7 +555,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <ExternalLink size={12} />
-            Open as Sticky Note
+            {t.noteMenu.openAsSticky}
           </button>
         </>
       )}
@@ -567,7 +569,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
           className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
         >
           <Trash2 size={12} />
-          Delete section
+          {t.common.deleteSection}
         </button>
       ) : (
         <button
@@ -582,7 +584,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
           className="w-full text-left px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 flex items-center gap-2 transition-colors"
         >
           <Trash2 size={12} />
-          Delete note
+          {t.common.deleteNote}
         </button>
       )}
     </ContextMenu>

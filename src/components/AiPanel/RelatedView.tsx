@@ -3,11 +3,13 @@ import { ChevronDown, Loader2 } from 'lucide-react'
 import { useAiStore } from '../../stores/aiStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+import { useT } from '../../i18n/useT'
 import { PANEL_LABEL } from './ui'
 
 // "Related notes" for any note/section, picked right here. Reuses the existing AI index
 // (aiStore.fetchRelated). Lives as a tab in the AI panel; mirrors the old brain bottom strip.
 export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, sectionId: string) => void }) {
+  const t = useT()
   const { previewProps } = useSectionHoverPreview()
   const enabled = useAiStore((s) => s.enabled)
   const indexState = useAiStore((s) => s.indexState)
@@ -36,8 +38,8 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
   const filteredNotes = useMemo(() => {
     const q = pickerFilter.trim().toLowerCase()
     if (!q) return selectableNotes
-    return selectableNotes.filter((n) => (n.title || 'Untitled').toLowerCase().includes(q))
-  }, [selectableNotes, pickerFilter])
+    return selectableNotes.filter((n) => (n.title || t.common.untitled).toLowerCase().includes(q))
+  }, [selectableNotes, pickerFilter, t])
 
   useEffect(() => {
     if (!enabled) return
@@ -64,7 +66,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
     return (
       <div className="flex items-center justify-center h-full px-6 text-center">
         <p className="text-[12px] font-mono text-text-muted/70 leading-relaxed">
-          Enable local AI (in the brain) to see content-related notes.
+          {t.aiPanel.related.enablePrompt}
         </p>
       </div>
     )
@@ -76,17 +78,17 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
     <div className="flex flex-col h-full min-h-0 p-3 text-[13px] font-mono">
       {/* What this section is */}
       <p className="mb-2.5 text-[11px] leading-relaxed text-text-muted/70">
-        Notes and sections that the local AI finds most similar in content to the one you pick below — surfacing connections across your notes.
+        {t.aiPanel.related.intro}
       </p>
 
       {/* Source selector */}
       <div className="relative flex items-center gap-1.5 mb-2">
-        <span className={`${PANEL_LABEL} flex-shrink-0`}>From</span>
+        <span className={`${PANEL_LABEL} flex-shrink-0`}>{t.aiPanel.related.from}</span>
         <button
           onClick={() => setPickerOpen((o) => !o)}
           className="flex items-center gap-1 min-w-0 px-2 py-1 rounded-lg border-solid border border-border bg-surface-1/60 hover:border-text/25 transition-colors"
         >
-          <span className="truncate text-[12px] text-text/80 max-w-[180px]">{sourceNote?.title || 'Select a note'}</span>
+          <span className="truncate text-[12px] text-text/80 max-w-[180px]">{sourceNote?.title || t.aiPanel.related.selectNote}</span>
           <ChevronDown size={11} className="text-text/40 flex-shrink-0" />
         </button>
         {pickerOpen && (
@@ -98,7 +100,7 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                   autoFocus
                   value={pickerFilter}
                   onChange={(e) => setPickerFilter(e.target.value)}
-                  placeholder="Search notes…"
+                  placeholder={t.aiPanel.related.searchNotes}
                   className="w-full bg-surface-0 border border-border rounded px-2 py-1 text-[12px] text-text placeholder-text-muted/40 outline-none focus:border-text/30"
                 />
               </div>
@@ -111,11 +113,11 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                         n.id === sourceNoteId ? 'text-text' : 'text-text/70'
                       }`}
                     >
-                      {n.title || 'Untitled'}
+                      {n.title || t.common.untitled}
                     </button>
                   </li>
                 ))}
-                {filteredNotes.length === 0 && <li className="px-2.5 py-2 text-[12px] text-text-muted/60">No notes</li>}
+                {filteredNotes.length === 0 && <li className="px-2.5 py-2 text-[12px] text-text-muted/60">{t.aiPanel.related.noNotes}</li>}
               </ul>
             </div>
           </>
@@ -152,9 +154,9 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
                     onClick={() => onOpenNote(r.noteId, r.sectionId)}
                     className="w-full text-left px-2 py-1 rounded hover:bg-text/5 transition-colors group flex items-center gap-2"
                   >
-                    <span className="truncate text-text/80 group-hover:text-text flex-1 min-w-0">{r.sectionName || 'Untitled section'}</span>
+                    <span className="truncate text-text/80 group-hover:text-text flex-1 min-w-0">{r.sectionName || t.aiPanel.related.untitledSection}</span>
                     <span className="flex-shrink-0 text-[10px] px-1 py-px rounded bg-text/8 text-text/50 max-w-[120px] truncate">
-                      {sameNote ? '↻ this note' : r.title || 'Untitled'}
+                      {sameNote ? t.aiPanel.related.thisNote : r.title || t.common.untitled}
                     </span>
                   </button>
                 </li>
@@ -164,10 +166,10 @@ export function RelatedView({ onOpenNote }: { onOpenNote: (noteId: string, secti
         ) : relatedLoading || indexing ? (
           <p className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] text-text-muted/60">
             <Loader2 size={11} className="animate-spin" />
-            {indexing ? 'Indexing…' : 'Finding related notes…'}
+            {indexing ? t.aiPanel.related.indexing : t.aiPanel.related.finding}
           </p>
         ) : (
-          <p className="px-2 py-1.5 text-[12px] text-text-muted/60">No related notes found.</p>
+          <p className="px-2 py-1.5 text-[12px] text-text-muted/60">{t.aiPanel.related.none}</p>
         )}
       </div>
     </div>

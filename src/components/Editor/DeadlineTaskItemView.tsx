@@ -4,14 +4,12 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, Flag } from 'lucide-react'
 import { getRootZoom } from '../../stores/themeStore'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 
 type Importance = 'low' | 'medium' | 'high'
 
-const IMPORTANCE_LEVELS: { value: Importance; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-]
+const IMPORTANCE_VALUES: Importance[] = ['low', 'medium', 'high']
 
 // Today's date as yyyy-mm-dd in LOCAL time (not UTC) to match the date input's value format.
 function todayISO(): string {
@@ -32,16 +30,19 @@ function formatBadgeDate(due: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function importanceLabel(importance: Importance): string {
-  return IMPORTANCE_LEVELS.find((l) => l.value === importance)?.label ?? ''
-}
-
 export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) {
+  const t = useT()
   const { checked, due, alarm, importance } = node.attrs as {
     checked: boolean
     due: string | null
     alarm: string | null
     importance: Importance | null
+  }
+
+  const importanceLabels: Record<Importance, string> = {
+    low: t.editor.task.importanceLow,
+    medium: t.editor.task.importanceMedium,
+    high: t.editor.task.importanceHigh,
   }
 
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -201,7 +202,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
             contentEditable={false}
             className={`task-importance-trigger${importance ? ' has-importance' : ''}`}
             onClick={openImpPopover}
-            title={importance ? `Importance: ${importanceLabel(importance)}` : 'Set importance'}
+            title={importance ? tf(t.editor.task.importanceTooltip, { level: importanceLabels[importance] }) : t.editor.task.setImportance}
             type="button"
           >
             {importance ? (
@@ -216,7 +217,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
             contentEditable={false}
             className={`task-deadline-trigger${due ? ' has-due' : ''}`}
             onClick={openPopover}
-            title={due ? `Deadline: ${due}${alarm ? ' ⏰' + alarm : ''}` : 'Set deadline'}
+            title={due ? `${tf(t.editor.task.deadlineTooltip, { date: due })}${alarm ? ' ⏰' + alarm : ''}` : t.editor.task.setDeadline}
             type="button"
           >
             {due ? (
@@ -240,7 +241,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
             contentEditable={false}
           >
             <div className="task-deadline-popover-row">
-              <label>Date</label>
+              <label>{t.editor.task.date}</label>
               <input
                 type="date"
                 value={draftDue}
@@ -259,10 +260,10 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
             </div>
             <div className="task-deadline-popover-actions">
               <button type="button" onClick={clear} className="task-deadline-btn-clear">
-                Clear
+                {t.editor.task.clear}
               </button>
               <button type="button" onClick={commit} className="task-deadline-btn-done">
-                Done
+                {t.editor.task.done}
               </button>
             </div>
           </div>,
@@ -277,15 +278,15 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
             style={{ top: impPopoverPos.top, left: impPopoverPos.left }}
             contentEditable={false}
           >
-            {IMPORTANCE_LEVELS.map((level) => (
+            {IMPORTANCE_VALUES.map((level) => (
               <button
-                key={level.value}
+                key={level}
                 type="button"
-                className={`task-importance-option${importance === level.value ? ' is-active' : ''}`}
-                onClick={() => setImportance(level.value)}
+                className={`task-importance-option${importance === level ? ' is-active' : ''}`}
+                onClick={() => setImportance(level)}
               >
-                <span className={`task-importance-dot task-importance-dot--${level.value}`} />
-                {level.label}
+                <span className={`task-importance-dot task-importance-dot--${level}`} />
+                {importanceLabels[level]}
               </button>
             ))}
             <button
@@ -293,7 +294,7 @@ export function DeadlineTaskItemView({ node, updateAttributes }: NodeViewProps) 
               className="task-importance-clear"
               onClick={() => setImportance(null)}
             >
-              Clear
+              {t.editor.task.clear}
             </button>
           </div>,
           document.body

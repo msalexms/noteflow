@@ -8,7 +8,9 @@ import {
   Clock, FolderPlus, Upload, Download, RefreshCw, Cloud, Zap, Settings,
   Brain, MessageSquare, Sparkles, Link2, SlidersHorizontal,
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { formatDate } from '../../i18n/formatDate'
+import { useT } from '../../i18n/useT'
+import { tf, plural } from '../../i18n/format'
 import { escapeRegExp, getNoteSearchIndex, normalize } from '../../lib/searchUtils'
 import { modKey } from '../../lib/platform'
 
@@ -39,6 +41,9 @@ interface Command {
   id: string
   label: string
   description?: string
+  // English search terms so the fuzzy filter still finds a command by its English
+  // name even when the UI (label/description) is running in another language.
+  keywords?: string
   icon: React.ReactNode
   action: () => void
   category: 'create' | 'navigate' | 'action'
@@ -60,6 +65,7 @@ export function CommandPalette() {
   const createGroup = useGroupsStore((s) => s.createGroup)
   const setBrainView = useNotesStore((s) => s.setBrainView)
   const openAiPanel = useAiChatStore((s) => s.openAiPanel)
+  const t = useT()
 
   const [query, setQuery] = useState('')
   const [showCheatSheet, setShowCheatSheet] = useState(false)
@@ -103,139 +109,159 @@ export function CommandPalette() {
 
   if (!commandPaletteOpen) return null
 
+  // Labels/descriptions come from the dict (re-read each render via `t`); `keywords`
+  // are English aliases so the fuzzy filter finds commands regardless of UI language.
+  const cmd = t.palette.commands
   const staticCommands: Command[] = [
     {
       id: 'new-note',
-      label: 'New note',
-      description: 'Create a blank note · Ctrl+N',
+      label: cmd.newNote.label,
+      description: cmd.newNote.description,
+      keywords: 'new note create blank',
       icon: <Plus size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { createNote(); setCommandPaletteOpen(false) },
       category: 'create',
     },
     {
       id: 'new-temp-note',
-      label: 'New temporary note',
-      description: 'Auto-deletes in 24h · Ctrl+Shift+N',
+      label: cmd.newTempNote.label,
+      description: cmd.newTempNote.description,
+      keywords: 'new temporary note temp auto delete',
       icon: <Clock size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { createTempNote(); setCommandPaletteOpen(false) },
       category: 'create',
     },
     {
       id: 'create-group',
-      label: 'Create group',
-      description: 'Organize notes into a new group',
+      label: cmd.createGroup.label,
+      description: cmd.createGroup.description,
+      keywords: 'create group new organize',
       icon: <FolderPlus size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setMode('create-group'); setQuery('') },
       category: 'create',
     },
     {
       id: 'open-brain',
-      label: 'Open Brain',
-      description: 'Explore your notes as a 3D graph',
+      label: cmd.openBrain.label,
+      description: cmd.openBrain.description,
+      keywords: 'open brain graph 3d visualize',
       icon: <Brain size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setBrainView(true); setCommandPaletteOpen(false) },
       category: 'navigate',
     },
     {
       id: 'ai-chat',
-      label: 'Chat with AI',
-      description: 'Ask your notes anything',
+      label: cmd.aiChat.label,
+      description: cmd.aiChat.description,
+      keywords: 'chat ai assistant ask',
       icon: <MessageSquare size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setBrainView(true); openAiPanel('chat'); setCommandPaletteOpen(false) },
       category: 'navigate',
     },
     {
       id: 'ai-ask',
-      label: 'Ask AI a question…',
-      description: 'Type a question and send it straight to the chat',
+      label: cmd.aiAsk.label,
+      description: cmd.aiAsk.description,
+      keywords: 'ask ai question',
       icon: <Sparkles size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setMode('ask-ai'); setQuery('') },
       category: 'navigate',
     },
     {
       id: 'ai-related',
-      label: 'Find related notes',
-      description: 'AI-suggested connections for a note',
+      label: cmd.aiRelated.label,
+      description: cmd.aiRelated.description,
+      keywords: 'find related notes connections ai',
       icon: <Link2 size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setBrainView(true); openAiPanel('related'); setCommandPaletteOpen(false) },
       category: 'navigate',
     },
     {
       id: 'ai-profile',
-      label: 'AI profile',
-      description: 'Review or set up your second brain',
+      label: cmd.aiProfile.label,
+      description: cmd.aiProfile.description,
+      keywords: 'ai profile second brain',
       icon: <Sparkles size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setBrainView(true); openAiPanel('profile'); setCommandPaletteOpen(false) },
       category: 'navigate',
     },
     {
       id: 'ai-settings',
-      label: 'AI provider settings',
-      description: 'Configure the chat model & API key',
+      label: cmd.aiSettings.label,
+      description: cmd.aiSettings.description,
+      keywords: 'ai provider settings model api key',
       icon: <SlidersHorizontal size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { setBrainView(true); openAiPanel('settings'); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'export',
-      label: 'Export notes',
-      description: 'Save notes to a file',
+      label: cmd.export.label,
+      description: cmd.export.description,
+      keywords: 'export notes save file',
       icon: <Upload size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:open-export')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'import',
-      label: 'Import notes',
-      description: 'Load notes from a file',
+      label: cmd.import.label,
+      description: cmd.import.description,
+      keywords: 'import notes load file',
       icon: <Download size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:open-import')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'sync',
-      label: 'Sync notes',
-      description: 'Pull latest from GitHub',
+      label: cmd.sync.label,
+      description: cmd.sync.description,
+      keywords: 'sync notes pull github',
       icon: <RefreshCw size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:sync-notes')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'github-sync',
-      label: 'GitHub Sync',
-      description: 'Open sync configuration',
+      label: cmd.githubSync.label,
+      description: cmd.githubSync.description,
+      keywords: 'github sync configuration',
       icon: <Cloud size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:open-github-sync')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'check-update',
-      label: 'Check for updates',
-      description: 'Check for a new NoteFlow version',
+      label: cmd.checkUpdate.label,
+      description: cmd.checkUpdate.description,
+      keywords: 'check for updates version',
       icon: <Zap size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:check-for-update')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'startup-settings',
-      label: 'Startup settings',
-      description: 'Autostart and stickies on launch',
+      label: cmd.startup.label,
+      description: cmd.startup.description,
+      keywords: 'startup settings autostart launch',
       icon: <Settings size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.dispatchEvent(new CustomEvent('noteflow:open-startup')); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'open-folder',
-      label: 'Open notes folder',
+      label: cmd.openFolder.label,
       description: '~/noteflow-notes',
+      keywords: 'open notes folder directory',
       icon: <FolderOpen size={ICON_SIZE} className={ICON_CLS} />,
       action: () => { window.noteflow.openNotesFolder(); setCommandPaletteOpen(false) },
       category: 'action',
     },
     {
       id: 'shortcuts',
-      label: 'Keyboard shortcuts',
-      description: 'Open shortcut reference',
+      label: cmd.shortcuts.label,
+      description: cmd.shortcuts.description,
+      keywords: 'keyboard shortcuts reference help',
       icon: <Keyboard size={ICON_SIZE} className={ICON_CLS} />,
       action: () => {
         window.dispatchEvent(new CustomEvent('noteflow:open-shortcuts'))
@@ -259,14 +285,14 @@ export function CommandPalette() {
             idx.title.includes(nq) ||
             idx.sectionContents.some((c) => c.includes(nq)) ||
             idx.sectionNames.some((s) => s.includes(nq)) ||
-            idx.tags.some((t) => t.includes(nq))
+            idx.tags.some((tag) => tag.includes(nq))
           )
         })
         .slice(0, 8)
         .map((n: Note) => ({
           id: `note-${n.id}`,
-          label: n.title || 'Untitled',
-          description: format(new Date(n.updated), 'MMM d · HH:mm'),
+          label: n.title || t.common.untitled,
+          description: formatDate(new Date(n.updated), 'MMM d · HH:mm'),
           icon: <Search size={ICON_SIZE} className={ICON_CLS} />,
           action: () => { setActiveNote(n.id); setCommandPaletteOpen(false) },
           category: 'navigate' as const,
@@ -277,7 +303,8 @@ export function CommandPalette() {
     ? staticCommands.filter(
         (c) =>
           c.label.toLowerCase().includes(q) ||
-          (c.description?.toLowerCase().includes(q) ?? false)
+          (c.description?.toLowerCase().includes(q) ?? false) ||
+          (c.keywords?.includes(q) ?? false)
       )
     : staticCommands
 
@@ -337,7 +364,7 @@ export function CommandPalette() {
                 onClick={() => { setMode('search'); setQuery('') }}
                 className="text-[10px] font-mono text-text-muted/50 hover:text-text-muted whitespace-nowrap flex-shrink-0 transition-colors"
               >
-                Commands ›
+                {t.palette.commandsBreadcrumb}
               </button>
             </>
           ) : (
@@ -349,7 +376,7 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={mode === 'create-group' ? 'Group name...' : mode === 'ask-ai' ? 'Ask your notes anything…' : 'Search notes or run command...'}
+            placeholder={mode === 'create-group' ? t.palette.groupNamePlaceholder : mode === 'ask-ai' ? t.palette.askPlaceholder : t.palette.searchPlaceholder}
             className="flex-1 bg-transparent text-xs font-mono text-text placeholder-text-muted/50
                        outline-none caret-text"
           />
@@ -368,64 +395,64 @@ export function CommandPalette() {
               <p className="text-xs font-mono text-text-muted">
                 {query.trim() ? (
                   <>
-                    Press{' '}
+                    {t.palette.press}{' '}
                     <kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded text-[10px]">Enter</kbd>
-                    {' '}to create{' '}
+                    {' '}{t.palette.createSuffix}{' '}
                     <span className="text-text">"{query.trim()}"</span>
                   </>
-                ) : 'Type a name for the new group'}
+                ) : t.palette.typeGroupName}
               </p>
-              <p className="text-[10px] font-mono text-text-muted/40 mt-1.5">Esc to go back</p>
+              <p className="text-[10px] font-mono text-text-muted/40 mt-1.5">{t.palette.escToGoBack}</p>
             </div>
           ) : mode === 'ask-ai' ? (
             <div className="px-4 py-8 text-center">
               <p className="text-xs font-mono text-text-muted">
                 {query.trim() ? (
                   <>
-                    Press{' '}
+                    {t.palette.press}{' '}
                     <kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded text-[10px]">Enter</kbd>
-                    {' '}to ask the AI about your notes
+                    {' '}{t.palette.askSuffix}
                   </>
-                ) : 'Type a question for the AI'}
+                ) : t.palette.typeQuestion}
               </p>
-              <p className="text-[10px] font-mono text-text-muted/40 mt-1.5">Opens the Brain chat · Esc to go back</p>
+              <p className="text-[10px] font-mono text-text-muted/40 mt-1.5">{t.palette.opensBrainChat}</p>
             </div>
           ) : (
             <>
               {showCheatSheet && !q && (
                 <div className="mx-3 mt-2 mb-2 rounded border border-text/15 bg-surface-2 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono text-text-muted uppercase tracking-wider">Quick shortcuts</span>
+                    <span className="text-[10px] font-mono text-text-muted uppercase tracking-wider">{t.palette.quickShortcuts}</span>
                     <button
                       onClick={dismissCheatSheet}
                       className="text-[10px] font-mono text-text-muted/70 hover:text-text transition-colors"
                     >
-                      hide
+                      {t.palette.hide}
                     </button>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] font-mono text-text-muted/80">
-                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+P</kbd> palette</span>
-                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+N</kbd> note</span>
-                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+F</kbd> search</span>
-                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+Shift+E</kbd> raw/editor</span>
+                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+P</kbd> {t.palette.scPalette}</span>
+                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+N</kbd> {t.palette.scNote}</span>
+                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+F</kbd> {t.palette.scSearch}</span>
+                    <span className="flex items-center gap-1"><kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded">{modKey}+Shift+E</kbd> {t.palette.scRawEditor}</span>
                   </div>
                 </div>
               )}
 
               <div className="px-4 py-1 text-[10px] font-mono text-text-muted/60 uppercase tracking-wider">
-                {allItems.length} result{allItems.length === 1 ? '' : 's'}
+                {plural(t.palette.results, allItems.length)}
               </div>
 
               {allItems.length === 0 ? (
                 <div className="px-4 py-6 text-center text-xs font-mono text-text-muted">
-                  No results for "{query}"
+                  {tf(t.palette.noResults, { query })}
                 </div>
               ) : (
                 <>
                   {matchedCommands.length > 0 && (
                     <>
                       <div className="px-3 py-1">
-                        <span className="text-[10px] font-mono text-text-muted/40 uppercase tracking-wider">Commands</span>
+                        <span className="text-[10px] font-mono text-text-muted/40 uppercase tracking-wider">{t.palette.commandsHeader}</span>
                       </div>
                       {matchedCommands.map((cmd, i) => (
                         <CommandItem
@@ -441,7 +468,7 @@ export function CommandPalette() {
                   {matchedNotes.length > 0 && (
                     <>
                       <div className="px-3 py-1 mt-1">
-                        <span className="text-[10px] font-mono text-text-muted/40 uppercase tracking-wider">Notes</span>
+                        <span className="text-[10px] font-mono text-text-muted/40 uppercase tracking-wider">{t.palette.notesHeader}</span>
                       </div>
                       {matchedNotes.map((cmd, i) => (
                         <CommandItem
@@ -464,7 +491,7 @@ export function CommandPalette() {
         <div className="px-4 py-2 border-t border-border flex gap-3">
           {mode !== 'search' ? (
             <>
-              {[['↵', mode === 'ask-ai' ? 'ask' : 'create'], ['esc', 'back']].map(([key, label]) => (
+              {[['↵', mode === 'ask-ai' ? t.palette.footer.ask : t.palette.footer.create], ['esc', t.palette.footer.back]].map(([key, label]) => (
                 <span key={key} className="flex items-center gap-1 text-[10px] font-mono text-text-muted/50">
                   <kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded text-[10px]">{key}</kbd>
                   {label}
@@ -473,7 +500,7 @@ export function CommandPalette() {
             </>
           ) : (
             <>
-              {[['↑↓', 'navigate'], ['↵', 'select'], ['esc', 'close'], [`${modKey}+P`, 'toggle']].map(([key, label]) => (
+              {[['↑↓', t.palette.footer.navigate], ['↵', t.palette.footer.select], ['esc', t.palette.footer.close], [`${modKey}+P`, t.palette.footer.toggle]].map(([key, label]) => (
                 <span key={key} className="flex items-center gap-1 text-[10px] font-mono text-text-muted/50">
                   <kbd className="bg-surface-2 border border-border px-1 py-0.5 rounded text-[10px]">{key}</kbd>
                   {label}

@@ -57,10 +57,11 @@ import { EditorToolbar } from './EditorToolbar'
 import { TableContextMenu } from './TableContextMenu'
 import { SearchHighlight } from './SearchHighlightExtension'
 import { SectionRelation } from './SectionRelation'
-import { SlashCommands } from './SlashCommands'
+import { SlashCommands, getSlashCommands } from './SlashCommands'
 import { SectionLinkPicker } from './SectionLinkPicker'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { htmlFromMarkdown, htmlToMarkdown, looksLikeMarkdown } from '../../lib/markdownHtml'
+import { useT } from '../../i18n/useT'
 
 const lowlight = createLowlight(common)
 
@@ -105,6 +106,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
   const { fontFamily } = useEditorSettingsStore()
   // When the "/ → Link section" command runs, open the section picker.
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
+
+  // Keep a live ref to the message tree so the slash-command labels reflect a
+  // language switch the next time the "/" menu opens (the editor isn't recreated
+  // on language change, so a captured dict would go stale — read it fresh).
+  const t = useT()
+  const tRef = useRef(t)
+  useEffect(() => { tRef.current = t }, [t])
 
   const editor = useEditor({
     editorProps: {
@@ -182,7 +190,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
       Placeholder.configure({ placeholder }),
       SearchHighlight,
       SectionRelation,
-      SlashCommands.configure({ onLinkSection: () => setLinkPickerOpen(true) }),
+      SlashCommands.configure({
+        onLinkSection: () => setLinkPickerOpen(true),
+        getLabels: () => getSlashCommands(tRef.current),
+      }),
     ],
     content: htmlFromMarkdown(content),
     editable: !readOnly,

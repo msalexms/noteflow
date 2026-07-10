@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { nanoid } from 'nanoid'
 import { Loader2, Sparkles, Paperclip, X, Plus, Link2, FileText, Image as ImageIcon, Check, ExternalLink, RotateCcw } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
@@ -20,7 +20,9 @@ export function findAiProfileNote(groups: NoteGroup[], notes: Note[]): Note | un
     .filter((n) => n.group === aiGroup.id)
     .sort((a, b) => a.created.localeCompare(b.created))[0]
 }
-import { detectLocale, PROFILE_FIELDS, PROFILE_SECTIONS, type ProfileField } from './profileQuestions'
+import { detectLocale, getProfileQuestions, type ProfileField } from './profileQuestions'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 import { Card, FieldLabel, FIELD_INPUT, PANEL_LABEL, Segmented } from './ui'
 
 type FieldValues = Record<string, string | string[]>
@@ -37,6 +39,9 @@ function looksLikeUrl(v: string): boolean {
 }
 
 export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: string | null; onDone: (noteId: string | null) => void }) {
+  const t = useT()
+  const sections = useMemo(() => getProfileQuestions(t), [t])
+  const fields = useMemo(() => sections.flatMap((s) => s.fields), [sections])
   const createPopulatedNote = useNotesStore((s) => s.createPopulatedNote)
   const updateNote = useNotesStore((s) => s.updateNote)
   const deleteNote = useNotesStore((s) => s.deleteNote)
@@ -89,7 +94,7 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
     if (Array.isArray(v)) return v.join(', ')
     return (v ?? '').trim()
   }
-  const filledCount = PROFILE_FIELDS.filter((f) => fieldValue(f).length > 0).length
+  const filledCount = fields.filter((f) => fieldValue(f).length > 0).length
   const hasAny = filledCount > 0 || files.length > 0 || urls.length > 0
 
   const pickFiles = async () => {
@@ -125,13 +130,13 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
     // a blank, date-titled note.
     let createdNoteId: string | null = null
     try {
-      const fields = PROFILE_SECTIONS.flatMap((sec) =>
+      const answers = sections.flatMap((sec) =>
         sec.fields
           .map((f) => ({ section: sec.title, label: f.label, value: fieldValue(f) }))
           .filter((f) => f.value.length > 0),
       )
       const res = await window.noteflow.aiProfileGenerate({
-        fields,
+        fields: answers,
         fileIds: files.map((f) => f.id),
         urls,
         locale: detectLocale(),
@@ -139,11 +144,11 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
       // Validate the shape fully before creating anything — a non-array or empty `sections`
       // means there's nothing to write, so we must not leave a note behind.
       if (!res.ok || !res.title || !Array.isArray(res.sections) || res.sections.length === 0) {
-        setError(res.error ?? 'Could not generate the profile')
+        setError(res.error ?? t.aiPanel.profile.generateError)
         setBusy(false)
         return
       }
-      const sections: NoteSection[] = res.sections.map((s) => ({
+      const noteSections: NoteSection[] = res.sections.map((s) => ({
         id: nanoid(8),
         name: s.name,
         content: s.content,
@@ -163,10 +168,10 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
       const existing = existingNoteId ? notes.find((n) => n.id === existingNoteId) : null
       let noteId: string
       if (existing) {
-        await updateNote(existing.id, { title: res.title, sections, group: aiGroup.id })
+        await updateNote(existing.id, { title: res.title, sections: noteSections, group: aiGroup.id })
         noteId = existing.id
       } else {
-        const note = await createPopulatedNote({ title: res.title, sections, group: aiGroup.id })
+        const note = await createPopulatedNote({ title: res.title, sections: noteSections, group: aiGroup.id })
         createdNoteId = note.id
         noteId = note.id
       }
@@ -189,9 +194,12 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
     onDone(null)
   }
 
+  const ft = t.aiPanel.fileTypes
   const acceptHint = capabilities
-    ? `${capabilities.pdf ? 'PDF, ' : ''}${capabilities.images ? 'images, ' : ''}text & code files`
-    : 'text & code files'
+    ? tf(t.aiPanel.profile.acceptFiles, {
+        types: [...(capabilities.pdf ? [ft.pdf] : []), ...(capabilities.images ? [ft.images] : []), ft.textCode].join(', '),
+      })
+    : t.aiPanel.profile.acceptFilesBasic
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -202,16 +210,15 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
             <span className="flex items-center justify-center w-6 h-6 rounded-md bg-accent/15 text-accent">
               <Sparkles size={14} />
             </span>
-            <h2 className="text-[14px] font-bold tracking-wide">Create your profile</h2>
+            <h2 className="text-[14px] font-bold tracking-wide">{t.aiPanel.profile.createTitle}</h2>
           </div>
           <p className="text-[12px] text-text-muted leading-relaxed">
-            Tap what fits, add a few tags — that's all it takes. The AI fills in the rest and writes
-            an editable profile note in your language, used as context for better answers.
+            {t.aiPanel.profile.createIntro}
           </p>
         </div>
 
         {/* Sections — each grouped on its own soft card, like the design. */}
-        {PROFILE_SECTIONS.map((sec) => (
+        {sections.map((sec) => (
           <Card key={sec.id} className="flex flex-col gap-5 p-3.5">
             <div className="flex flex-col gap-0.5">
               <span className={PANEL_LABEL}>{sec.title}</span>
@@ -288,23 +295,23 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
 
         {/* Extras: files + links */}
         <Card className="flex flex-col gap-4 p-3.5">
-          <span className={PANEL_LABEL}>Add more — optional</span>
+          <span className={PANEL_LABEL}>{t.aiPanel.profile.addMore}</span>
 
           {/* Files */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <FieldLabel>Files</FieldLabel>
+              <FieldLabel>{t.aiPanel.profile.files}</FieldLabel>
               <button
                 type="button"
                 onClick={pickFiles}
                 disabled={busy}
                 className="flex items-center gap-1.5 px-2 py-1 rounded-lg border-solid border border-border text-[11px] text-text-muted hover:text-text hover:border-text/30 transition-colors disabled:opacity-50"
               >
-                <Paperclip size={11} /> Add files
+                <Paperclip size={11} /> {t.aiPanel.profile.addFiles}
               </button>
             </div>
             <span className="text-[11px] text-text-muted/60 leading-snug">
-              The AI reads them directly. Supported here: {acceptHint}.
+              {tf(t.aiPanel.profile.filesHint, { types: acceptHint })}
             </span>
             {files.length > 0 && (
               <div className="flex flex-col gap-1">
@@ -329,14 +336,14 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
 
           {/* Links */}
           <div className="flex flex-col gap-2">
-            <FieldLabel>Links</FieldLabel>
+            <FieldLabel>{t.aiPanel.profile.links}</FieldLabel>
             <div className="flex items-center gap-1.5">
               <input
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addUrl() } }}
                 disabled={busy}
-                placeholder="LinkedIn, portfolio, GitHub, X…"
+                placeholder={t.aiPanel.profile.linksPlaceholder}
                 className={`flex-1 ${FIELD_INPUT} py-1.5`}
               />
               <button type="button" onClick={addUrl} disabled={busy || !urlInput.trim()} className="flex items-center justify-center w-8 h-8 rounded-lg border-solid border border-border text-text-muted hover:text-text hover:border-text/30 transition-colors disabled:opacity-40">
@@ -375,7 +382,7 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
           disabled={busy}
           className="px-3 py-2 rounded border-solid border border-border text-text-muted text-[12px] font-mono hover:text-text hover:border-text/30 transition-colors disabled:opacity-50"
         >
-          Not now
+          {t.aiPanel.profile.notNow}
         </button>
         <button
           onClick={generate}
@@ -383,7 +390,7 @@ export function ProfileFlow({ existingNoteId, onDone }: { existingNoteId?: strin
           className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90 transition-opacity disabled:opacity-40"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-          {busy ? 'Generating…' : 'Generate profile'}
+          {busy ? t.aiPanel.profile.generating : t.aiPanel.profile.generate}
         </button>
         </div>
       </div>
@@ -402,6 +409,7 @@ export function ProfileSummary({
   onOpenNote: (noteId: string, sectionId: string) => void
   onStartOver: () => void
 }) {
+  const t = useT()
   const note = useNotesStore((s) => (noteId ? s.notes.find((n) => n.id === noteId) : undefined))
 
   return (
@@ -412,16 +420,15 @@ export function ProfileSummary({
             <span className="flex items-center justify-center w-6 h-6 rounded-md bg-accent/15 text-accent">
               <Check size={14} />
             </span>
-            <h2 className="text-[14px] font-bold tracking-wide">Profile created</h2>
+            <h2 className="text-[14px] font-bold tracking-wide">{t.aiPanel.profile.createdTitle}</h2>
           </div>
           <p className="text-[12px] text-text-muted leading-relaxed">
-            The AI keeps your profile note as context for better answers. Edit it like any other
-            note, or start over to rebuild it from scratch.
+            {t.aiPanel.profile.createdIntro}
           </p>
         </div>
 
         <Card className="flex flex-col gap-3 p-3.5">
-          <span className={PANEL_LABEL}>Your profile note</span>
+          <span className={PANEL_LABEL}>{t.aiPanel.profile.yourNote}</span>
           {note ? (
             <button
               type="button"
@@ -429,12 +436,12 @@ export function ProfileSummary({
               className="flex items-center gap-2 text-[12px] text-text bg-surface-0 border-solid border border-border rounded-lg px-2.5 py-2 hover:border-text/30 transition-colors text-left"
             >
               <Sparkles size={13} className="shrink-0 text-accent" />
-              <span className="truncate flex-1">{note.title || 'Untitled'}</span>
+              <span className="truncate flex-1">{note.title || t.common.untitled}</span>
               <ExternalLink size={12} className="shrink-0 text-text-muted" />
             </button>
           ) : (
             <span className="text-[12px] text-text-muted/70 leading-snug">
-              The profile note was deleted. Start over to create a new one.
+              {t.aiPanel.profile.noteDeleted}
             </span>
           )}
         </Card>
@@ -445,7 +452,7 @@ export function ProfileSummary({
           onClick={onStartOver}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded border-solid border border-border text-text-muted text-[12px] font-mono hover:text-text hover:border-text/30 transition-colors"
         >
-          <RotateCcw size={13} /> Start over
+          <RotateCcw size={13} /> {t.aiPanel.profile.startOver}
         </button>
       </div>
     </div>

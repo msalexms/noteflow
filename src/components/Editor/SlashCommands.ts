@@ -5,6 +5,7 @@ import type { SuggestionProps } from '@tiptap/suggestion'
 import { ReactRenderer } from '@tiptap/react'
 import { SlashCommandMenu, type SlashCommandMenuHandle } from './SlashCommandMenu'
 import { getRootZoom } from '../../stores/themeStore'
+import type { Messages } from '../../i18n'
 
 export interface SlashCommandItem {
   title: string
@@ -13,8 +14,27 @@ export interface SlashCommandItem {
   run: (editor: Editor) => void
 }
 
+export interface SlashCommandLabels {
+  linkSection: string
+  linkSectionDescription: string
+}
+
+/**
+ * Factory for the slash-command labels. Never call at module load — invoke it at
+ * use time (via `getLabels`, wired to a `useT()`-backed ref) so a live language
+ * switch is reflected the next time the `/` menu opens.
+ */
+export function getSlashCommands(t: Messages): SlashCommandLabels {
+  return {
+    linkSection: t.editor.slash.linkSection,
+    linkSectionDescription: t.editor.slash.linkSectionDescription,
+  }
+}
+
 export interface SlashCommandsOptions {
   onLinkSection: (editor: Editor) => void
+  // Read fresh labels each time the menu builds its items (see getSlashCommands).
+  getLabels: () => SlashCommandLabels
 }
 
 // Position the popup just below the caret, clamped to the viewport.
@@ -46,11 +66,17 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
   addOptions() {
     return {
       onLinkSection: () => {},
+      // English fallback; the editor overrides this with a `useT()`-backed getter.
+      getLabels: () => ({
+        linkSection: 'Link section',
+        linkSectionDescription: 'Link to another section',
+      }),
     }
   },
 
   addProseMirrorPlugins() {
     const onLinkSection = this.options.onLinkSection
+    const getLabels = this.options.getLabels
     return [
       Suggestion<SlashCommandItem>({
         editor: this.editor,
@@ -62,10 +88,11 @@ export const SlashCommands = Extension.create<SlashCommandsOptions>({
           return $from.parent.type.name !== 'codeBlock'
         },
         items: ({ query }) => {
+          const labels = getLabels()
           const all: SlashCommandItem[] = [
             {
-              title: 'Link section',
-              description: 'Link to another section',
+              title: labels.linkSection,
+              description: labels.linkSectionDescription,
               run: (editor) => onLinkSection(editor),
             },
           ]

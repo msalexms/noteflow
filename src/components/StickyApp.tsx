@@ -5,6 +5,7 @@ import { resolveColorVar } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
+import { useT } from '../i18n/useT'
 import type { NoteSection } from '../types'
 
 const FOLDED_W = 220
@@ -19,6 +20,7 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, on
   isPinned?: boolean
   onTogglePin?: () => void
 }) {
+  const t = useT()
   return (
     <div
       className="h-8 bg-surface-0 border-b border-border/40 flex items-center justify-between px-2 cursor-default select-none"
@@ -42,7 +44,7 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, on
                 : 'text-text-muted hover:text-text hover:bg-surface-2'
             }`}
             onClick={onTogglePin}
-            title={isPinned ? 'Always on top: on' : 'Always on top: off'}
+            title={isPinned ? t.sticky.alwaysOnTopOn : t.sticky.alwaysOnTopOff}
           >
             {isPinned ? <Pin size={12} /> : <PinOff size={12} />}
           </button>
@@ -50,21 +52,21 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, on
         <button
           className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={onFold}
-          title="Fold Sticky Note"
+          title={t.sticky.fold}
         >
           <ChevronUp size={12} />
         </button>
         <button
           className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={() => window.noteflow.minimize()}
-          title="Minimize Sticky Note"
+          title={t.sticky.minimize}
         >
           <Minus size={12} />
         </button>
         <button
           className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
           onClick={() => window.noteflow.close()}
-          title="Close Sticky Note"
+          title={t.sticky.close}
         >
           <X size={14} />
         </button>
@@ -80,6 +82,7 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
   colorVar: string
   onUnfold: () => void
 }) {
+  const t = useT()
   return (
     <div
       className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-0 rounded-lg overflow-hidden border border-border/40"
@@ -102,21 +105,21 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
         <button
           className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={onUnfold}
-          title="Unfold Sticky Note"
+          title={t.sticky.unfold}
         >
           <ChevronDown size={12} />
         </button>
         <button
           className="p-1 rounded-full text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
           onClick={() => window.noteflow.minimize()}
-          title="Minimize"
+          title={t.sticky.minimizeShort}
         >
           <Minus size={12} />
         </button>
         <button
           className="p-1 rounded-full text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
           onClick={() => window.noteflow.close()}
-          title="Close"
+          title={t.sticky.closeShort}
         >
           <X size={14} />
         </button>
@@ -126,6 +129,7 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
 }
 
 export function StickyApp() {
+  const t = useT()
   const [noteId, setNoteId] = useState<string | null>(null)
   const [sectionId, setSectionId] = useState<string | null>(null)
   const [rawContent, setRawContent] = useState('')
@@ -226,7 +230,7 @@ export function StickyApp() {
       const sections = await decryptSections(note.encryption, unlockPassword)
       setUnlockedSections(sections)
     } catch {
-      setUnlockError('Wrong password. Try again.')
+      setUnlockError(t.encryption.wrongPassword)
     } finally {
       setUnlockLoading(false)
     }
@@ -238,9 +242,9 @@ export function StickyApp() {
   if ((isLoading && notes.length === 0) || !noteId || !sectionId) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar noteTitle="Loading..." colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={t.common.loading} colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-xs font-mono text-text-muted animate-pulse">Loading sticky note...</div>
+          <div className="text-xs font-mono text-text-muted animate-pulse">{t.sticky.loadingSticky}</div>
         </div>
       </div>
     )
@@ -250,17 +254,17 @@ export function StickyApp() {
   if (note?.encryption && !unlockedSections) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
-        <StickyTitleBar noteTitle={note.title || 'Untitled'} colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={note.title || t.common.untitled} colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-4">
           <Lock size={20} className="text-text-muted opacity-30" />
-          <p className="text-xs font-mono text-text-muted text-center">This note is encrypted</p>
+          <p className="text-xs font-mono text-text-muted text-center">{t.encryption.noteEncrypted}</p>
           <input
             ref={passwordRef}
             type="password"
             value={unlockPassword}
             onChange={(e) => { setUnlockPassword(e.target.value); setUnlockError('') }}
             onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
-            placeholder="Enter password"
+            placeholder={t.encryption.enterPassword}
             className="w-full bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
             autoComplete="off"
           />
@@ -273,7 +277,7 @@ export function StickyApp() {
             className="flex items-center gap-1.5 w-full justify-center px-3 py-1.5 text-xs font-mono bg-text text-surface-0 rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
             {unlockLoading && <Loader2 size={11} className="animate-spin" />}
-            Unlock
+            {t.encryption.unlock}
           </button>
         </div>
       </div>
@@ -283,10 +287,10 @@ export function StickyApp() {
   if (!note || !section) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar noteTitle="Not Found" colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={t.sticky.notFound} colorVar="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
-          <div className="text-sm font-mono text-red-400 mb-2">Note not found</div>
-          <div className="text-xs font-mono text-text-muted">It may have been deleted.</div>
+          <div className="text-sm font-mono text-red-400 mb-2">{t.sticky.noteNotFound}</div>
+          <div className="text-xs font-mono text-text-muted">{t.sticky.mayHaveBeenDeleted}</div>
         </div>
       </div>
     )
@@ -364,7 +368,7 @@ export function StickyApp() {
       {isReadOnly && (
         <div className="flex items-center gap-1 px-2 py-1 bg-amber-500/10 border-b border-amber-500/20">
           <Lock size={9} className="text-amber-400 flex-shrink-0" />
-          <span className="text-[10px] font-mono text-amber-400/80">read-only</span>
+          <span className="text-[10px] font-mono text-amber-400/80">{t.sticky.readOnly}</span>
         </div>
       )}
       <div className="flex-1 overflow-hidden mr-1" onKeyDown={(e) => e.stopPropagation()}>
@@ -384,7 +388,7 @@ export function StickyApp() {
               key={`${note.id}-${section.id}`}
               content={section.content ?? ''}
               onChange={handleContentChange}
-              placeholder="Start writing..."
+              placeholder={t.sticky.startWriting}
               hideToolbar={true}
             />
           </div>

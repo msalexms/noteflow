@@ -3,7 +3,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPlus, Folder, FolderOpen, X, Plus, Timer, LayoutGrid } from 'lucide-react'
-import { format, isToday, isYesterday } from 'date-fns'
+import { isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
@@ -13,6 +13,10 @@ import { NoteGroupHeader } from './NoteGroupHeader'
 import { NoteFolderHeader } from './NoteFolderHeader'
 import { useSidebarGroups, type SidebarFolder } from './useSidebarGroups'
 import { SectionTabsRow } from './SectionTabsRow'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
+import { formatDate } from '../../i18n/formatDate'
+import type { Messages } from '../../i18n'
 import type { GroupColor, Note } from '../../types'
 import type { TagColorMap } from '../../lib/tagColors'
 
@@ -20,20 +24,20 @@ interface SidebarProps {
   onCollapse: () => void
 }
 
-function formatNoteDate(iso: string): string {
+function formatNoteDate(iso: string, t: Messages): string {
   const d = new Date(iso)
-  if (isToday(d)) return format(d, 'HH:mm')
-  if (isYesterday(d)) return 'Yesterday'
-  return format(d, 'MMM d')
+  if (isToday(d)) return formatDate(d, 'HH:mm')
+  if (isYesterday(d)) return t.sidebar.yesterday
+  return formatDate(d, 'MMM d')
 }
 
-function formatExpiry(iso: string): string {
+function formatExpiry(iso: string, t: Messages): string {
   const diffMs = new Date(iso).getTime() - Date.now()
-  if (diffMs <= 0) return 'expiring soon'
+  if (diffMs <= 0) return t.sidebar.expiringSoon
   const diffH = Math.floor(diffMs / (1000 * 60 * 60))
-  if (diffH < 1) return `expires in ${Math.ceil(diffMs / (1000 * 60))}m`
-  if (diffH < 24) return `expires in ${diffH}h`
-  return `expires in ${Math.floor(diffH / 24)}d`
+  if (diffH < 1) return tf(t.sidebar.expiresInMinutes, { m: Math.ceil(diffMs / (1000 * 60)) })
+  if (diffH < 24) return tf(t.sidebar.expiresInHours, { h: diffH })
+  return tf(t.sidebar.expiresInDays, { d: Math.floor(diffH / 24) })
 }
 
 function renderHighlightedText(text: string, query: string) {
@@ -108,6 +112,7 @@ const NoteRow = memo(function NoteRow({
   sectionTagColors,
   handlers,
 }: NoteRowProps) {
+  const t = useT()
   return (
     <li
       style={{ position: 'relative' }}
@@ -139,17 +144,17 @@ const NoteRow = memo(function NoteRow({
             : {}),
           ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
-        title="Ctrl/Cmd + click to open side by side"
+        title={t.sidebar.openSideBySide}
       >
         <div className="flex items-center gap-1 min-w-0">
           {note.encryption && <Lock size={9} className="text-amber-400 flex-shrink-0" />}
-          {note.expiresAt && <span title={formatExpiry(note.expiresAt)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
+          {note.expiresAt && <span title={formatExpiry(note.expiresAt, t)} className="flex-shrink-0 flex items-center"><Timer size={9} className="text-text-muted/60" /></span>}
           <span className={`text-[13px] font-mono font-medium truncate flex-1
             ${isActive ? 'text-text' : 'text-text/80'}`}>
-            {renderHighlightedText(note.title || 'Untitled', searchQuery)}
+            {renderHighlightedText(note.title || t.common.untitled, searchQuery)}
           </span>
           <span className="text-xs font-mono text-text-muted/50 flex-shrink-0 ml-1">
-            {formatNoteDate(note.updated)}
+            {formatNoteDate(note.updated, t)}
           </span>
         </div>
         <SectionTabsRow
@@ -168,6 +173,7 @@ const NoteRow = memo(function NoteRow({
 })
 
 export function Sidebar({ onCollapse }: SidebarProps) {
+  const t = useT()
   const rawNotes = useNotesStore((s) => s.notes)
   const activeNoteId = useNotesStore((s) => s.activeNoteId)
   const noteViewId = useNotesStore((s) => s.noteViewId)
@@ -761,7 +767,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     className="w-full text-left pl-[26px] pr-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
                   >
                     <Plus size={10} />
-                    New note
+                    {t.common.newNote}
                   </button>
                 </li>
               )}
@@ -860,7 +866,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search... or #section"
+            placeholder={t.sidebar.searchPlaceholder}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
@@ -871,7 +877,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           {hasSearchFilter && (
             <button
               onClick={() => setSearchQuery('')}
-              title="Clear search"
+              title={t.sidebar.clearSearch}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <X size={11} />
@@ -880,7 +886,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         </div>
         <button
           onClick={onCollapse}
-          title="Collapse sidebar (Ctrl+')"
+          title={t.sidebar.collapseSidebar}
           className="flex-shrink-0 p-1.5 rounded text-text-muted/50 hover:text-text-muted
                      hover:bg-surface-2 transition-colors"
         >
@@ -894,16 +900,16 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           <button
             onClick={() => createNote()}
             onContextMenu={(e) => { e.preventDefault(); setNewNoteCtx({ x: e.clientX, y: e.clientY }) }}
-            title="New note (Ctrl+N) · Right-click for temporary note"
+            title={t.sidebar.newNoteTooltip}
             className="flex-1 py-1.5 rounded text-xs font-mono transition-all
                        bg-text/[0.12] text-text border border-text/20
                        hover:bg-text/[0.18] hover:border-text/30"
           >
-            + New note
+            {t.sidebar.newNoteButton}
           </button>
           <button
             onClick={() => createTempNote()}
-            title="New temporary note (24h)"
+            title={t.sidebar.newTempNoteTooltip}
             className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
                        hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
           >
@@ -911,7 +917,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
           </button>
           <button
             onClick={() => { setNewGroupInput(true); setNewGroupName('') }}
-            title="New group"
+            title={t.sidebar.newGroup}
             className="flex-shrink-0 p-1.5 rounded text-text-muted/50 border border-border
                        hover:text-text-muted hover:bg-surface-2 hover:border-border transition-colors"
           >
@@ -935,7 +941,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }
             }}
             onBlur={() => { setNewGroupInput(false); setNewGroupName('') }}
-            placeholder="Group name…"
+            placeholder={t.common.groupNamePlaceholder}
             className="w-full px-2 py-1 text-xs font-mono bg-surface-1 border border-text/25 rounded outline-none text-text placeholder-text-muted/40 caret-text"
           />
         )}
@@ -945,13 +951,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
       <div className="px-3 pt-1.5 pb-0.5">
         <button
           onClick={() => setAllView(true)}
-          title="View all content"
+          title={t.sidebar.viewAllContent}
           className="w-full flex items-center justify-start gap-1.5 px-2 py-0.5 rounded text-xs font-mono
                      transition-colors hover:bg-surface-2"
           style={{ color: 'rgb(var(--text-muted))' }}
         >
           <LayoutGrid size={13} />
-          All content
+          {t.common.allContent}
         </button>
       </div>
 
@@ -960,7 +966,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-muted gap-2">
             <span className="text-2xl opacity-20">∅</span>
-            <span className="text-xs font-mono">{rawNotes.length > 0 ? 'No notes match current filters' : 'No notes'}</span>
+            <span className="text-xs font-mono">{rawNotes.length > 0 ? t.sidebar.noNotesMatch : t.sidebar.noNotes}</span>
           </div>
         ) : (
           <ul className="flex flex-col gap-0.5 px-2.5 pt-2 pb-8">
@@ -976,7 +982,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               return (
                 <>
                   <li className="px-1 pt-0.5 pb-0.5">
-                    <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">favorites</span>
+                    <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">{t.sidebar.favoritesHeader}</span>
                   </li>
                   {favoriteNotes.map((note) => {
                     const noteGroup = note.group ? groups.find((g) => g.id === note.group) ?? null : null
@@ -997,7 +1003,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                   <Fragment key={`group-${group.id}`}>
                     {isFirstGroup && (
                       <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-5">
-                        <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">groups</span>
+                        <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">{t.sidebar.groupsHeader}</span>
                       </li>
                     )}
                   <li
@@ -1104,7 +1110,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                                 if (e.key === 'Escape') { setNewFolderInput(null); setNewFolderName('') }
                               }}
                               onBlur={() => void commitNewFolder()}
-                              placeholder="Folder name…"
+                              placeholder={t.common.folderNamePlaceholder}
                               className="flex-1 text-[11.5px] font-mono bg-surface-1 border border-text/25 rounded px-1 outline-none text-text placeholder-text-muted/40"
                               onClick={(e) => e.stopPropagation()}
                             />
@@ -1119,7 +1125,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                                 className="w-full text-left px-2.5 py-2 text-xs font-mono text-text-muted hover:text-text flex items-center gap-1.5 transition-colors"
                               >
                                 <Plus size={10} />
-                                New note
+                                {t.common.newNote}
                               </button>
                             </li>
                           )}
@@ -1142,7 +1148,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 return (
                   <Fragment key={`note-${item.note.id}`}>
                     <li className="px-1 pt-0.5 pb-0.5 first:mt-0 mt-5">
-                      <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">notes</span>
+                      <span className="text-[10px] font-mono text-text-muted/50 uppercase tracking-widest">{t.sidebar.notesHeader}</span>
                     </li>
                     {renderNoteButton(item.note, null)}
                   </Fragment>
@@ -1166,7 +1172,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
           >
             <Timer size={12} />
-            Temporary note (24h)
+            {t.sidebar.tempNote24h}
           </button>
         </ContextMenu>
       )}
@@ -1186,7 +1192,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <LayoutGrid size={12} />
-              View group
+              {t.sidebar.viewGroup}
             </button>
             <div className="h-px bg-border my-1" />
             <button
@@ -1194,14 +1200,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Plus size={12} />
-              New note
+              {t.common.newNote}
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); startNewFolder(group.id) }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <FolderPlus size={12} />
-              New folder
+              {t.common.newFolder}
             </button>
             <div className="h-px bg-border my-1" />
             <button
@@ -1213,7 +1219,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
-              Rename group
+              {t.common.renameGroup}
             </button>
 
             {/* Color picker */}
@@ -1247,7 +1253,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               {group.archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
-              {group.archived ? 'Unarchive group' : 'Archive group'}
+              {group.archived ? t.common.unarchiveGroup : t.sidebar.archiveGroup}
             </button>
 
             <div className="h-px bg-border my-1" />
@@ -1256,9 +1262,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 e.stopPropagation()
                 setGroupContextMenu(null)
                 setModal({
-                  title: 'Delete group',
-                  message: `"${group.name}" will be deleted. Notes inside will become ungrouped.`,
-                  confirmLabel: 'Delete',
+                  title: t.sidebar.deleteGroup,
+                  message: tf(t.sidebar.deleteGroupMessage, { name: group.name }),
+                  confirmLabel: t.common.delete,
                   danger: true,
                   onConfirm: async () => {
                     setModal(null)
@@ -1274,7 +1280,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
             >
               <Trash2 size={12} />
-              Delete group
+              {t.sidebar.deleteGroup}
             </button>
           </ContextMenu>
         )
@@ -1295,7 +1301,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <Plus size={12} />
-              New note
+              {t.common.newNote}
             </button>
             <div className="h-px bg-border my-1" />
             <button
@@ -1307,7 +1313,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               }}
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
-              Rename folder
+              {t.common.renameFolder}
             </button>
             <div className="h-px bg-border my-1" />
             <button
@@ -1315,9 +1321,9 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                 e.stopPropagation()
                 setFolderContextMenu(null)
                 setModal({
-                  title: 'Delete folder',
-                  message: `"${folder.name}" will be deleted. Notes inside will move to the group root.`,
-                  confirmLabel: 'Delete',
+                  title: t.common.deleteFolder,
+                  message: tf(t.common.deleteFolderMessage, { name: folder.name }),
+                  confirmLabel: t.common.delete,
                   danger: true,
                   onConfirm: () => { setModal(null); deleteFolder(folder.id) },
                 })
@@ -1325,7 +1331,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-red-400 hover:bg-red-400/10 flex items-center gap-2 transition-colors"
             >
               <Trash2 size={12} />
-              Delete folder
+              {t.common.deleteFolder}
             </button>
           </ContextMenu>
         )
@@ -1339,10 +1345,12 @@ export function Sidebar({ onCollapse }: SidebarProps) {
             ${showArchived ? 'text-text' : 'text-text-muted hover:text-text'}`}
         >
           <Archive size={10} />
-          {showArchived ? 'Hide archived' : 'Show archived'}
+          {showArchived ? t.sidebar.hideArchived : t.sidebar.showArchived}
         </button>
         <span className="text-xs font-mono text-text-muted/40">
-          {notes.length}{hasActiveFilters ? ` / ${scopedTotal}` : ''} notes
+          {hasActiveFilters
+            ? tf(t.sidebar.notesCountFiltered, { count: notes.length, total: scopedTotal })
+            : tf(t.sidebar.notesCount, { count: notes.length })}
         </span>
       </div>
     </div>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Cloud, CloudOff, ExternalLink, Github, Loader, RefreshCw, Unlink } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
+import { plural, tf } from '../../i18n/format'
+import { useT } from '../../i18n/useT'
 
 interface SyncStatus {
   enabled: boolean
@@ -14,6 +16,7 @@ interface SyncStatus {
 type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling'
 
 export function SyncPanel() {
+  const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
   const [status, setStatus] = useState<SyncStatus | null>(null)
@@ -39,13 +42,13 @@ export function SyncPanel() {
         await loadNotes()
         setStep('idle')
       } else {
-        setError(result.error ?? 'Authorization failed')
+        setError(result.error ?? t.settings.sync.authFailed)
         setUserCode(null)
         setStep('idle')
       }
     })
     return unsub
-  }, [loadNotes])
+  }, [loadNotes, t])
 
   // If the user closes the panel mid device-flow, cancel the pending auth.
   useEffect(() => {
@@ -64,7 +67,7 @@ export function SyncPanel() {
       setVerificationUri(result.verificationUri)
       window.noteflow.openUrl(result.verificationUri)
     } else {
-      setError(result.error ?? 'Failed to start authorization')
+      setError(result.error ?? t.settings.sync.failedToStart)
       setStep('idle')
     }
   }
@@ -104,7 +107,7 @@ export function SyncPanel() {
           {status.connected ? (
             <>
               <Cloud size={12} className="text-green-400" />
-              <span className="text-xs font-mono text-green-400">Connected</span>
+              <span className="text-xs font-mono text-green-400">{t.settings.sync.connected}</span>
               <span className="text-xs font-mono text-text-muted">·</span>
               <a
                 href="#"
@@ -121,7 +124,7 @@ export function SyncPanel() {
           ) : (
             <>
               <CloudOff size={12} className="text-text-muted" />
-              <span className="text-xs font-mono text-text-muted">Not connected</span>
+              <span className="text-xs font-mono text-text-muted">{t.settings.sync.notConnected}</span>
             </>
           )}
         </div>
@@ -129,7 +132,7 @@ export function SyncPanel() {
 
       {status?.lastSync && (
         <p className="text-[11px] font-mono text-text-muted">
-          Last sync: {new Date(status.lastSync).toLocaleString()}
+          {tf(t.settings.sync.lastSync, { time: new Date(status.lastSync).toLocaleString() })}
         </p>
       )}
 
@@ -148,8 +151,8 @@ export function SyncPanel() {
             : 'bg-green-500/10 border border-green-500/30 text-green-400'
         }`}>
           {pullResult.pulled === 0
-            ? 'Already up to date'
-            : `Pulled ${pullResult.pulled} note${pullResult.pulled !== 1 ? 's' : ''}`}
+            ? t.settings.sync.alreadyUpToDate
+            : plural(t.settings.sync.pulled, pullResult.pulled)}
           {pullResult.errors.length > 0 && (
             <div className="mt-1 text-[11px] text-red-400">{pullResult.errors.join(', ')}</div>
           )}
@@ -161,7 +164,7 @@ export function SyncPanel() {
         <div className="space-y-4">
           <div>
             <p className="text-[11px] font-mono text-text-muted mb-3">
-              Go to{' '}
+              {t.settings.sync.goToPrefix}
               <a
                 href="#"
                 onClick={(e) => {
@@ -171,8 +174,8 @@ export function SyncPanel() {
                 className="text-text hover:underline"
               >
                 github.com/login/device
-              </a>{' '}
-              and enter this code:
+              </a>
+              {t.settings.sync.goToSuffix}
             </p>
             <div className="flex items-center justify-center py-3">
               <span className="text-2xl font-mono font-bold text-text tracking-widest bg-surface-0 border border-border px-6 py-3 rounded-lg">
@@ -182,7 +185,7 @@ export function SyncPanel() {
           </div>
           <div className="flex items-center gap-2 text-text-muted">
             <Loader size={12} className="animate-spin flex-shrink-0" />
-            <span className="text-[11px] font-mono">Waiting for authorization...</span>
+            <span className="text-[11px] font-mono">{t.settings.sync.waitingAuth}</span>
           </div>
           <div className="flex gap-2">
             <button
@@ -190,13 +193,13 @@ export function SyncPanel() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
             >
               <ExternalLink size={11} />
-              Open browser
+              {t.settings.sync.openBrowser}
             </button>
             <button
               onClick={handleCancel}
               className="px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors"
             >
-              Cancel
+              {t.common.cancel}
             </button>
           </div>
         </div>
@@ -206,7 +209,7 @@ export function SyncPanel() {
       {step === 'completing' && !userCode && (
         <div className="flex items-center gap-2 text-text-muted">
           <Loader size={12} className="animate-spin" />
-          <span className="text-xs font-mono">Connecting...</span>
+          <span className="text-xs font-mono">{t.settings.sync.connecting}</span>
         </div>
       )}
 
@@ -223,7 +226,7 @@ export function SyncPanel() {
             ) : (
               <RefreshCw size={11} />
             )}
-            Sync now
+            {t.settings.sync.syncNow}
           </button>
           <button
             onClick={handleDisconnect}
@@ -231,7 +234,7 @@ export function SyncPanel() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
           >
             <Unlink size={11} />
-            Disconnect
+            {t.settings.sync.disconnect}
           </button>
         </div>
       )}
@@ -240,12 +243,11 @@ export function SyncPanel() {
       {status && !status.connected && !userCode && step !== 'completing' && (
         <div className="space-y-3 pt-1">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            Sync notes across machines via a private GitHub repository.
-            The repo will be created automatically if it doesn&apos;t exist.
+            {t.settings.sync.setupDesc}
           </p>
           <div>
             <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              Repository name
+              {t.settings.sync.repoName}
             </label>
             <input
               type="text"
@@ -256,7 +258,7 @@ export function SyncPanel() {
               className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
             />
             <p className="text-[11px] font-mono text-text-muted/60 mt-1">
-              Will be created as private if it doesn&apos;t exist.
+              {t.settings.sync.repoHint}
             </p>
           </div>
           <button
@@ -269,7 +271,7 @@ export function SyncPanel() {
             ) : (
               <Github size={11} />
             )}
-            Connect with GitHub
+            {t.settings.sync.connectWithGitHub}
           </button>
         </div>
       )}
@@ -278,7 +280,7 @@ export function SyncPanel() {
       {!status && (
         <div className="flex items-center gap-2 text-text-muted">
           <Loader size={12} className="animate-spin" />
-          <span className="text-xs font-mono">Loading...</span>
+          <span className="text-xs font-mono">{t.common.loading}</span>
         </div>
       )}
     </div>

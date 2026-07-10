@@ -6,6 +6,8 @@ import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { UI_SCALES } from '../../stores/themeStore'
 import type { HeadingLevel } from '../../stores/themeStore'
 import type { Theme } from '../../lib/themes'
+import { tf } from '../../i18n/format'
+import { useT } from '../../i18n/useT'
 
 // Each heading level follows a theme var until the user overrides it.
 const HEADING_LEVELS: { level: HeadingLevel; label: string; themeVar: '--accent' | '--cyan' | '--text' }[] = [
@@ -57,10 +59,11 @@ export function AppearancePanel() {
   const changeUiScale = useThemeStore((s) => s.changeUiScale)
   const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
   const setPrefer3D = useBrainSettingsStore((s) => s.setPrefer3D)
+  const t = useT()
 
   const [showAllThemes, setShowAllThemes] = useState(false)
 
-  const theme = THEMES.find((t) => t.id === activeThemeId) ?? THEMES[0]
+  const theme = THEMES.find((th) => th.id === activeThemeId) ?? THEMES[0]
   const effectiveFontId = fontOverride ?? theme.font
   const effectiveAccent = accentOverride ?? theme.vars['--accent']
   const fonts = Object.values(APP_FONTS)
@@ -77,17 +80,17 @@ export function AppearancePanel() {
   const atMinScale = uiScale <= UI_SCALES[0]
   const atMaxScale = uiScale >= UI_SCALES[UI_SCALES.length - 1]
 
-  function renderThemeCard(t: Theme) {
-    const selected = t.id === activeThemeId
+  function renderThemeCard(th: Theme) {
+    const selected = th.id === activeThemeId
     return (
       <button
-        key={t.id}
-        onClick={() => setTheme(t.id)}
+        key={th.id}
+        onClick={() => setTheme(th.id)}
         className="relative text-left rounded-md border p-2 transition-all"
         style={{
-          background: `rgb(${t.vars['--bg-1']})`,
-          borderColor: selected ? `rgb(${t.vars['--accent']})` : `rgb(${t.vars['--border']})`,
-          boxShadow: selected ? `0 0 0 1px rgb(${t.vars['--accent']})` : undefined,
+          background: `rgb(${th.vars['--bg-1']})`,
+          borderColor: selected ? `rgb(${th.vars['--accent']})` : `rgb(${th.vars['--border']})`,
+          boxShadow: selected ? `0 0 0 1px rgb(${th.vars['--accent']})` : undefined,
         }}
       >
         <div className="flex items-center gap-1 mb-1.5">
@@ -95,15 +98,15 @@ export function AppearancePanel() {
             <span
               key={v}
               className="w-3.5 h-3.5 rounded-full border"
-              style={{ background: `rgb(${t.vars[v]})`, borderColor: `rgb(${t.vars['--border']})` }}
+              style={{ background: `rgb(${th.vars[v]})`, borderColor: `rgb(${th.vars['--border']})` }}
             />
           ))}
         </div>
         <div className="flex items-center justify-between gap-1">
-          <span className="text-[11px] truncate" style={{ color: `rgb(${t.vars['--text']})`, fontFamily: APP_FONTS[t.font]?.stack }}>
-            {t.label}
+          <span className="text-[11px] truncate" style={{ color: `rgb(${th.vars['--text']})`, fontFamily: APP_FONTS[th.font]?.stack }}>
+            {th.label}
           </span>
-          {selected && <Check size={11} style={{ color: `rgb(${t.vars['--accent']})` }} className="flex-shrink-0" />}
+          {selected && <Check size={11} style={{ color: `rgb(${th.vars['--accent']})` }} className="flex-shrink-0" />}
         </div>
       </button>
     )
@@ -115,7 +118,7 @@ export function AppearancePanel() {
       <div className="flex-1 space-y-5">
         {/* Theme */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Theme</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.theme}</div>
           <div className="grid grid-cols-2 gap-2">
             {primaryThemes.map(renderThemeCard)}
           </div>
@@ -131,7 +134,7 @@ export function AppearancePanel() {
                 className="mt-2 flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
                 <ChevronDown size={11} className={`transition-transform ${showAllThemes ? 'rotate-180' : ''}`} />
-                {showAllThemes ? 'Fewer themes' : `More themes (${moreThemes.length})`}
+                {showAllThemes ? t.settings.appearance.fewerThemes : tf(t.settings.appearance.moreThemes, { count: moreThemes.length })}
               </button>
             </>
           )}
@@ -140,13 +143,13 @@ export function AppearancePanel() {
         {/* Font */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Font</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.font}</div>
             {fontOverride !== null && (
               <button
                 onClick={() => setFontOverride(null)}
                 className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
-                <RotateCcw size={9} /> Theme default
+                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
               </button>
             )}
           </div>
@@ -164,7 +167,7 @@ export function AppearancePanel() {
                     isEffective ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
                   }`}
                   style={{ fontFamily: f.stack }}
-                  title={isOverride ? 'Selected' : f.label}
+                  title={isOverride ? t.settings.appearance.fontSelected : f.label}
                 >
                   <div className="text-sm text-text leading-none mb-1">Ag</div>
                   <div className={`text-[11px] truncate ${isEffective ? 'text-accent' : 'text-text-muted'}`}>{f.label}</div>
@@ -177,13 +180,13 @@ export function AppearancePanel() {
         {/* Accent */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Accent</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.accent}</div>
             {accentOverride !== null && (
               <button
                 onClick={() => setAccentOverride(null)}
                 className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
-                <RotateCcw size={9} /> Theme default
+                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
               </button>
             )}
           </div>
@@ -208,7 +211,7 @@ export function AppearancePanel() {
             {/* Custom colour picker */}
             <label
               className="w-7 h-7 rounded-full border border-dashed border-text-muted/50 flex items-center justify-center cursor-pointer hover:border-text-muted transition-colors relative overflow-hidden"
-              title="Custom colour"
+              title={t.settings.appearance.customColour}
               style={{ background: `conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)` }}
             >
               <input
@@ -224,13 +227,13 @@ export function AppearancePanel() {
         {/* Headings */}
         <section>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Headings</div>
+            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.headings}</div>
             {headingsOverridden && (
               <button
                 onClick={resetHeadingOverrides}
                 className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
               >
-                <RotateCcw size={9} /> Theme default
+                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
               </button>
             )}
           </div>
@@ -266,7 +269,7 @@ export function AppearancePanel() {
                     {/* Custom colour picker */}
                     <label
                       className="w-5 h-5 rounded-full border border-dashed border-text-muted/50 flex items-center justify-center cursor-pointer hover:border-text-muted transition-colors relative overflow-hidden"
-                      title="Custom colour"
+                      title={t.settings.appearance.customColour}
                       style={{ background: `conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)` }}
                     >
                       <input
@@ -280,7 +283,7 @@ export function AppearancePanel() {
                       <button
                         onClick={() => setHeadingOverride(l.level, null)}
                         className="text-text-muted hover:text-text transition-colors"
-                        title="Reset to theme default"
+                        title={t.settings.appearance.resetToThemeDefault}
                       >
                         <RotateCcw size={11} />
                       </button>
@@ -294,13 +297,13 @@ export function AppearancePanel() {
 
         {/* Text size */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Text size</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.textSize}</div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => changeUiScale(-1)}
               disabled={atMinScale}
               className="w-8 h-8 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Smaller"
+              title={t.settings.appearance.smaller}
             >
               <Minus size={14} />
             </button>
@@ -309,7 +312,7 @@ export function AppearancePanel() {
               onClick={() => changeUiScale(1)}
               disabled={atMaxScale}
               className="w-8 h-8 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Larger"
+              title={t.settings.appearance.larger}
             >
               <Plus size={14} />
             </button>
@@ -318,11 +321,11 @@ export function AppearancePanel() {
 
         {/* Brain view */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">Brain view</div>
+          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.brainView}</div>
           <div className="grid grid-cols-2 gap-1.5">
             {([
-              { value: true, label: '3D', desc: 'Immersive' },
-              { value: false, label: '2D', desc: 'Lightweight' },
+              { value: true, label: '3D', desc: t.settings.appearance.immersive },
+              { value: false, label: '2D', desc: t.settings.appearance.lightweight },
             ] as const).map((opt) => {
               const selected = prefer3D === opt.value
               return (
@@ -343,14 +346,14 @@ export function AppearancePanel() {
             })}
           </div>
           <p className="mt-2 text-[11px] leading-relaxed text-text-muted/80">
-            3D looks better but uses more resources. If the brain feels slow, switch to 2D.
+            {t.settings.appearance.brainViewHint}
           </p>
         </section>
       </div>
 
       {/* ── Live preview ─────────────────────────────────────────────────── */}
       <div className="w-[280px] flex-shrink-0 border-l border-border pl-4 flex flex-col gap-3">
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">Preview</div>
+        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.preview}</div>
         <div className="rounded-lg border border-border overflow-hidden bg-surface-0 shadow-inner">
           {/* fake titlebar */}
           <div className="flex items-center gap-1.5 px-2 py-1.5 bg-surface-2 border-b border-border">
@@ -367,20 +370,20 @@ export function AppearancePanel() {
             <div className="w-[42%] bg-surface-1 border-r border-border p-1.5 space-y-1">
               <div className="h-4 rounded bg-surface-2 border border-border" />
               <div className="px-1.5 py-1 rounded bg-text/[0.1] border border-text/15 text-text text-[8px] font-mono truncate">
-                Active note
+                {t.settings.appearance.previewActiveNote}
               </div>
-              <div className="px-1.5 py-1 text-text/70 text-[8px] font-mono truncate">Another note</div>
-              <div className="px-1.5 py-1 text-text/70 text-[8px] font-mono truncate">Third note</div>
+              <div className="px-1.5 py-1 text-text/70 text-[8px] font-mono truncate">{t.settings.appearance.previewAnotherNote}</div>
+              <div className="px-1.5 py-1 text-text/70 text-[8px] font-mono truncate">{t.settings.appearance.previewThirdNote}</div>
             </div>
             {/* editor */}
             <div className="flex-1 p-2 space-y-1.5 bg-surface-0 overflow-hidden">
-              <div className="font-bold text-[12px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[0])})` }}>Heading</div>
-              <div className="text-[10px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[1])})` }}>Subheading</div>
+              <div className="font-bold text-[12px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[0])})` }}>{t.settings.appearance.previewHeading}</div>
+              <div className="text-[10px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[1])})` }}>{t.settings.appearance.previewSubheading}</div>
               <div className="text-text/80 text-[8px] font-mono leading-relaxed">
-                The quick brown fox jumps over the lazy dog.
+                {t.settings.appearance.previewParagraph}
               </div>
               <span className="inline-block text-[8px] text-red font-mono bg-surface-0 border border-border rounded px-1">
-                inline code
+                {t.settings.appearance.previewInlineCode}
               </span>
             </div>
           </div>
@@ -389,21 +392,21 @@ export function AppearancePanel() {
         {/* current selection summary */}
         <div className="text-[11px] font-mono text-text-muted space-y-1 mt-auto">
           <div className="flex justify-between gap-2">
-            <span className="text-text-muted/60">Theme</span>
+            <span className="text-text-muted/60">{t.settings.appearance.theme}</span>
             <span className="text-text truncate">{theme.label}</span>
           </div>
           <div className="flex justify-between gap-2">
-            <span className="text-text-muted/60">Font</span>
+            <span className="text-text-muted/60">{t.settings.appearance.font}</span>
             <span className="text-text truncate">
               {APP_FONTS[effectiveFontId]?.label}
-              {fontOverride === null && <span className="text-text-muted/50"> · theme</span>}
+              {fontOverride === null && <span className="text-text-muted/50"> · {t.settings.appearance.summaryTheme}</span>}
             </span>
           </div>
           <div className="flex justify-between gap-2 items-center">
-            <span className="text-text-muted/60">Accent</span>
+            <span className="text-text-muted/60">{t.settings.appearance.accent}</span>
             <span className="flex items-center gap-1.5 text-text">
               <span className="w-3 h-3 rounded-full border border-border" style={{ background: `rgb(${effectiveAccent})` }} />
-              {accentOverride === null ? <span className="text-text-muted/50">theme</span> : 'custom'}
+              {accentOverride === null ? <span className="text-text-muted/50">{t.settings.appearance.summaryTheme}</span> : t.settings.appearance.summaryCustom}
             </span>
           </div>
         </div>

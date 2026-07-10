@@ -1,7 +1,8 @@
 import { Check } from 'lucide-react'
-import { format } from 'date-fns'
 import { SectionTabsRow } from './Sidebar/SectionTabsRow'
 import { type NoteContextMenuRequest } from './NoteContextMenu'
+import { useT } from '../i18n/useT'
+import { formatDate } from '../i18n/formatDate'
 import type { SectionTagColorMap } from '../stores/sectionTagColorsStore'
 import type { Note, GroupColor } from '../types'
 
@@ -11,7 +12,7 @@ import type { Note, GroupColor } from '../types'
 export function formatCardDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return format(d, 'dd/MM/yyyy · HH:mm')
+  return formatDate(d, 'dd/MM/yyyy · HH:mm')
 }
 
 // ── Note card (shared by the group / all-content overviews) ─────────────────────
@@ -50,6 +51,7 @@ export function OverviewNoteCard({
   onReorderDragOver,
   onReorderDrop,
 }: NoteCardProps) {
+  const t = useT()
   const reorderable = Boolean(onReorderDrop)
   const selectable = Boolean(onToggleSelect)
   return (
@@ -80,7 +82,7 @@ export function OverviewNoteCard({
         onContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: null })
       }}
       className={`group relative text-left rounded-md border bg-surface-1 hover:bg-surface-2 transition-colors overflow-hidden p-3 pl-4 flex flex-col gap-2 min-h-[78px] ${reorderable ? 'cursor-grab active:cursor-grabbing' : ''} ${selected ? 'border-text/40 bg-text/[0.06] ring-1 ring-text/20' : 'border-border hover:border-text/25'}`}
-      title={note.title || 'Untitled'}
+      title={note.title || t.common.untitled}
     >
       {/* In-band reorder drop indicator (vertical bar on the relevant edge).
           Kept inside the card bounds because the card clips overflow. */}
@@ -113,7 +115,7 @@ export function OverviewNoteCard({
       )}
 
       <span className={`text-[13px] font-mono font-medium text-text/90 truncate ${selectable ? 'pr-6' : ''}`}>
-        {note.title || 'Untitled'}
+        {note.title || t.common.untitled}
       </span>
 
       <SectionTabsRow

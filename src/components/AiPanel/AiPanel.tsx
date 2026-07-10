@@ -7,6 +7,7 @@ import { ChatView } from './ChatView'
 import { RelatedView } from './RelatedView'
 import { LlmConfigView } from './LlmConfigView'
 import { ProfileFlow, ProfileSummary, findAiProfileNote } from './ProfileFlow'
+import { useT } from '../../i18n/useT'
 
 type Tab = PanelTab
 
@@ -17,6 +18,7 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
   const llmConfig = useAiChatStore((s) => s.llmConfig)
   const configLoaded = useAiChatStore((s) => s.configLoaded)
   const panelTab = useAiChatStore((s) => s.panelTab)
+  const t = useT()
 
   // Notes + groups are synced across machines; the local settings flag is not. So we treat the
   // synced profile note (a note in the "AI generated" group) as the source of truth, and only
@@ -73,30 +75,30 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
   }, [panelTab])
 
   const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
-    { id: 'chat', icon: <MessageSquare size={13} />, label: 'Chat' },
-    { id: 'related', icon: <Link2 size={13} />, label: 'Related' },
-    { id: 'profile', icon: <Sparkles size={13} />, label: 'Profile' },
+    { id: 'chat', icon: <MessageSquare size={13} />, label: t.aiPanel.tabs.chat },
+    { id: 'related', icon: <Link2 size={13} />, label: t.aiPanel.tabs.related },
+    { id: 'profile', icon: <Sparkles size={13} />, label: t.aiPanel.tabs.profile },
   ]
 
   return (
     <div className="flex flex-col h-full min-h-0 border-r border-border" style={{ background: 'rgb(var(--bg-1))' }}>
       {/* Tab bar */}
       <div className="flex-shrink-0 flex items-center gap-1 px-2 h-9 border-b border-border">
-        {TABS.map((t) => (
+        {TABS.map((item) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+            key={item.id}
+            onClick={() => setTab(item.id)}
             className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] font-mono transition-colors ${
-              tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text hover:bg-surface-2'
+              tab === item.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text hover:bg-surface-2'
             }`}
           >
-            {t.icon}
-            <span>{t.label}</span>
+            {item.icon}
+            <span>{item.label}</span>
           </button>
         ))}
         <button
           onClick={() => setTab('settings')}
-          title="AI provider"
+          title={t.aiPanel.providerTooltip}
           className={`ml-auto flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${
             tab === 'settings' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text hover:bg-surface-2'
           }`}
@@ -106,7 +108,7 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
         {onCollapse && (
           <button
             onClick={onCollapse}
-            title="Collapse AI panel"
+            title={t.aiPanel.collapse}
             className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text transition-colors"
           >
             <PanelLeftClose size={13} />

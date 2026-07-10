@@ -1,4 +1,5 @@
 import { ChevronRight, ChevronDown } from 'lucide-react'
+import { useT } from '../../i18n/useT'
 import type { NoteGroup } from '../../types'
 
 interface NoteGroupHeaderProps {
@@ -11,6 +12,7 @@ interface NoteGroupHeaderProps {
 }
 
 export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenGroupView, onContextMenu }: NoteGroupHeaderProps) {
+  const t = useT()
   return (
     <div
       className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors hover:bg-surface-3
@@ -24,7 +26,7 @@ export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenG
       />
       <span
         onClick={(e) => { e.stopPropagation(); onOpenGroupView() }}
-        title="Open group view"
+        title={t.common.openGroupView}
         className={`min-w-0 text-[11px] font-mono hover:text-text uppercase tracking-wider truncate transition-colors cursor-pointer
           ${collapsed ? 'text-text-muted font-normal' : 'text-text/75 font-medium'}`}
       >

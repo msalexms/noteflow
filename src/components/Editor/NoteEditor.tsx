@@ -13,7 +13,9 @@ import {
   Star, Trash2, Copy, Eye, Edit3, EyeOff,
   Plus, X, Check, Pencil, ExternalLink, Lock, RotateCcw, MoreHorizontal, Archive, LayoutGrid, LayoutTemplate, Timer,
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { formatDate } from '../../i18n/formatDate'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
 import { EncryptionModal } from '../EncryptionModal'
 import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
@@ -65,6 +67,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const setSectionTagColor = useSectionTagColorsStore((s) => s.setSectionTagColor)
   const clearSectionTagColor = useSectionTagColorsStore((s) => s.clearSectionTagColor)
   const { previewProps } = useSectionHoverPreview()
+  const t = useT()
 
   // Active section by id (not index — stable across reorders)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
@@ -301,13 +304,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
   const openDeleteNoteModal = useCallback(() => {
     if (!note) return
     setModal({
-      title: 'Delete note',
-      message: `"${note.title || 'Untitled'}" will be permanently deleted.`,
-      confirmLabel: 'Delete',
+      title: t.common.deleteNote,
+      message: tf(t.common.deleteNoteMessage, { title: note.title || t.common.untitled }),
+      confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => { setModal(null); deleteNote(note.id) },
     })
-  }, [note, deleteNote])
+  }, [note, deleteNote, t])
 
   const handleRawImageInsert = useCallback(async (files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
@@ -414,9 +417,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       const section = n.sections.find((s) => s.id === sectionId)
       if (!section) return
       setModal({
-        title: 'Delete section',
-        message: `"${section.name}" will be permanently deleted.`,
-        confirmLabel: 'Delete',
+        title: t.common.deleteSection,
+        message: tf(t.common.deleteSectionMessage, { name: section.name }),
+        confirmLabel: t.common.delete,
         danger: true,
         onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
       })
@@ -473,7 +476,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
       window.removeEventListener('noteflow:open-sticky-all', handleOpenStickyAll)
       window.removeEventListener('noteflow:in-note-search', handleInNoteSearch)
     }
-  }, [updateNote, isPaneActive])
+  }, [updateNote, isPaneActive, t])
 
   // Close the in-note search bar when the active section or note changes.
   // The Editor is recreated (key-based) so matches and decorations are gone.
@@ -486,8 +489,8 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-muted gap-3">
         <div className="text-4xl opacity-20 font-mono">_</div>
-        <p className="text-sm font-mono">No note selected</p>
-        <p className="text-xs opacity-50 font-mono">Ctrl+N to create one</p>
+        <p className="text-sm font-mono">{t.editor.noNoteSelected}</p>
+        <p className="text-xs opacity-50 font-mono">{t.editor.createHint}</p>
       </div>
     )
   }
@@ -710,9 +713,9 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
     const section = note?.sections.find((s) => s.id === sectionId)
     if (!section) return
     setModal({
-      title: 'Delete section',
-      message: `"${section.name}" will be permanently deleted.`,
-      confirmLabel: 'Delete',
+      title: t.common.deleteSection,
+      message: tf(t.common.deleteSectionMessage, { name: section.name }),
+      confirmLabel: t.common.delete,
       danger: true,
       onConfirm: () => { setModal(null); deleteSectionWithUndo(sectionId) },
     })
@@ -851,17 +854,17 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         >
           <div className="px-4 pt-3 pb-2 border-b border-border flex-shrink-0">
             <span className="text-xl font-bold font-mono text-text">
-              {note.title || 'Untitled'}
+              {note.title || t.common.untitled}
             </span>
           </div>
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
             <Lock size={28} className="opacity-20" />
-            <p className="text-sm font-mono">This note is encrypted</p>
+            <p className="text-sm font-mono">{t.editor.noteEncrypted}</p>
             <button
               onClick={() => setShowUnlockModal(true)}
               className="text-xs font-mono text-text hover:underline opacity-70 hover:opacity-100 transition-opacity"
             >
-              Click to unlock
+              {t.editor.clickToUnlock}
             </button>
           </div>
         </div>
@@ -920,10 +923,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           >
             <div className="flex items-center gap-2.5 px-4 pt-4 pb-3 border-b border-border">
               <LayoutTemplate size={15} className="text-text flex-shrink-0" />
-              <span className="text-sm font-mono font-semibold text-text">Save as template</span>
+              <span className="text-sm font-mono font-semibold text-text">{t.editor.saveAsTemplate}</span>
             </div>
             <div className="px-4 py-3">
-              <label className="text-[10px] font-mono text-text-muted uppercase tracking-widest">Template name</label>
+              <label className="text-[10px] font-mono text-text-muted uppercase tracking-widest">{t.editor.templateName}</label>
               <input
                 autoFocus
                 value={templateNameDraft}
@@ -933,7 +936,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   if (e.key === 'Enter') { e.preventDefault(); void saveAsTemplate() }
                   if (e.key === 'Escape') { e.preventDefault(); setTemplateNameDraft(null) }
                 }}
-                placeholder="Untitled template"
+                placeholder={t.editor.untitledTemplate}
                 className="mt-1.5 w-full bg-surface-2 border border-border rounded px-2.5 py-1.5
                            text-xs font-mono text-text focus:outline-none focus:border-text/30"
               />
@@ -944,7 +947,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 className="px-3 py-1.5 rounded text-xs font-mono text-text-muted
                            border border-border hover:border-text/25 hover:text-text transition-colors"
               >
-                Cancel
+                {t.common.cancel}
               </button>
               <button
                 onClick={() => void saveAsTemplate()}
@@ -952,7 +955,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 className="px-3 py-1.5 rounded text-xs font-mono bg-surface-2 text-text border border-text/20
                            hover:bg-surface-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Save
+                {t.common.save}
               </button>
             </div>
           </div>
@@ -993,7 +996,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 <div
                   key={section.id}
                   draggable
-                  title="Drag to reorder section"
+                  title={t.editor.dragToReorder}
                   onDragStart={(e) => handleDragStart(e, section.id)}
                   onDragOver={(e) => handleDragOver(e, section.id)}
                   onDrop={(e) => handleDrop(e, section.id)}
@@ -1055,7 +1058,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       style={isActive ? { color: colorStyle.color } : undefined}
                     >
                       {section.aiHidden && (
-                        <EyeOff size={11} className="opacity-60 flex-shrink-0" aria-label="Hidden from AI" />
+                        <EyeOff size={11} className="opacity-60 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
                       )}
                       {section.name}
                     </button>
@@ -1069,7 +1072,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
               {!tabsOverflow && (
                 <button
                   onClick={handleAddSection}
-                  title="Add section (Ctrl+T)"
+                  title={t.editor.addSection}
                   className="self-center ml-1 flex items-center justify-center w-6 h-6 rounded flex-shrink-0
                              text-text-muted/60 hover:text-text-muted hover:bg-surface-3
                              border border-transparent hover:border-border transition-colors"
@@ -1091,7 +1094,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           {tabsOverflow && (
             <button
               onClick={handleAddSection}
-              title="Add section (Ctrl+T)"
+              title={t.editor.addSection}
               className="self-center flex items-center justify-center w-6 h-6 rounded flex-shrink-0
                          text-text-muted/60 hover:text-text-muted hover:bg-surface-3
                          border border-transparent hover:border-border transition-colors"
@@ -1105,14 +1108,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
               onClick={() => setNoteView(note.id)}
-              title="Note overview — all sections at a glance"
+              title={t.editor.noteOverview}
               className="p-1.5 rounded text-xs text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
             >
               <LayoutGrid size={13} />
             </button>
             <button
               onClick={() => updateNote(note.id, { favorited: !note.favorited })}
-              title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
+              title={note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
               className={`p-1.5 rounded text-xs transition-colors
                 ${note.favorited ? 'text-accent-3 bg-accent-3/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
             >
@@ -1121,7 +1124,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             <div className="relative">
               <button
                 onClick={(e) => { e.stopPropagation(); setSectionMenuOpen((prev) => !prev) }}
-                title="Section options"
+                title={t.editor.sectionOptions}
                 className={`p-1.5 rounded text-xs transition-colors
                   ${sectionMenuOpen
                     ? 'text-text bg-surface-3 border border-text/20'
@@ -1140,14 +1143,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                   >
                     {rawMode ? <Edit3 size={13} /> : <Eye size={13} />}
-                    {rawMode ? 'Editor mode' : 'Raw markdown mode'}
+                    {rawMode ? t.editor.menu.editorMode : t.editor.menu.rawMode}
                   </button>
                   <button
                     onClick={() => { handleCopyAllText(); setSectionMenuOpen(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                   >
                     <Copy size={13} />
-                    Copy section text
+                    {t.editor.menu.copySectionText}
                   </button>
                   {!(note.encryption && !sessionPasswords[note.id]) && (
                     <button
@@ -1155,22 +1158,22 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                         setSectionMenuOpen(false)
                         setTemplateNameDraft(note.title || 'Untitled template')
                       }}
-                      title="Save this note (title + sections) as a reusable template"
+                      title={t.editor.saveAsTemplateHint}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                     >
                       <LayoutTemplate size={13} />
-                      Save as template
+                      {t.editor.saveAsTemplate}
                     </button>
                   )}
                   <button
                     onClick={() => { handleToggleAiHidden(); setSectionMenuOpen(false) }}
                     title={activeSection?.aiHidden
-                      ? 'The AI will index and use this section again'
-                      : 'The AI will never index, read or reference this section'}
+                      ? t.editor.menu.showToAiHint
+                      : t.editor.menu.hideFromAiHint}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                   >
                     {activeSection?.aiHidden ? <Eye size={13} /> : <EyeOff size={13} />}
-                    {activeSection?.aiHidden ? 'Show to AI' : 'Hide from AI'}
+                    {activeSection?.aiHidden ? t.common.showToAI : t.common.hideFromAI}
                   </button>
                   <button
                     onClick={() => {
@@ -1182,14 +1185,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                   >
                     <ExternalLink size={13} />
-                    Open as sticky note
+                    {t.editor.menu.openAsSticky}
                   </button>
                   <button
                     onClick={() => { setSectionMenuOpen(false); void archiveNote(note.id) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                   >
                     <Archive size={13} />
-                    {note.archived ? 'Unarchive note' : 'Archive note'}
+                    {note.archived ? t.editor.menu.unarchiveNote : t.editor.menu.archiveNote}
                   </button>
                   {!note.encryption && (
                     <button
@@ -1197,7 +1200,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                     >
                       <Lock size={13} />
-                      Encrypt note
+                      {t.editor.menu.encryptNote}
                     </button>
                   )}
                   {note.encryption && sessionPasswords[note.id] && (
@@ -1206,7 +1209,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-3 transition-colors text-left"
                     >
                       <Lock size={13} />
-                      Remove encryption
+                      {t.editor.menu.removeEncryption}
                     </button>
                   )}
                   <div className="my-1 border-t border-border" />
@@ -1215,7 +1218,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-normal text-red/75 hover:text-red hover:bg-red/10 transition-colors text-left"
                   >
                     <Trash2 size={13} />
-                    Delete note
+                    {t.common.deleteNote}
                   </button>
                 </div>
               )}
@@ -1227,14 +1230,14 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
         {sectionUndo && sectionUndo.noteId === note.id && (
           <div className="mx-3 mt-2 px-3 py-2 rounded border border-amber-300/35 bg-amber-300/10 flex items-center justify-between gap-2">
             <span className="text-[11px] font-mono text-text-muted min-w-0 truncate">
-              Section "{sectionUndo.sectionName}" deleted
+              {tf(t.editor.sectionDeleted, { name: sectionUndo.sectionName })}
             </span>
             <button
               onClick={undoSectionDelete}
               className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border border-amber-300/45 text-amber-200 hover:bg-amber-300/15 transition-colors"
             >
               <RotateCcw size={10} />
-              Undo
+              {t.editor.undo}
             </button>
           </div>
         )}
@@ -1272,12 +1275,12 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                       : 'text-text border-text/25 bg-surface-2'
                   }`}
                 >
-                  Auto
+                  {t.editor.auto}
                 </button>
                 <div className="w-px h-4 bg-border/70 mx-0.5" />
                 <button
                   onClick={() => { handleStartRename(visibleColorPickerSection); setSectionColorPickerId(null) }}
-                  title="Rename section"
+                  title={t.editor.renameSection}
                   className="p-0.5 rounded text-text-muted/80 hover:text-text transition-colors"
                 >
                   <Pencil size={13} />
@@ -1285,7 +1288,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 {note.sections.length > 1 && (
                   <button
                     onClick={() => { handleDeleteSection(visibleColorPickerSection.id); setSectionColorPickerId(null) }}
-                    title="Delete section"
+                    title={t.common.deleteSection}
                     className="p-0.5 rounded text-text-muted/80 hover:text-red-400 transition-colors"
                   >
                     <Trash2 size={13} />
@@ -1309,7 +1312,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
             value={titleDraft}
             onChange={handleTitleChange}
             onBlur={handleTitleBlur}
-            placeholder="Untitled"
+            placeholder={t.common.untitled}
             className="w-full bg-transparent text-xl font-bold font-mono text-text
                        placeholder-text-muted/30 border-none outline-none caret-text"
           />
@@ -1318,13 +1321,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
 
         <div className="px-4 pb-2 flex-shrink-0 flex items-center gap-2">
           <span className="text-xs font-mono text-text-muted/50">
-            {format(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
+            {formatDate(new Date(note.updated), 'MMM d, yyyy · HH:mm')}
           </span>
           {note.expiresAt && (
             <span className="text-xs font-mono text-accent/70 flex items-center gap-1">
               <span className="text-text-muted/40">·</span>
               <Timer size={11} strokeWidth={2.5} />
-              Deletes {format(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm')}
+              {tf(t.editor.deletesAt, { date: formatDate(new Date(note.expiresAt), 'MMM d, yyyy · HH:mm') })}
             </span>
           )}
         </div>
@@ -1351,7 +1354,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                   e.preventDefault()
                   handleRawImageInsert(files)
                 }}
-                placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
+                placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 style={{
                   fontSize: `${fontSize}px`,
                   fontFamily: fontFamily === 'inter' ? "'Inter', sans-serif" : "'JetBrains Mono', 'Fira Code', monospace",
@@ -1374,7 +1377,7 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                 key={`${note.id}-${activeSection?.id ?? 'none'}`}
                 content={activeSection?.content ?? ''}
                 onChange={handleSectionContentChange}
-                placeholder={`${activeSection?.name ?? 'Section'} — start writing...`}
+                placeholder={tf(t.editor.sectionStartWriting, { name: activeSection?.name ?? t.editor.sectionFallback })}
                 fontSize={fontSize}
                 autoFocus={renamingId === null}
                 currentSectionId={activeSection?.id ?? null}

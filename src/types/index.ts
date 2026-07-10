@@ -277,6 +277,7 @@ export interface AccountStatus {
   email?: string
   entitlements: AccountEntitlements
   entitlementsFetchedAt?: string  // ISO — last successful entitlements fetch
+  aiCheckoutConfigured: boolean   // true when the build ships a NoteFlow AI checkout URL
 }
 
 // Extend window with our electron bridge
@@ -312,6 +313,9 @@ declare global {
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void
+      getLanguage: () => 'en' | 'es' | 'system'
+      setLanguage: (setting: 'en' | 'es' | 'system') => void
+      onLanguageChanged: (cb: (setting: 'en' | 'es' | 'system') => void) => () => void
       getLoginItem: () => Promise<{ openAtLogin: boolean }>
       setLoginItem: (enabled: boolean) => Promise<void>
       getSkillSync: () => Promise<{ enabled: boolean }>
@@ -362,6 +366,7 @@ declare global {
       accountVerifyOtp: (email: string, code: string) => Promise<{ ok: boolean; error?: string }>
       accountSignOut: () => Promise<{ ok: boolean; error?: string }>
       accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
+      accountOpenCheckout: (product: 'ai') => Promise<{ ok: boolean; error?: string }>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
       // AI / Semantic index

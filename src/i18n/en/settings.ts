@@ -1,0 +1,239 @@
+// Settings modal copy. English is the source of truth; es/settings.ts mirrors it
+// key-for-key (enforced by the `const es: Messages` annotation). One namespace per
+// panel so keys stay grouped and easy to find.
+export const settings = {
+  // Modal header.
+  title: 'Settings',
+
+  // Left-hand navigation labels, keyed by SettingsSection id.
+  nav: {
+    general: 'General',
+    appearance: 'Appearance',
+    editor: 'Editor',
+    templates: 'Templates',
+    startup: 'Startup',
+    sync: 'Sync',
+    data: 'Data',
+    ai: 'AI',
+    account: 'Account',
+    shortcuts: 'Keyboard shortcuts',
+    about: 'About',
+  },
+
+  general: {
+    language: 'Language',
+    languageHint: 'Language used across the NoteFlow interface',
+    // Option labels. `system` is translated; the language names are shown in
+    // their own language, so they are identical across locales.
+    system: 'System',
+    english: 'English',
+    spanish: 'Español',
+    // Secondary line under the "System" option showing the detected language.
+    detected: 'Detected: {lang}',
+  },
+
+  appearance: {
+    theme: 'Theme',
+    font: 'Font',
+    accent: 'Accent',
+    headings: 'Headings',
+    textSize: 'Text size',
+    brainView: 'Brain view',
+    preview: 'Preview',
+    // Reset-to-theme link shown next to Font / Accent / Headings.
+    themeDefault: 'Theme default',
+    fewerThemes: 'Fewer themes',
+    moreThemes: 'More themes ({count})',
+    fontSelected: 'Selected',
+    customColour: 'Custom colour',
+    resetToThemeDefault: 'Reset to theme default',
+    smaller: 'Smaller',
+    larger: 'Larger',
+    immersive: 'Immersive',
+    lightweight: 'Lightweight',
+    brainViewHint: '3D looks better but uses more resources. If the brain feels slow, switch to 2D.',
+    // Live preview mock content.
+    previewActiveNote: 'Active note',
+    previewAnotherNote: 'Another note',
+    previewThirdNote: 'Third note',
+    previewHeading: 'Heading',
+    previewSubheading: 'Subheading',
+    previewParagraph: 'The quick brown fox jumps over the lazy dog.',
+    previewInlineCode: 'inline code',
+    // Selection summary suffixes.
+    summaryTheme: 'theme',
+    summaryCustom: 'custom',
+  },
+
+  editor: {
+    fontSize: 'Font size',
+    fontSizeHint: 'Size of the text inside the editor',
+    decrease: 'Decrease ({keys})',
+    reset: 'Reset ({keys})',
+    increase: 'Increase ({keys})',
+    editorFont: 'Editor font',
+    editorFontHint: 'Typeface used for note content',
+    contentWidth: 'Content width',
+    contentWidthHint: 'Constrain editor content to a readable column',
+    full: 'Full',
+    readable: 'Readable',
+  },
+
+  startup: {
+    launchOnStartup: 'Launch on system startup',
+    launchOnStartupHint: 'NoteFlow starts automatically when you turn on your computer',
+    enableLaunch: 'Enable launch on startup',
+    disableLaunch: 'Disable launch on startup',
+    openAsSticky: 'Open as sticky at startup',
+    enableToUse: 'Enable "Launch on system startup" to use this feature',
+    noNotesAvailable: 'No notes available',
+    willOpen: {
+      one: '{count} sticky window will open on startup',
+      other: '{count} sticky windows will open on startup',
+    },
+    noTabsSelected: 'No tabs selected — app will start in tray',
+  },
+
+  sync: {
+    connected: 'Connected',
+    notConnected: 'Not connected',
+    lastSync: 'Last sync: {time}',
+    authFailed: 'Authorization failed',
+    failedToStart: 'Failed to start authorization',
+    alreadyUpToDate: 'Already up to date',
+    pulled: {
+      one: 'Pulled {count} note',
+      other: 'Pulled {count} notes',
+    },
+    // "Go to <link> and enter this code:" — the link sits between these two.
+    goToPrefix: 'Go to ',
+    goToSuffix: ' and enter this code:',
+    waitingAuth: 'Waiting for authorization...',
+    openBrowser: 'Open browser',
+    connecting: 'Connecting...',
+    syncNow: 'Sync now',
+    disconnect: 'Disconnect',
+    setupDesc: "Sync notes across machines via a private GitHub repository. The repo will be created automatically if it doesn't exist.",
+    repoName: 'Repository name',
+    repoHint: "Will be created as private if it doesn't exist.",
+    connectWithGitHub: 'Connect with GitHub',
+  },
+
+  data: {
+    backup: 'Backup',
+    exportNotes: 'Export notes…',
+    importNotes: 'Import notes…',
+    notesLocation: 'Notes location',
+    openNotesFolder: 'Open notes folder',
+  },
+
+  ai: {
+    localAi: 'Local AI',
+    localAiHint:
+      'Index your notes on this device to power Related notes, the brain graph and chat context. Runs fully offline; encrypted notes are skipped.',
+    enableLocalAi: 'Enable local AI',
+    disableLocalAi: 'Disable local AI',
+    reindexAll: 'Reindex all notes',
+    downloadingModel: 'Downloading model…',
+    assistant: 'Assistant (LLM)',
+    assistantHint:
+      "Configure the chat provider, endpoint, API key and model. Each provider keeps its own credentials; switching providers won't mix keys.",
+    profile: 'Profile',
+    openProfileSetup: 'Open profile setup',
+    profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
+    aiAgents: 'AI agents',
+    exposeSkill: 'Expose CLI skill to AI agents',
+    exposeSkillHint:
+      'Installs the NoteFlow skill into ~/.claude/skills so agents like Claude Code can drive your notes via the CLI without extra setup.',
+    exposeSkillTooltip: 'Expose the CLI skill',
+    stopExposingSkill: 'Stop exposing the CLI skill',
+  },
+
+  account: {
+    notAvailable: "NoteFlow account services aren't available in this build yet.",
+    couldNotSendCode: 'Could not send the sign-in code.',
+    couldNotVerify: 'Could not verify the code.',
+    couldNotRefresh: 'Could not refresh subscription status.',
+    active: 'Active',
+    lastChecked: 'Last checked: {time}',
+    subscriptionsSoon: 'Subscriptions are coming soon.',
+    subscribeAi: 'Subscribe to NoteFlow AI',
+    subscribeAiHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
+    couldNotOpenCheckout: 'Could not open the checkout.',
+    refresh: 'Refresh',
+    signOut: 'Sign out',
+    signInDesc:
+      "Sign in with your email to access your NoteFlow account. We'll send you a one-time code — no password needed.",
+    email: 'Email',
+    sendCode: 'Send code',
+    // "We sent a 6-digit code to <email>. Enter it below to sign in." — the email
+    // address (styled inline) sits between these two fragments.
+    codeSentPrefix: 'We sent a 6-digit code to ',
+    codeSentSuffix: '. Enter it below to sign in.',
+    code: 'Code',
+    verifyAndSignIn: 'Verify & sign in',
+    useDifferentEmail: 'Use a different email',
+  },
+
+  shortcuts: {
+    // Section titles.
+    appSection: 'App',
+    sectionsSection: 'Sections',
+    stickySection: 'Sticky notes',
+    editorSection: 'Editor',
+    fontSizeSection: 'Font size',
+    // Shortcut descriptions.
+    showHideApp: 'Show / hide app (global)',
+    commandPalette: 'Command palette',
+    newNote: 'New note',
+    newTempNote: 'New temporary note (24h)',
+    searchAllNotes: 'Search all notes',
+    toggleSidebar: 'Toggle sidebar',
+    openSideBySide: 'Open note side by side',
+    newSectionShortcut: 'New section',
+    deleteSectionShortcut: 'Delete section',
+    nextSection: 'Next section',
+    prevSection: 'Previous section',
+    deleteSelectedNote: 'Delete selected note (when not editing)',
+    openSectionSticky: 'Open current section as sticky',
+    openAllSticky: 'Open all sections as sticky',
+    undo: 'Undo',
+    redo: 'Redo',
+    bold: 'Bold',
+    italic: 'Italic',
+    underline: 'Underline',
+    inlineCode: 'Inline code',
+    codeBlock: 'Code block',
+    findInNote: 'Find in note',
+    toggleMarkdown: 'Toggle Markdown / rich-text mode',
+    increaseFontSize: 'Increase font size',
+    decreaseFontSize: 'Decrease font size',
+    resetFontSize: 'Reset font size',
+  },
+
+  templates: {
+    title: 'Note templates',
+    desc: 'Reusable notes with predefined sections. Open a note’s ⋯ menu and choose "Save as template" to add one here.',
+    empty: 'No templates yet. Open a note’s ⋯ menu and choose "Save as template".',
+    createFromTemplate: 'Create a note from this template',
+    saveName: 'Save name',
+    newNoteFromTemplate: 'New note from template',
+    newNote: 'New note',
+    renameTemplate: 'Rename template',
+    deleteTemplate: 'Delete template',
+    deleteConfirm: 'Delete the template "{name}"? This cannot be undone.',
+  },
+
+  about: {
+    tagline: 'Fast notes for software engineers',
+    updates: 'Updates',
+    checking: 'Checking…',
+    upToDate: 'Up to date',
+    checkForUpdates: 'Check for updates',
+    installing: 'Installing…',
+    downloading: 'Downloading…',
+    updateTo: 'Update to v{version}',
+    links: 'Links',
+    githubRepo: 'GitHub repository',
+  },
+}

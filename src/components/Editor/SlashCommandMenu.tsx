@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useState } from 'react'
 import type { SlashCommandItem } from './SlashCommands'
+import { useT } from '../../i18n/useT'
 
 export interface SlashCommandMenuHandle {
   onKeyDown: (event: KeyboardEvent) => boolean
@@ -14,6 +15,7 @@ interface SlashCommandMenuProps {
 // suggestion plugin can drive ↑/↓/Enter selection while the editor keeps focus.
 export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandMenuProps>(
   function SlashCommandMenu({ items, command }, ref) {
+    const t = useT()
     const [selected, setSelected] = useState(0)
 
     // Reset the highlight to the first item whenever the filtered list changes.
@@ -48,7 +50,7 @@ export const SlashCommandMenu = forwardRef<SlashCommandMenuHandle, SlashCommandM
     if (items.length === 0) {
       return (
         <div className="slash-menu">
-          <div className="slash-menu-empty">No commands</div>
+          <div className="slash-menu-empty">{t.editor.slash.noCommands}</div>
         </div>
       )
     }

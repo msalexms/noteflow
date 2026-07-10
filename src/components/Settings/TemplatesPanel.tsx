@@ -5,8 +5,11 @@ import { useTemplatesStore } from '../../stores/templatesStore'
 import { useNotesStore } from '../../stores/notesStore'
 import type { NoteTemplate } from '../../types'
 import { ConfirmModal } from '../ConfirmModal'
+import { tf } from '../../i18n/format'
+import { useT } from '../../i18n/useT'
 
 export function TemplatesPanel({ onClose }: { onClose: () => void }) {
+  const t = useT()
   const templates = useTemplatesStore((s) => s.templates)
   const renameTemplate = useTemplatesStore((s) => s.renameTemplate)
   const deleteTemplate = useTemplatesStore((s) => s.deleteTemplate)
@@ -40,15 +43,14 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
   return (
     <div className="space-y-6">
       <section>
-        <p className="text-xs font-mono font-medium text-text">Note templates</p>
+        <p className="text-xs font-mono font-medium text-text">{t.settings.templates.title}</p>
         <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
-          Reusable notes with predefined sections. Open a note's ⋯ menu and choose
-          "Save as template" to add one here.
+          {t.settings.templates.desc}
         </p>
 
         {templates.length === 0 ? (
           <p className="mt-4 text-xs font-mono text-text-muted/70 leading-relaxed">
-            No templates yet. Open a note's ⋯ menu and choose "Save as template".
+            {t.settings.templates.empty}
           </p>
         ) : (
           <div className="mt-4 space-y-1.5">
@@ -76,7 +78,7 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
                   <button
                     onDoubleClick={() => startRename(tpl)}
                     onClick={() => void createFromTemplate(tpl)}
-                    title="Create a note from this template"
+                    title={t.settings.templates.createFromTemplate}
                     className="flex-1 min-w-0 text-left text-xs font-mono text-text truncate hover:text-accent transition-colors"
                   >
                     {tpl.name}
@@ -86,7 +88,7 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
                 {editingId === tpl.id ? (
                   <button
                     onClick={() => void commitRename()}
-                    title="Save name"
+                    title={t.settings.templates.saveName}
                     className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
                   >
                     <Check size={13} />
@@ -95,23 +97,23 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
                   <>
                     <button
                       onClick={() => void createFromTemplate(tpl)}
-                      title="New note from template"
+                      title={t.settings.templates.newNoteFromTemplate}
                       className="flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono
                                  text-text-muted border border-border hover:text-text hover:border-text/25 transition-colors"
                     >
                       <FilePlus2 size={12} />
-                      New note
+                      {t.settings.templates.newNote}
                     </button>
                     <button
                       onClick={() => startRename(tpl)}
-                      title="Rename template"
+                      title={t.settings.templates.renameTemplate}
                       className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-3 transition-colors"
                     >
                       <Pencil size={13} />
                     </button>
                     <button
                       onClick={() => setPendingDelete(tpl)}
-                      title="Delete template"
+                      title={t.settings.templates.deleteTemplate}
                       className="p-1 rounded text-text-muted hover:text-red hover:bg-red/10 transition-colors"
                     >
                       <Trash2 size={13} />
@@ -126,9 +128,9 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
 
       {pendingDelete && (
         <ConfirmModal
-          title="Delete template"
-          message={`Delete the template "${pendingDelete.name}"? This cannot be undone.`}
-          confirmLabel="Delete"
+          title={t.settings.templates.deleteTemplate}
+          message={tf(t.settings.templates.deleteConfirm, { name: pendingDelete.name })}
+          confirmLabel={t.common.delete}
           danger
           onConfirm={() => {
             void deleteTemplate(pendingDelete.id)

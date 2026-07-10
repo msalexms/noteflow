@@ -39,17 +39,14 @@ export function splitSuggestions(content: string): { visible: string; suggestion
   return { visible, suggestions }
 }
 
-/** Static starters shown when the chat is empty and there are no usable notes (UI text is English). */
-export const GENERIC_SUGGESTIONS: string[] = [
-  'Summarize recent notes',
-  'What am I working on?',
-  'Find a topic',
-]
-
 // ── Personalized starters ──────────────────────────────────────────────────────
 // When the chat is empty we build randomized starter chips from the user's own note
 // and section names (e.g. "Reorganize \"Project ideas\"") so the empty state feels
-// alive and varies each time the view is opened. Falls back to GENERIC_SUGGESTIONS.
+// alive and varies each time the view is opened. Falls back to the generic starters.
+//
+// Label templates are passed in (from the i18n dict, see `t.aiPanel.chat.suggestions`)
+// rather than hard-coded, so they follow the UI language. `note`/`section` templates
+// interpolate the quoted name via a `{name}` placeholder.
 
 type StarterNote = {
   title: string
@@ -59,7 +56,12 @@ type StarterNote = {
   expiresAt?: string
 }
 
-type Template = (name: string) => string
+/** Suggestion label templates sourced from the active language. */
+export interface SuggestionLabels {
+  generic: string[]
+  note: string[]
+  section: string[]
+}
 
 // Quote a name for a chip, trimming over-long titles so the button stays compact.
 function quoteName(name: string): string {
@@ -68,19 +70,9 @@ function quoteName(name: string): string {
   return `“${short}”`
 }
 
-const NOTE_TEMPLATES: Template[] = [
-  (n) => `Summarize ${quoteName(n)}`,
-  (n) => `Reorganize ${quoteName(n)}`,
-  (n) => `Improve ${quoteName(n)}`,
-  (n) => `Find notes like ${quoteName(n)}`,
-  (n) => `What's in ${quoteName(n)}?`,
-  (n) => `Turn ${quoteName(n)} into tasks`,
-]
-
-const SECTION_TEMPLATES: Template[] = [
-  (s) => `Expand the ${quoteName(s)} section`,
-  (s) => `Clean up ${quoteName(s)}`,
-]
+function fill(template: string, name: string): string {
+  return template.replace(/\{name\}/g, quoteName(name))
+}
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
@@ -98,15 +90,19 @@ function shuffle<T>(arr: T[]): T[] {
 /**
  * Build randomized starter suggestions personalized with the user's own note and
  * section names. Meant to be recomputed each time the empty chat is shown so the
- * chips vary. Falls back to GENERIC_SUGGESTIONS when there are no usable notes.
+ * chips vary. Falls back to the generic starters when there are no usable notes.
  */
-export function buildStarterSuggestions(notes: StarterNote[], count = MAX_SUGGESTIONS): string[] {
+export function buildStarterSuggestions(
+  notes: StarterNote[],
+  labels: SuggestionLabels,
+  count = MAX_SUGGESTIONS,
+): string[] {
   // Only notes the AI can actually act on: skip encrypted (unreadable), archived and
   // temporary notes, plus untitled ones.
   const usable = notes.filter(
     (n) => !n.encryption && !n.archived && !n.expiresAt && n.title.trim().length > 0,
   )
-  if (usable.length === 0) return shuffle(GENERIC_SUGGESTIONS).slice(0, count)
+  if (usable.length === 0) return shuffle(labels.generic).slice(0, count)
 
   const out: string[] = []
   const seen = new Set<string>()
@@ -130,16 +126,16 @@ export function buildStarterSuggestions(notes: StarterNote[], count = MAX_SUGGES
     const useSection =
       si < sectionNames.length && (ni >= notePool.length || Math.random() < 0.34)
     if (useSection) {
-      push(pick(SECTION_TEMPLATES)(sectionNames[si++]))
+      push(fill(pick(labels.section), sectionNames[si++]))
     } else if (ni < notePool.length) {
-      push(pick(NOTE_TEMPLATES)(notePool[ni++].title))
+      push(fill(pick(labels.note), notePool[ni++].title))
     } else {
       break
     }
   }
 
   // Top up with generic starters if we produced too few (e.g. dedupe collisions).
-  for (const g of shuffle(GENERIC_SUGGESTIONS)) {
+  for (const g of shuffle(labels.generic)) {
     if (out.length >= count) break
     push(g)
   }

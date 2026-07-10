@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { getTagColor } from '../../lib/tagColors'
 import { normalize } from '../../lib/searchUtils'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
+import { useT } from '../../i18n/useT'
 import type { TagColorMap } from '../../lib/tagColors'
 import type { NoteSection } from '../../types'
 
@@ -35,6 +36,7 @@ export function SectionTabsRow({
   onSectionContextMenu,
   renderHighlightedText,
 }: SectionTabsRowProps) {
+  const t = useT()
   const { previewProps } = useSectionHoverPreview()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -81,7 +83,7 @@ export function SectionTabsRow({
         <div
           role="button"
           tabIndex={-1}
-          aria-label="Scroll sections left"
+          aria-label={t.sidebar.scrollSectionsLeft}
           onClick={(e) => scrollByAmount(e, -100)}
           className="absolute left-0.5 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center
                      w-4 h-4 rounded bg-surface-3/95 text-text-muted hover:text-text shadow-sm
@@ -113,7 +115,7 @@ export function SectionTabsRow({
             style={getTagColor(section.name, sectionTagColors)}
           >
             {section.aiHidden && (
-              <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label="Hidden from AI" />
+              <EyeOff size={9} className="opacity-70 flex-shrink-0" aria-label={t.common.hiddenFromAI} />
             )}
             {renderHighlightedText(section.name, searchQuery)}
           </span>
@@ -125,7 +127,7 @@ export function SectionTabsRow({
         <div
           role="button"
           tabIndex={-1}
-          aria-label="Scroll sections right"
+          aria-label={t.sidebar.scrollSectionsRight}
           onClick={(e) => scrollByAmount(e, 100)}
           className="absolute right-0.5 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center
                      w-4 h-4 rounded bg-surface-3/95 text-text-muted hover:text-text shadow-sm

@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { Eye, Edit3, Plus } from 'lucide-react'
-import { format } from 'date-fns'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { getTagColor } from '../../lib/tagColors'
+import { useT } from '../../i18n/useT'
+import { formatDate } from '../../i18n/formatDate'
 import type { SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import type { Note, NoteSection } from '../../types'
 
@@ -36,6 +37,7 @@ export function SectionPreviewCard({
   previewHeight = PREVIEW_HEIGHT,
   previewZoom = PREVIEW_ZOOM,
 }: SectionPreviewCardProps) {
+  const t = useT()
   const colorStyle = getTagColor(section.name, sectionTagColors)
   const hasContent = section.content.trim().length > 0
   // Render the section body to the same HTML the editor produces, so the preview
@@ -55,7 +57,7 @@ export function SectionPreviewCard({
         </span>
         <span
           className="ml-auto flex items-center text-text-muted/50 flex-shrink-0"
-          title={section.isRawMode ? 'Raw markdown section' : 'Rich text section'}
+          title={section.isRawMode ? t.overview.rawSection : t.overview.richSection}
         >
           {section.isRawMode ? <Edit3 size={10} /> : <Eye size={10} />}
         </span>
@@ -65,10 +67,10 @@ export function SectionPreviewCard({
       <div className="flex flex-col" style={{ background: 'rgb(var(--bg-editor))' }}>
         <div className="px-3 pt-1.5">
           <div className={`${compact ? 'text-[11px]' : 'text-[12.5px]'} font-mono font-bold text-text truncate`}>
-            {note.title || 'Untitled'}
+            {note.title || t.common.untitled}
           </div>
           <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-px`}>
-            {format(new Date(note.created), 'MMM d, yyyy · HH:mm')}
+            {formatDate(new Date(note.created), 'MMM d, yyyy · HH:mm')}
           </div>
         </div>
 
@@ -99,7 +101,7 @@ export function SectionPreviewCard({
           ) : (
             <div className="flex items-center gap-1.5 pt-1 text-text-muted/35">
               <Plus size={11} />
-              <span className="text-[10px] font-mono">Empty section</span>
+              <span className="text-[10px] font-mono">{t.overview.emptySection}</span>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Database,
+  Globe,
   Info,
   Keyboard,
   LayoutTemplate,
@@ -13,6 +14,8 @@ import {
   UserCircle,
   X,
 } from 'lucide-react'
+import { useT } from '../../i18n/useT'
+import { GeneralPanel } from './GeneralPanel'
 import { AccountPanel } from './AccountPanel'
 import { AppearancePanel } from './AppearancePanel'
 import { EditorPanel } from './EditorPanel'
@@ -25,6 +28,7 @@ import { AiPanel } from './AiPanel'
 import { TemplatesPanel } from './TemplatesPanel'
 
 export type SettingsSection =
+  | 'general'
   | 'appearance'
   | 'editor'
   | 'templates'
@@ -38,21 +42,23 @@ export type SettingsSection =
 
 interface NavEntry {
   id: SettingsSection
-  label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
 }
 
+// Icon + order only; labels come from the dictionary (keyed by id) so the nav
+// switches language live.
 const NAV: NavEntry[] = [
-  { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'editor', label: 'Editor', icon: Pencil },
-  { id: 'templates', label: 'Templates', icon: LayoutTemplate },
-  { id: 'startup', label: 'Startup', icon: Monitor },
-  { id: 'sync', label: 'Sync', icon: RefreshCw },
-  { id: 'data', label: 'Data', icon: Database },
-  { id: 'ai', label: 'AI', icon: Sparkles },
-  { id: 'account', label: 'Account', icon: UserCircle },
-  { id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
-  { id: 'about', label: 'About', icon: Info },
+  { id: 'general', icon: Globe },
+  { id: 'appearance', icon: Palette },
+  { id: 'editor', icon: Pencil },
+  { id: 'templates', icon: LayoutTemplate },
+  { id: 'startup', icon: Monitor },
+  { id: 'sync', icon: RefreshCw },
+  { id: 'data', icon: Database },
+  { id: 'ai', icon: Sparkles },
+  { id: 'account', icon: UserCircle },
+  { id: 'shortcuts', icon: Keyboard },
+  { id: 'about', icon: Info },
 ]
 
 interface SettingsModalProps {
@@ -63,6 +69,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ initialSection = 'appearance', onClose, onOpenExportImport }: SettingsModalProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
+  const t = useT()
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -75,7 +82,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const activeLabel = NAV.find((n) => n.id === section)?.label ?? ''
+  const activeLabel = t.settings.nav[section]
 
   return (
     <div
@@ -87,7 +94,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <Settings size={13} className="text-text" />
-            <span className="text-sm font-mono font-semibold text-text">Settings</span>
+            <span className="text-sm font-mono font-semibold text-text">{t.settings.title}</span>
           </div>
           <button
             onClick={onClose}
@@ -114,7 +121,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
                   }`}
                 >
                   <Icon size={13} className="flex-shrink-0" />
-                  <span className="truncate">{entry.label}</span>
+                  <span className="truncate">{t.settings.nav[entry.id]}</span>
                 </button>
               )
             })}
@@ -126,6 +133,7 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
               <h2 className="text-xs font-mono text-text-muted/70 uppercase tracking-widest">{activeLabel}</h2>
             </div>
             <div className="flex-1 overflow-y-auto px-5 pb-5">
+              {section === 'general' && <GeneralPanel />}
               {section === 'appearance' && <AppearancePanel />}
               {section === 'editor' && <EditorPanel />}
               {section === 'templates' && <TemplatesPanel onClose={onClose} />}

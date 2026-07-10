@@ -4,6 +4,7 @@ import { Search, Link2 } from 'lucide-react'
 import type { Editor as TiptapEditor } from '@tiptap/react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../../components/SectionPreview/hoverPreviewContext'
+import { useT } from '../../i18n/useT'
 
 interface SectionOption {
   noteId: string
@@ -23,6 +24,7 @@ interface SectionLinkPickerProps {
 // section of every (non-encrypted, non-archived, non-temporary) note. On pick it
 // inserts the relation pill into the editor at the current selection.
 export function SectionLinkPicker({ editor, onClose, currentSectionId }: SectionLinkPickerProps) {
+  const t = useT()
   const notes = useNotesStore((s) => s.notes)
   const { previewProps } = useSectionHoverPreview()
   const [query, setQuery] = useState('')
@@ -116,13 +118,13 @@ export function SectionLinkPicker({ editor, onClose, currentSectionId }: Section
             ref={inputRef}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(0) }}
-            placeholder="Link to section…"
+            placeholder={t.editor.sectionLink.placeholder}
             className="flex-1 bg-transparent outline-none text-sm text-text placeholder:text-text/40"
           />
         </div>
         <div ref={listRef} className="flex-1 overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-text/40">No sections found</div>
+            <div className="px-3 py-6 text-center text-sm text-text/40">{t.editor.sectionLink.noSectionsFound}</div>
           ) : (
             filtered.map((opt, i) => {
               const hp = previewProps(opt.noteId, opt.sectionId)

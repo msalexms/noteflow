@@ -1,0 +1,50 @@
+export const common = {
+  save: 'Guardar',
+  cancel: 'Cancelar',
+  close: 'Cerrar',
+  closeEsc: 'Cerrar (Esc)',
+  delete: 'Eliminar',
+  loading: 'Cargando...',
+  untitled: 'Sin título',
+
+  allContent: 'Todo el contenido',
+  openGroupView: 'Abrir vista de grupo',
+
+  newNote: 'Nueva nota',
+  newFolder: 'Nueva carpeta',
+  renameFolder: 'Renombrar carpeta',
+  deleteFolder: 'Eliminar carpeta',
+  renameGroup: 'Renombrar grupo',
+  unarchiveGroup: 'Desarchivar grupo',
+  deleteNote: 'Eliminar nota',
+  deleteSection: 'Eliminar sección',
+  addToFavorites: 'Añadir a favoritos',
+  removeFromFavorites: 'Quitar de favoritos',
+  archive: 'Archivar',
+  unarchive: 'Desarchivar',
+  showToAI: 'Mostrar a la IA',
+  hideFromAI: 'Ocultar de la IA',
+  hiddenFromAI: 'Oculta a la IA',
+  moveToGroup: 'Mover a grupo',
+  moveToFolder: 'Mover a carpeta',
+  groupRoot: 'Raíz del grupo',
+  noFoldersYet: 'Aún no hay carpetas',
+
+  groupNamePlaceholder: 'Nombre del grupo…',
+  folderNamePlaceholder: 'Nombre de la carpeta…',
+  newFolderInline: '+ Nueva carpeta…',
+  newGroupInline: '+ Nuevo grupo…',
+
+  deleteNoteMessage: '"{title}" se eliminará permanentemente.',
+  deleteSectionMessage: '"{name}" se eliminará permanentemente.',
+  deleteFolderMessage: '"{name}" se eliminará. Las notas dentro pasarán a la raíz del grupo.',
+
+  notesPlural: {
+    one: '{count} nota',
+    other: '{count} notas',
+  },
+  foldersPlural: {
+    one: '{count} carpeta',
+    other: '{count} carpetas',
+  },
+}

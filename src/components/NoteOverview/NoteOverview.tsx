@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
 import { X, Star, FileText, Lock, Plus, EyeOff, Eye, Trash2, Check, Pencil } from 'lucide-react'
-import { format } from 'date-fns'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore, type SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import { SectionPreviewCard, CARD_WIDTH } from '../SectionPreview/SectionPreviewCard'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
+import { useT } from '../../i18n/useT'
+import { tf, plural } from '../../i18n/format'
+import { formatDate } from '../../i18n/formatDate'
 import type { Note, NoteSection } from '../../types'
 
 interface NoteOverviewProps {
@@ -15,6 +17,7 @@ interface NoteOverviewProps {
 }
 
 export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
+  const t = useT()
   const note = useNotesStore((s) => s.notes.find((n) => n.id === noteId) ?? null)
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
@@ -211,20 +214,20 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                 void updateNote(note.id, { title: note.title ?? '' })
               }
             }}
-            placeholder="Untitled"
+            placeholder={t.common.untitled}
             className="text-sm font-mono font-semibold text-text bg-surface-1 border border-text/25 rounded px-1.5 py-0.5 outline-none focus:border-text/40 min-w-0 flex-shrink"
           />
         ) : (
           <button
             onClick={startTitleEdit}
             disabled={locked}
-            title={locked ? undefined : 'Rename note'}
+            title={locked ? undefined : t.overview.renameNote}
             className={`group/title flex items-center gap-1.5 min-w-0 rounded px-1 -mx-1 transition-colors ${
               locked ? 'cursor-default' : 'hover:bg-surface-3'
             }`}
           >
             <h1 className="text-sm font-mono font-semibold text-text truncate">
-              {note.title || 'Untitled'}
+              {note.title || t.common.untitled}
             </h1>
             {!locked && (
               <Pencil
@@ -237,16 +240,16 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
         <button
           onClick={() => updateNote(note.id, { favorited: !note.favorited })}
-          title={note.favorited ? 'Remove from favorites' : 'Add to favorites'}
+          title={note.favorited ? t.common.removeFromFavorites : t.common.addToFavorites}
           className={`p-1 rounded flex-shrink-0 transition-colors
             ${note.favorited ? 'text-accent-3 bg-accent-3/10' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
         >
           <Star size={13} fill={note.favorited ? 'currentColor' : 'none'} />
         </button>
         <span className="text-[11px] font-mono text-text-muted/60 flex-shrink-0">
-          {sectionCount} {sectionCount === 1 ? 'section' : 'sections'}
+          {plural(t.overview.sectionsPlural, sectionCount)}
           {' · '}
-          {format(new Date(note.updated), 'dd/MM/yyyy · HH:mm')}
+          {formatDate(new Date(note.updated), 'dd/MM/yyyy · HH:mm')}
         </span>
 
         <div className="flex-1" />
@@ -255,22 +258,22 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
           <button
             onClick={() => void addSection()}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
-            title="Add section and edit it"
+            title={t.overview.addSectionTooltip}
           >
-            <Plus size={12} /> Add section
+            <Plus size={12} /> {t.overview.addSection}
           </button>
         )}
         <button
           onClick={() => setConfirm('delete-note')}
           className="flex items-center justify-center w-7 h-7 rounded border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
-          title="Delete note"
+          title={t.common.deleteNote}
         >
           <Trash2 size={13} />
         </button>
         <button
           onClick={onClose}
           className="ml-1 flex items-center justify-center w-7 h-7 rounded border border-border bg-surface-2 text-text-muted hover:text-text hover:border-text/25 transition-colors"
-          title="Close (Esc)"
+          title={t.common.closeEsc}
         >
           <X size={14} />
         </button>
@@ -282,13 +285,13 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
         {locked ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
             <Lock size={28} className="text-text-muted/40" />
-            <p className="text-sm font-mono text-text-muted">This note is encrypted</p>
-            <p className="text-xs font-mono text-text-muted/60">Unlock it in the editor to preview its sections</p>
+            <p className="text-sm font-mono text-text-muted">{t.overview.noteEncrypted}</p>
+            <p className="text-xs font-mono text-text-muted/60">{t.overview.unlockToPreview}</p>
           </div>
         ) : sectionCount === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
             <FileText size={28} className="text-text-muted/40" />
-            <p className="text-sm font-mono text-text-muted">This note has no sections</p>
+            <p className="text-sm font-mono text-text-muted">{t.overview.noSections}</p>
           </div>
         ) : (
           <div
@@ -321,39 +324,35 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <span className="px-2 text-[11px] font-mono text-text whitespace-nowrap">
-              {selectedCount} selected
+              {tf(t.overview.selectedCount, { count: selectedCount })}
             </span>
             <div className="w-px h-5 bg-border" />
 
             {aiActionAvailable && (
               <button
                 onClick={toggleSelectedAiHidden}
-                title={allHidden
-                  ? 'The AI will index and use these sections again'
-                  : 'The AI will never index, read or reference these sections'}
+                title={allHidden ? t.overview.aiShowTooltip : t.overview.aiHideTooltip}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-text-muted hover:text-text hover:bg-text/10 transition-colors"
               >
                 {allHidden ? <Eye size={13} /> : <EyeOff size={13} />}
-                {allHidden ? 'Show to AI' : 'Hide from AI'}
+                {allHidden ? t.common.showToAI : t.common.hideFromAI}
               </button>
             )}
 
             <button
               onClick={() => setConfirm('delete-sections')}
               disabled={selectingAll}
-              title={selectingAll
-                ? "Can't delete every section — delete the note instead"
-                : undefined}
+              title={selectingAll ? t.overview.cantDeleteAllSections : undefined}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-red/75 hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-red/75"
             >
               <Trash2 size={13} />
-              Delete
+              {t.common.delete}
             </button>
 
             <div className="w-px h-5 bg-border" />
             <button
               onClick={clearSelection}
-              title="Clear selection (Esc)"
+              title={t.overview.clearSelection}
               className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-text/10 transition-colors"
             >
               <X size={14} />
@@ -367,13 +366,9 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
       {confirm === 'delete-sections' && (
         <ConfirmModal
-          title="Delete sections"
-          message={
-            selectedCount === 1
-              ? '1 section will be permanently deleted.'
-              : `${selectedCount} sections will be permanently deleted.`
-          }
-          confirmLabel="Delete"
+          title={t.overview.deleteSections}
+          message={plural(t.overview.deleteSectionsMessage, selectedCount)}
+          confirmLabel={t.common.delete}
           danger
           onConfirm={deleteSelectedSections}
           onCancel={() => setConfirm(null)}
@@ -382,9 +377,9 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
       {confirm === 'delete-note' && (
         <ConfirmModal
-          title="Delete note"
-          message={`"${note.title || 'Untitled'}" will be permanently deleted.`}
-          confirmLabel="Delete"
+          title={t.common.deleteNote}
+          message={tf(t.common.deleteNoteMessage, { title: note.title || t.common.untitled })}
+          confirmLabel={t.common.delete}
           danger
           onConfirm={deleteThisNote}
           onCancel={() => setConfirm(null)}
@@ -418,6 +413,7 @@ function SectionCard({
   onSelectRange,
   onContextMenu,
 }: SectionCardProps) {
+  const t = useT()
   return (
     <button
       // Shift-click extends a range; Ctrl/Cmd-click toggles; a plain click while a
@@ -442,7 +438,7 @@ function SectionCard({
         e.stopPropagation()
         onContextMenu({ x: e.clientX, y: e.clientY, noteId: note.id, sectionId: section.id })
       }}
-      title={`Open "${section.name}"`}
+      title={tf(t.overview.openSection, { name: section.name })}
       className={`group relative text-left rounded-lg border border-solid bg-surface-1 shadow-md
                  hover:shadow-lg hover:-translate-y-0.5
                  transition-all duration-150 overflow-hidden flex flex-col ${
@@ -456,8 +452,8 @@ function SectionCard({
       <span
         role="checkbox"
         aria-checked={selected}
-        aria-label="Select section"
-        title="Select section"
+        aria-label={t.overview.selectSection}
+        title={t.overview.selectSection}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect(section.id) }}
         className={`absolute top-2 right-2 z-20 flex items-center justify-center w-[18px] h-[18px] rounded border transition-all cursor-pointer ${
           selected
@@ -472,11 +468,11 @@ function SectionCard({
 
       {section.aiHidden && (
         <span
-          title="Hidden from AI"
+          title={t.common.hiddenFromAI}
           className="absolute top-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded
                      bg-surface-3/90 text-text-muted text-[9px] font-mono"
         >
-          <EyeOff size={10} /> AI
+          <EyeOff size={10} /> {t.overview.aiBadge}
         </span>
       )}
       <SectionPreviewCard note={note} section={section} sectionTagColors={sectionTagColors} />

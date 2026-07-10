@@ -10,6 +10,8 @@ import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
 import { OverviewNoteCard } from '../OverviewNoteCard'
+import { useT } from '../../i18n/useT'
+import { tf, plural } from '../../i18n/format'
 import type { GroupColor, NoteGroup, NoteFolder } from '../../types'
 
 interface GroupOverviewProps {
@@ -31,6 +33,7 @@ function loadCardWidth(): number {
 }
 
 export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
+  const t = useT()
   const notes = useNotesStore((s) => s.notes)
   const setActiveNote = useNotesStore((s) => s.setActiveNote)
   const setOpenNoteIds = useNotesStore((s) => s.setOpenNoteIds)
@@ -378,14 +381,14 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
             <h1
               className="text-sm font-mono uppercase tracking-wider text-text truncate cursor-text"
               onDoubleClick={startGroupRename}
-              title="Double-click to rename"
+              title={t.overview.doubleClickRename}
             >
               {group.name}
             </h1>
             <button
               onClick={startGroupRename}
               className="flex-shrink-0 text-text-muted hover:text-text opacity-0 group-hover/title:opacity-100 transition-opacity"
-              title="Rename group"
+              title={t.common.renameGroup}
             >
               <Pencil size={12} />
             </button>
@@ -394,15 +397,15 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         {group.archived && (
           <button
             onClick={() => toggleGroupArchived(group.id)}
-            title="Unarchive group"
+            title={t.common.unarchiveGroup}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-surface-2 text-[10px] font-mono uppercase tracking-wider text-text-muted hover:text-text hover:border-accent/50 transition-colors flex-shrink-0"
           >
-            <Archive size={11} /> Archived
+            <Archive size={11} /> {t.overview.archivedBadge}
           </button>
         )}
         <span className="text-[11px] font-mono text-text-muted/60 flex-shrink-0">
-          {visibleCount} {visibleCount === 1 ? 'note' : 'notes'}
-          {folderCount > 0 && ` · ${folderCount} ${folderCount === 1 ? 'folder' : 'folders'}`}
+          {plural(t.common.notesPlural, visibleCount)}
+          {folderCount > 0 && ` · ${plural(t.common.foldersPlural, folderCount)}`}
         </span>
 
         <div className="flex-1" />
@@ -410,7 +413,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         {/* Card width control — wider cards reveal more sections at once (kept subtle) */}
         <div
           className="flex items-center gap-1 mr-2 opacity-35 hover:opacity-100 transition-opacity"
-          title="Card width"
+          title={t.overview.cardWidth}
         >
           <StretchHorizontal size={12} className="text-text-muted flex-shrink-0" />
           <input
@@ -421,28 +424,28 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
             value={cardWidth}
             onChange={(e) => updateCardWidth(Number(e.target.value))}
             className="w-16 h-0.5 accent-text-muted cursor-pointer"
-            aria-label="Card width"
+            aria-label={t.overview.cardWidth}
           />
         </div>
 
         <button
           onClick={handleNewNote}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
-          title="New note in this group"
+          title={t.overview.newNoteInGroup}
         >
-          <Plus size={12} /> New note
+          <Plus size={12} /> {t.common.newNote}
         </button>
         <button
           onClick={() => { setShowNewFolder(true); setNewFolderName('') }}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
-          title="New folder"
+          title={t.common.newFolder}
         >
-          <FolderPlus size={12} /> New folder
+          <FolderPlus size={12} /> {t.common.newFolder}
         </button>
         <button
           onClick={onClose}
           className="ml-1 flex items-center justify-center w-7 h-7 rounded border border-border bg-surface-2 text-text-muted hover:text-text hover:border-text/25 transition-colors"
-          title="Close (Esc)"
+          title={t.common.closeEsc}
         >
           <X size={14} />
         </button>
@@ -464,7 +467,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
                 if (e.key === 'Enter') void commitNewFolder()
                 if (e.key === 'Escape') { setShowNewFolder(false); setNewFolderName('') }
               }}
-              placeholder="Folder name…"
+              placeholder={t.common.folderNamePlaceholder}
               className="flex-1 max-w-xs text-xs font-mono bg-surface-1 border border-text/25 rounded px-2 py-1 outline-none text-text"
             />
           </div>
@@ -473,12 +476,12 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         {visibleCount === 0 && groupFolders.length === 0 && archivedNotes.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
             <FileText size={28} className="text-text-muted/40" />
-            <p className="text-sm font-mono text-text-muted">This group is empty</p>
+            <p className="text-sm font-mono text-text-muted">{t.overview.groupEmpty}</p>
             <button
               onClick={handleNewNote}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border bg-surface-2 text-xs font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
             >
-              <Plus size={13} /> New note
+              <Plus size={13} /> {t.common.newNote}
             </button>
           </div>
         ) : (
@@ -529,7 +532,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
             {/* Loose notes (group root) */}
             {(looseNotes.length > 0 || groupFolders.length > 0) && (
               <Band
-                label="No folder"
+                label={t.overview.noFolder}
                 count={looseNotes.length}
                 color={color}
                 isFolder={false}
@@ -564,7 +567,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
             {/* Archived notes of this group (read-only band — not a drop target) */}
             {archivedNotes.length > 0 && (
               <Band
-                label="Archived"
+                label={t.overview.archived}
                 count={archivedNotes.length}
                 color={color}
                 isFolder={false}
@@ -614,13 +617,13 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
 
       {confirmDelete && (
         <ConfirmModal
-          title={selectedNotes.length === 1 ? 'Delete note' : 'Delete notes'}
+          title={selectedNotes.length === 1 ? t.common.deleteNote : t.overview.deleteNotes}
           message={
             selectedNotes.length === 1
-              ? `"${selectedNotes[0]?.title || 'Untitled'}" will be permanently deleted.`
-              : `${selectedNotes.length} notes will be permanently deleted.`
+              ? tf(t.common.deleteNoteMessage, { title: selectedNotes[0]?.title || t.common.untitled })
+              : tf(t.overview.deleteNotesMessage, { count: selectedNotes.length })
           }
-          confirmLabel="Delete"
+          confirmLabel={t.common.delete}
           danger
           onConfirm={batchDelete}
           onCancel={() => setConfirmDelete(false)}
@@ -629,9 +632,9 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
 
       {folderToDelete && (
         <ConfirmModal
-          title="Delete folder"
-          message={`"${folderToDelete.name}" will be deleted. Notes inside will move to the group root.`}
-          confirmLabel="Delete"
+          title={t.common.deleteFolder}
+          message={tf(t.common.deleteFolderMessage, { name: folderToDelete.name })}
+          confirmLabel={t.common.delete}
           danger
           onConfirm={confirmFolderDelete}
           onCancel={() => setFolderToDelete(null)}
@@ -670,6 +673,7 @@ function Band({
   editing, editValue, onEditChange, onEditCommit, onEditCancel, onStartRename, onDelete,
   children,
 }: BandProps) {
+  const t = useT()
   const droppable = Boolean(onDrop)
   const hasFolderActions = isFolder && Boolean(onStartRename || onDelete)
   return (
@@ -725,7 +729,7 @@ function Band({
             {onStartRename && (
               <button
                 onClick={onStartRename}
-                title="Rename folder"
+                title={t.common.renameFolder}
                 className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text hover:bg-text/10 transition-colors"
               >
                 <Pencil size={13} />
@@ -734,7 +738,7 @@ function Band({
             {onDelete && (
               <button
                 onClick={onDelete}
-                title="Delete folder"
+                title={t.common.deleteFolder}
                 className="flex items-center justify-center w-6 h-6 rounded text-red/75 hover:text-red hover:bg-red/10 transition-colors"
               >
                 <Trash2 size={13} />
@@ -746,7 +750,7 @@ function Band({
       <div className="grid gap-3 mt-1" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))` }}>
         {count === 0 ? (
           <p className="text-[11px] font-mono text-text-muted/40 px-1 py-3">
-            {droppable ? 'Empty — drop a note here' : 'Empty'}
+            {droppable ? t.overview.emptyDropHint : t.overview.empty}
           </p>
         ) : (
           children
@@ -786,6 +790,7 @@ function SelectionBar({
   onDelete,
   onClear,
 }: SelectionBarProps) {
+  const t = useT()
   const [picker, setPicker] = useState<'group' | 'folder' | null>(null)
 
   // Close the open picker on outside click.
@@ -805,18 +810,18 @@ function SelectionBar({
       onClick={(e) => e.stopPropagation()}
     >
       <span className="px-2 text-[11px] font-mono text-text whitespace-nowrap">
-        {count} selected
+        {tf(t.overview.selectedCount, { count })}
       </span>
       <div className="w-px h-5 bg-border mx-0.5" />
 
-      <button onClick={onFavorite} className={btn} title={allFavorited ? 'Remove from favorites' : 'Add to favorites'}>
+      <button onClick={onFavorite} className={btn} title={allFavorited ? t.common.removeFromFavorites : t.common.addToFavorites}>
         {allFavorited ? <StarOff size={13} /> : <Star size={13} />}
-        {allFavorited ? 'Unfavorite' : 'Favorite'}
+        {allFavorited ? t.overview.unfavorite : t.overview.favorite}
       </button>
 
-      <button onClick={onArchive} className={btn} title={allArchived ? 'Unarchive' : 'Archive'}>
+      <button onClick={onArchive} className={btn} title={allArchived ? t.common.unarchive : t.common.archive}>
         <Archive size={13} />
-        {allArchived ? 'Unarchive' : 'Archive'}
+        {allArchived ? t.common.unarchive : t.common.archive}
       </button>
 
       {/* Move to group */}
@@ -824,10 +829,10 @@ function SelectionBar({
         <button
           onClick={(e) => { e.stopPropagation(); setPicker((p) => (p === 'group' ? null : 'group')) }}
           className={btn}
-          title="Move to group"
+          title={t.common.moveToGroup}
         >
           <FolderInput size={13} />
-          Move to group
+          {t.common.moveToGroup}
           <ChevronRight size={10} className="rotate-90 opacity-60" />
         </button>
         {picker === 'group' && (
@@ -848,7 +853,7 @@ function SelectionBar({
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <FolderMinus size={12} />
-              No group
+              {t.overview.noGroup}
             </button>
           </div>
         )}
@@ -859,10 +864,10 @@ function SelectionBar({
         <button
           onClick={(e) => { e.stopPropagation(); setPicker((p) => (p === 'folder' ? null : 'folder')) }}
           className={btn}
-          title="Move to folder in this group"
+          title={t.overview.moveToFolderTooltip}
         >
           <Folder size={13} />
-          Move to folder
+          {t.common.moveToFolder}
           <ChevronRight size={10} className="rotate-90 opacity-60" />
         </button>
         {picker === 'folder' && (
@@ -872,7 +877,7 @@ function SelectionBar({
               className="w-full text-left px-3 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-3 hover:text-text flex items-center gap-2 transition-colors"
             >
               <FolderMinus size={12} />
-              Group root
+              {t.common.groupRoot}
             </button>
             {currentGroupFolders.map((f) => (
               <button
@@ -885,7 +890,7 @@ function SelectionBar({
               </button>
             ))}
             {currentGroupFolders.length === 0 && (
-              <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">No folders yet</div>
+              <div className="px-3 py-1.5 text-[10px] font-mono text-text-muted/60">{t.common.noFoldersYet}</div>
             )}
           </div>
         )}
@@ -894,17 +899,17 @@ function SelectionBar({
       <button
         onClick={onDelete}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-red/75 hover:text-red hover:bg-red/10 transition-colors"
-        title="Delete selected"
+        title={t.overview.deleteSelected}
       >
         <Trash2 size={13} />
-        Delete
+        {t.common.delete}
       </button>
 
       <div className="w-px h-5 bg-border mx-0.5" />
       <button
         onClick={onClear}
         className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-text/10 transition-colors"
-        title="Clear selection (Esc)"
+        title={t.overview.clearSelection}
       >
         <X size={14} />
       </button>

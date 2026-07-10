@@ -5,6 +5,8 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 import { htmlFromMarkdown } from '../../lib/markdownHtml'
 import { buildStarterSuggestions, splitSuggestions } from '../../lib/chatSuggestions'
+import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 import { Card } from './ui'
 import type { ChatAttachment, ChatToolActivity } from '../../types'
 
@@ -16,36 +18,23 @@ function formatBytes(n: number): string {
 
 // A file chip shown in the composer (removable) or on a sent user message (read-only).
 function AttachmentChip({ a, onRemove }: { a: ChatAttachment; onRemove?: () => void }) {
+  const t = useT()
   return (
     <div className="flex items-center gap-1.5 max-w-[160px] text-[11.5px] font-mono text-text bg-surface-0 border border-border rounded px-1.5 py-1">
       {a.kind === 'image' ? <ImageIcon size={11} className="shrink-0 text-accent" /> : <FileText size={11} className="shrink-0 text-accent" />}
       <span className="truncate flex-1">{a.name}</span>
       {onRemove
-        ? <button onClick={onRemove} title="Remove" className="shrink-0 text-text-muted hover:text-red transition-colors"><X size={11} /></button>
+        ? <button onClick={onRemove} title={t.aiPanel.remove} className="shrink-0 text-text-muted hover:text-red transition-colors"><X size={11} /></button>
         : <span className="shrink-0 text-text-muted/50">{formatBytes(a.sizeBytes)}</span>}
     </div>
   )
 }
 
-// Present-continuous labels shown while a tool runs (replaced by its summary once it finishes).
-const RUNNING_LABELS: Record<string, string> = {
-  list_notes: 'Listing notes…', get_note: 'Reading note…', list_groups: 'Listing groups…',
-  search_notes: 'Searching notes…', create_note: 'Creating note…', update_note: 'Updating note…',
-  add_section: 'Adding section…', update_section: 'Updating section…', rename_section: 'Renaming section…',
-  create_group: 'Creating group…', create_folder: 'Creating folder…', rename_group: 'Renaming group…',
-  rename_folder: 'Renaming folder…', delete_note: 'Deleting note…', delete_section: 'Deleting section…',
-  delete_group: 'Deleting group…', delete_folder: 'Deleting folder…',
-}
-
-const CONFIRM_LABELS: Record<string, string> = {
-  delete_note: 'Delete this note permanently?',
-  delete_section: 'Delete this section?',
-  delete_group: 'Delete this group? Its notes are kept but ungrouped.',
-  delete_folder: 'Delete this folder? Its notes keep their group.',
-}
-
 function ToolActivityRow({ a }: { a: ChatToolActivity }) {
-  const label = a.summary || a.runningLabel || RUNNING_LABELS[a.name] || a.name
+  const t = useT()
+  // Present-continuous label shown while a tool runs (replaced by its summary once it finishes).
+  const running = t.aiPanel.chat.running as Record<string, string>
+  const label = a.summary || a.runningLabel || running[a.name] || a.name
   const icon =
     a.status === 'running' ? <Loader2 size={11} className="animate-spin text-text-muted" />
     : a.status === 'error' ? <AlertTriangle size={11} className="text-red-300" />
@@ -63,10 +52,11 @@ function ToolActivityRow({ a }: { a: ChatToolActivity }) {
 // thinking, or the gap after a tool finishes). Makes "still going" unmistakable so an
 // error mid-turn isn't mistaken for a finished reply.
 function ThinkingIndicator() {
+  const t = useT()
   return (
     <div className="self-start flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-mono text-text-muted">
       <Loader2 size={12} className="animate-spin text-accent" />
-      <span className="animate-pulse">Thinking…</span>
+      <span className="animate-pulse">{t.aiPanel.chat.thinking}</span>
     </div>
   )
 }
@@ -92,6 +82,7 @@ export function ChatView({
   onOpenNote: (noteId: string, sectionId: string) => void
   onConfigure: () => void
 }) {
+  const t = useT()
   const { previewProps } = useSectionHoverPreview()
   const llmConfig = useAiChatStore((s) => s.llmConfig)
   const presets = useAiChatStore((s) => s.presets)
@@ -159,9 +150,12 @@ export function ChatView({
 
   const configured = llmConfig?.configured ?? false
   const caps = llmConfig?.capabilities
+  const ft = t.aiPanel.fileTypes
   const attachHint = caps
-    ? `Attach files — ${caps.pdf ? 'PDF, ' : ''}${caps.images ? 'images, ' : ''}text & code`
-    : 'Attach text & code files'
+    ? tf(t.aiPanel.chat.attachHint, {
+        list: [...(caps.pdf ? [ft.pdf] : []), ...(caps.images ? [ft.images] : []), ft.textCode].join(', '),
+      })
+    : t.aiPanel.chat.attachHintBasic
 
   // A question queued from the command palette ("Ask AI") auto-sends once a provider is ready.
   // If none is configured yet it lingers until one is, then fires.
@@ -186,7 +180,7 @@ export function ChatView({
   // note edit to avoid flicker — hence the notes-loaded boolean as the only dep.
   const notesLoaded = notes.length > 0
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const starterSuggestions = useMemo(() => buildStarterSuggestions(notes), [notesLoaded])
+  const starterSuggestions = useMemo(() => buildStarterSuggestions(notes, t.aiPanel.chat.suggestions), [notesLoaded, t])
 
   // Prompt suggestions above the composer: personalized starters on an empty chat, or the
   // model's parsed next-actions once there's a conversation. Hidden while streaming.
@@ -209,10 +203,10 @@ export function ChatView({
             <Settings size={18} />
           </span>
           <p className="text-[13px] font-mono text-text-muted leading-relaxed">
-            Connect a model (your Anthropic/OpenAI key or a local Ollama) to chat with your notes.
+            {t.aiPanel.chat.notConfigured}
           </p>
           <button onClick={onConfigure} className="px-3 py-1.5 rounded-lg bg-text text-surface-0 text-[12px] font-mono font-bold hover:opacity-90">
-            Configure provider
+            {t.aiPanel.chat.configureProvider}
           </button>
         </Card>
       </div>
@@ -225,14 +219,14 @@ export function ChatView({
       <div className="flex-shrink-0 flex items-center gap-1.5 px-2 h-9 border-b border-text/10">
         <button
           onClick={() => setHistoryOpen((o) => !o)}
-          title="Chat history"
+          title={t.aiPanel.chat.historyTooltip}
           className={`flex items-center justify-center w-7 h-7 rounded transition-colors ${historyOpen ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text hover:bg-surface-2'}`}
         >
           <History size={14} />
         </button>
         <button
           onClick={() => { newChat(); setHistoryOpen(false) }}
-          title="New chat"
+          title={t.aiPanel.chat.newChat}
           className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
         >
           <Plus size={15} />
@@ -241,10 +235,10 @@ export function ChatView({
           <select
             value={llmConfig?.model ?? ''}
             onChange={(e) => setLlmConfig({ model: e.target.value })}
-            title="Model used for the next question"
+            title={t.aiPanel.chat.modelSelectTitle}
             className="max-w-[150px] bg-surface-0 border border-border rounded px-1.5 py-1 text-[11px] font-mono text-text outline-none focus:border-text/30"
           >
-            {modelOptions.length === 0 && <option value="">(no model)</option>}
+            {modelOptions.length === 0 && <option value="">{t.aiPanel.chat.noModel}</option>}
             {modelOptions.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
@@ -252,7 +246,7 @@ export function ChatView({
           <button
             onClick={() => refreshModels()}
             disabled={modelsLoading}
-            title="Load models from provider"
+            title={t.aiPanel.chat.loadModelsTitle}
             className="flex items-center justify-center w-6 h-6 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={11} className={modelsLoading ? 'animate-spin' : ''} />
@@ -265,7 +259,7 @@ export function ChatView({
         <>
           <div className="absolute inset-0 z-10" onClick={() => setHistoryOpen(false)} />
           <div className="absolute top-9 left-2 z-20 w-64 max-h-80 overflow-y-auto rounded-lg border border-border bg-surface-1 shadow-2xl py-1">
-            {sessions.length === 0 && <p className="px-3 py-2 text-[12px] font-mono text-text-muted/60">No saved chats yet.</p>}
+            {sessions.length === 0 && <p className="px-3 py-2 text-[12px] font-mono text-text-muted/60">{t.aiPanel.chat.noSavedChats}</p>}
             {sessions.map((s) => (
               <div
                 key={s.id}
@@ -275,7 +269,7 @@ export function ChatView({
                 <span className="flex-1 min-w-0 truncate text-[12px] font-mono text-text/80">{s.title}</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
-                  title="Delete chat"
+                  title={t.aiPanel.chat.deleteChat}
                   className="opacity-0 group-hover:opacity-100 flex items-center justify-center w-5 h-5 rounded text-text-muted hover:text-red-300"
                 >
                   <Trash2 size={12} />
@@ -290,7 +284,7 @@ export function ChatView({
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
         {messages.length === 0 && (
           <p className="text-[12px] font-mono text-text-muted/60 text-center mt-6">
-            Ask about your notes. I'll light up the ones I use in the brain.
+            {t.aiPanel.chat.emptyHint}
           </p>
         )}
         {messages.map((m) => (
@@ -327,7 +321,7 @@ export function ChatView({
           <div className="self-start max-w-[92%] w-full rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 flex flex-col gap-2">
             <div className="flex items-center gap-1.5 text-[12.5px] font-mono text-amber-200">
               <Wrench size={12} />
-              <span>{CONFIRM_LABELS[pendingConfirm.name] ?? 'Confirm this action?'}</span>
+              <span>{(t.aiPanel.chat.confirm as Record<string, string>)[pendingConfirm.name] ?? t.aiPanel.chat.confirm.fallback}</span>
             </div>
             {pendingConfirm.target && (
               <div className="text-[12px] font-mono text-amber-100/90 break-words pl-[18px]">
@@ -339,13 +333,13 @@ export function ChatView({
                 onClick={() => confirmAction(true)}
                 className="px-2.5 py-1 rounded bg-red-500/80 text-white text-[12px] font-mono font-bold hover:bg-red-500 transition-colors"
               >
-                Confirm
+                {t.aiPanel.chat.confirmBtn}
               </button>
               <button
                 onClick={() => confirmAction(false)}
                 className="px-2.5 py-1 rounded bg-surface-2 text-text text-[12px] font-mono hover:bg-surface-3 transition-colors"
               >
-                Cancel
+                {t.common.cancel}
               </button>
             </div>
           </div>
@@ -362,7 +356,7 @@ export function ChatView({
                 onClick={() => onOpenNote(s.noteId, s.sectionId)}
                 className="px-2 py-0.5 rounded-md text-[11px] font-mono border-solid border border-border bg-surface-0 text-text-muted hover:text-text hover:border-accent/50 transition-colors max-w-[160px] truncate"
               >
-                {s.title || 'Untitled'}
+                {s.title || t.common.untitled}
               </button>
             ))}
           </div>
@@ -408,15 +402,15 @@ export function ChatView({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
-              placeholder="Type a message…"
+              placeholder={t.aiPanel.chat.messagePlaceholder}
               className="flex-1 resize-none bg-transparent px-1 py-1.5 text-[13px] font-mono text-text placeholder-text-muted/40 outline-none max-h-32 overflow-y-auto"
             />
             {streaming ? (
-              <button onClick={cancel} title="Stop" className="flex items-center justify-center w-8 h-8 rounded-lg bg-surface-2 text-text hover:bg-surface-3 transition-colors">
+              <button onClick={cancel} title={t.aiPanel.chat.stop} className="flex items-center justify-center w-8 h-8 rounded-lg bg-surface-2 text-text hover:bg-surface-3 transition-colors">
                 <Square size={13} />
               </button>
             ) : (
-              <button onClick={submit} disabled={!canSend} title="Send" className="flex items-center justify-center w-8 h-8 rounded-lg bg-text text-surface-0 disabled:opacity-40 hover:opacity-90 transition-opacity">
+              <button onClick={submit} disabled={!canSend} title={t.aiPanel.chat.send} className="flex items-center justify-center w-8 h-8 rounded-lg bg-text text-surface-0 disabled:opacity-40 hover:opacity-90 transition-opacity">
                 <ArrowUp size={15} />
               </button>
             )}

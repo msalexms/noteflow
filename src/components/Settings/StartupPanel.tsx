@@ -3,6 +3,8 @@ import { Bookmark } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { getTagColor } from '../../lib/tagColors'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
+import { plural } from '../../i18n/format'
+import { useT } from '../../i18n/useT'
 
 interface StartupSticky {
   noteId: string
@@ -12,6 +14,7 @@ interface StartupSticky {
 export function StartupPanel() {
   const notes = useNotesStore((s) => s.notes)
   const sectionTagColors = useSectionTagColorsStore((s) => s.sectionTagColors)
+  const t = useT()
   const [openAtLogin, setOpenAtLogin] = useState(false)
   const [startupStickies, setStartupStickies] = useState<StartupSticky[]>([])
   const [loading, setLoading] = useState(true)
@@ -49,7 +52,7 @@ export function StartupPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center text-text-muted text-xs font-mono py-8">
-        Loading...
+        {t.common.loading}
       </div>
     )
   }
@@ -59,14 +62,14 @@ export function StartupPanel() {
       {/* Open at login toggle */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-mono font-medium text-text">Launch on system startup</p>
+          <p className="text-xs font-mono font-medium text-text">{t.settings.startup.launchOnStartup}</p>
           <p className="text-[11px] font-mono text-text-muted mt-0.5">
-            NoteFlow starts automatically when you turn on your computer
+            {t.settings.startup.launchOnStartupHint}
           </p>
         </div>
         <button
           onClick={() => handleToggleLogin(!openAtLogin)}
-          title={openAtLogin ? 'Disable launch on startup' : 'Enable launch on startup'}
+          title={openAtLogin ? t.settings.startup.disableLaunch : t.settings.startup.enableLaunch}
           className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors ${
             openAtLogin ? 'bg-text/70' : 'bg-surface-3 border border-border'
           }`}
@@ -84,19 +87,19 @@ export function StartupPanel() {
         <div className="flex items-center gap-1.5 mb-1">
           <Bookmark size={11} className="text-text-muted" />
           <span className="text-[11px] font-mono font-medium text-text-muted uppercase tracking-widest">
-            Open as sticky at startup
+            {t.settings.startup.openAsSticky}
           </span>
         </div>
         {!openAtLogin && (
           <p className="text-[11px] font-mono text-text-muted/60 mb-2">
-            Enable "Launch on system startup" to use this feature
+            {t.settings.startup.enableToUse}
           </p>
         )}
 
         <div className={`transition-opacity ${!openAtLogin ? 'opacity-40 pointer-events-none' : ''}`}>
           {visibleNotes.length === 0 ? (
             <div className="flex items-center justify-center h-16 text-text-muted text-xs font-mono">
-              No notes available
+              {t.settings.startup.noNotesAvailable}
             </div>
           ) : (
             <ul className="space-y-2">
@@ -109,7 +112,7 @@ export function StartupPanel() {
                         hasAnyActive ? 'text-text' : 'text-text/50'
                       }`}
                     >
-                      {note.title || 'Untitled'}
+                      {note.title || t.common.untitled}
                     </span>
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {note.sections.map((section) => {
@@ -139,8 +142,8 @@ export function StartupPanel() {
 
         <p className="text-[11px] font-mono text-text-muted/60 mt-3">
           {startupStickies.length > 0
-            ? `${startupStickies.length} sticky window${startupStickies.length > 1 ? 's' : ''} will open on startup`
-            : 'No tabs selected — app will start in tray'}
+            ? plural(t.settings.startup.willOpen, startupStickies.length)
+            : t.settings.startup.noTabsSelected}
         </p>
       </div>
     </div>

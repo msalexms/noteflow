@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Lock, Unlock, AlertTriangle, Loader2, Info, ChevronDown, ChevronUp } from 'lucide-react'
 import type { EncryptionOptions } from '../lib/cryptoUtils'
+import { useT } from '../i18n/useT'
+import { tf } from '../i18n/format'
 
 const ITER_MIN  = 100_000
 const ITER_MAX  = 2_000_000
@@ -19,6 +21,7 @@ interface EncryptionModalProps {
 }
 
 export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: EncryptionModalProps) {
+  const t = useT()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm]   = useState('')
   const [error, setError]       = useState('')
@@ -49,7 +52,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
       ? password.length > 0 && password === confirm
       : password.length > 0
 
-  const modeLabel = mode === 'encrypt' ? 'Encrypt note' : mode === 'unlock' ? 'Unlock note' : 'Remove encryption'
+  const modeLabel = mode === 'encrypt' ? t.encryption.encryptNote : mode === 'unlock' ? t.encryption.unlockNote : t.encryption.removeEncryption
 
   async function handleSubmit() {
     if (!isValid || loading) return
@@ -63,8 +66,8 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
     } catch {
       setError(
         mode === 'encrypt'
-          ? 'An error occurred while encrypting. Try again.'
-          : 'Wrong password. Try again.'
+          ? t.encryption.encryptError
+          : t.encryption.wrongPassword
       )
       setLoading(false)
     }
@@ -92,7 +95,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
         <div className="px-4 py-4 flex flex-col gap-3">
           {/* Note title */}
           <p className="text-xs font-mono text-text-muted truncate">
-            <span className="text-text">{noteTitle || 'Untitled'}</span>
+            <span className="text-text">{noteTitle || t.common.untitled}</span>
           </p>
 
           {/* Warning (encrypt only) */}
@@ -100,8 +103,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
             <div className="flex gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
               <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs font-mono text-amber-300 leading-relaxed">
-                If you lose the password, the note content is{' '}
-                <span className="font-semibold">permanently lost</span>. There is no recovery option.
+                {t.encryption.encryptWarning}
               </p>
             </div>
           )}
@@ -111,14 +113,14 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
             <div className="flex gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
               <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs font-mono text-amber-300 leading-relaxed">
-                This will <span className="font-semibold">permanently</span> decrypt the note. The content will be stored unencrypted on disk.
+                {t.encryption.removeWarning}
               </p>
             </div>
           )}
 
           {/* Password field */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-mono text-text-muted">Password</label>
+            <label className="text-xs font-mono text-text-muted">{t.encryption.password}</label>
             <input
               ref={passwordRef}
               type="password"
@@ -126,7 +128,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
               onChange={(e) => { setPassword(e.target.value); setError('') }}
               onKeyDown={(e) => { if (e.key === 'Enter' && mode !== 'encrypt') handleSubmit() }}
               className="w-full bg-surface-2 border border-border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-text/30 transition-colors"
-              placeholder="Enter password"
+              placeholder={t.encryption.enterPassword}
               autoComplete="new-password"
             />
           </div>
@@ -134,7 +136,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
           {/* Confirm password (encrypt only) */}
           {mode === 'encrypt' && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-mono text-text-muted">Confirm password</label>
+              <label className="text-xs font-mono text-text-muted">{t.encryption.confirmPassword}</label>
               <input
                 type="password"
                 value={confirm}
@@ -143,11 +145,11 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                 className={`w-full bg-surface-2 border rounded px-3 py-2 text-sm font-mono text-text placeholder-text-muted outline-none focus:border-text/30 transition-colors ${
                   passwordMismatch ? 'border-red-500/60' : 'border-border'
                 }`}
-                placeholder="Confirm password"
+                placeholder={t.encryption.confirmPassword}
                 autoComplete="new-password"
               />
               {passwordMismatch && (
-                <p className="text-xs font-mono text-red-400">Passwords do not match</p>
+                <p className="text-xs font-mono text-red-400">{t.encryption.passwordsDoNotMatch}</p>
               )}
             </div>
           )}
@@ -160,7 +162,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                 onClick={() => setShowAdvanced((v) => !v)}
                 className="w-full flex items-center justify-between px-3 py-2 text-xs font-mono text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
               >
-                <span>Advanced options</span>
+                <span>{t.encryption.advancedOptions}</span>
                 {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               </button>
 
@@ -169,9 +171,9 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                   {/* Iterations */}
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1">
-                      <label className="text-xs font-mono text-text-muted">Iterations</label>
+                      <label className="text-xs font-mono text-text-muted">{t.encryption.iterations}</label>
                       <span
-                        title="Number of PBKDF2 key derivation rounds. Higher = harder to brute-force but slower to encrypt/decrypt. OWASP recommends ≥ 210,000."
+                        title={t.encryption.iterationsInfo}
                         className="cursor-help text-text-muted/60 hover:text-text-muted transition-colors"
                       >
                         <Info size={11} />
@@ -197,9 +199,9 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                   {/* Salt length */}
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1">
-                      <label className="text-xs font-mono text-text-muted">Salt length</label>
+                      <label className="text-xs font-mono text-text-muted">{t.encryption.saltLength}</label>
                       <span
-                        title="Random salt size in bytes used for key derivation. 16 bytes (128-bit) is the standard minimum."
+                        title={t.encryption.saltLengthInfo}
                         className="cursor-help text-text-muted/60 hover:text-text-muted transition-colors"
                       >
                         <Info size={11} />
@@ -216,7 +218,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                         className="flex-1 bg-surface-2 border border-border rounded px-2 py-1.5 text-xs font-mono text-text outline-none focus:border-text/30 transition-colors"
                       />
                       <span className="text-xs font-mono text-text-muted/60 flex-shrink-0">
-                        bytes ({SALT_MIN}–{SALT_MAX})
+                        {tf(t.encryption.bytesRange, { min: SALT_MIN, max: SALT_MAX })}
                       </span>
                     </div>
                   </div>
@@ -224,9 +226,9 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
                   {/* Hash algorithm */}
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1">
-                      <label className="text-xs font-mono text-text-muted">Hash algorithm</label>
+                      <label className="text-xs font-mono text-text-muted">{t.encryption.hashAlgorithm}</label>
                       <span
-                        title="Hash function for PBKDF2. SHA-512 is slower on GPUs, offering better resistance to parallel brute-force attacks."
+                        title={t.encryption.hashAlgorithmInfo}
                         className="cursor-help text-text-muted/60 hover:text-text-muted transition-colors"
                       >
                         <Info size={11} />
@@ -258,7 +260,7 @@ export function EncryptionModal({ mode, noteTitle, onConfirm, onCancel }: Encryp
             onClick={onCancel}
             className="px-3 py-1.5 text-xs font-mono text-text-muted hover:text-text border border-border hover:border-text-muted rounded transition-colors"
           >
-            Cancel
+            {t.common.cancel}
           </button>
           <button
             onClick={handleSubmit}

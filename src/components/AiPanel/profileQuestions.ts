@@ -10,6 +10,12 @@
 // real but MODEST, so the model treats them as soft probabilistic priors, never verdicts. The model
 // — not the app — does the inference: it expands, infers and synthesises a Markdown profile note in
 // the user's language. The app never processes uploaded documents.
+//
+// Field ids + types live here; all display strings come from the i18n dict via the factory below.
+// Never build the schema at module load — call `getProfileQuestions(t)` at use time so a live
+// language switch is reflected (see ProfileFlow's `useMemo([t])`).
+import { useLanguageStore } from '../../stores/languageStore'
+import type { Messages } from '../../i18n'
 
 export type ProfileFieldType = 'text' | 'chips' | 'tags' | 'choice'
 
@@ -34,158 +40,72 @@ export interface ProfileSection {
   fields: ProfileField[]
 }
 
-export const PROFILE_SECTIONS: ProfileSection[] = [
-  {
-    id: 'professional',
-    title: 'Professional',
-    description: 'Work, studies and what you spend your focus on.',
-    fields: [
-      {
+/** Builds the profile wizard schema from the active language's message tree. */
+export function getProfileQuestions(t: Messages): ProfileSection[] {
+  const f = t.aiPanel.profileForm
+  return [
+    {
+      id: 'professional',
+      title: f.professional.title,
+      description: f.professional.description,
+      fields: [
         // Too open to enumerate (any job, studies, life situation) → free text.
-        id: 'about',
-        label: 'What do you do?',
-        type: 'text',
-        hint: 'Work, studies, or how you spend most of your time. A line is enough.',
-        placeholder: 'e.g. I study architecture / I run a small bakery / Backend dev at a startup',
-      },
-      {
-        id: 'tools',
-        label: 'Tools & apps you use often',
-        type: 'tags',
-        hint: 'Optional — anything from Notion to a programming language.',
-        options: ['Notion', 'Excel', 'Figma', 'Obsidian', 'Photoshop', 'VS Code', 'Python', 'TypeScript'],
-        placeholder: 'Type a tool and press Enter',
-      },
-      {
-        id: 'goals',
-        label: "What are you focused on?",
-        type: 'chips',
-        options: ['Learn something new', 'Build a habit', 'Get organized', 'Ship a project', 'Find a job', 'Improve my health', 'Personal growth', 'Earn more'],
-      },
-    ],
-  },
-  {
-    id: 'personal',
-    title: 'Personal',
-    description: "A few favourites — no need to overthink, just what comes to mind.",
-    fields: [
-      {
-        id: 'name',
-        label: 'Your name',
-        type: 'text',
-        placeholder: 'Optional — how should the AI address you?',
-      },
-      {
-        id: 'interests',
-        label: 'Interests & passions',
-        type: 'tags',
-        options: ['Reading', 'Music', 'Gaming', 'Sports', 'Cooking', 'Travel', 'Art', 'Science', 'Technology', 'Photography', 'Writing', 'Nature'],
-        placeholder: 'Type anything you love and press Enter',
-      },
-      {
-        id: 'music',
-        label: 'Songs or artists you keep coming back to',
-        type: 'tags',
-        hint: 'A few is plenty — taste says more than you’d think.',
-        placeholder: 'Type a song or artist and press Enter',
-      },
-      {
-        id: 'screen',
-        label: 'Favourite films or series',
-        type: 'tags',
-        hint: 'The ones you’d rewatch any day.',
-        placeholder: 'Type a film or series and press Enter',
-      },
-      {
-        id: 'books',
-        label: 'Books that stuck with you',
-        type: 'tags',
-        hint: 'Optional.',
-        placeholder: 'Type a book and press Enter',
-      },
-      {
-        id: 'dreamTrip',
-        label: 'A place you’d love to go',
-        type: 'text',
-        hint: 'Optional — a dream trip or a spot you keep thinking about.',
-        placeholder: 'e.g. road-tripping Iceland / a quiet cabin in the mountains',
-      },
-    ],
-  },
-  {
-    id: 'style',
-    title: 'Your style',
-    description: 'Quick taps — there are no right answers, just go with your gut.',
-    fields: [
-      {
-        id: 'personality',
-        label: 'How would you describe yourself?',
-        type: 'chips',
-        options: ['Curious', 'Analytical', 'Creative', 'Organized', 'Spontaneous', 'Introverted', 'Extroverted', 'Detail-oriented', 'Big-picture', 'Pragmatic', 'Ambitious', 'Easy-going'],
-      },
-      {
-        id: 'q_weekend',
-        label: 'Your ideal weekend is…',
-        type: 'choice',
-        options: ['Planned in advance', 'Decided in the moment'],
-      },
-      {
-        id: 'q_recharge',
-        label: 'You recharge by…',
-        type: 'choice',
-        options: ['Time on your own', 'Being around people'],
-      },
-      {
-        id: 'q_drawn',
-        label: 'You’re more drawn to…',
-        type: 'choice',
-        options: ['A bold new idea', 'A proven, reliable method'],
-      },
-      {
-        id: 'q_space',
-        label: 'Your space tends to be…',
-        type: 'choice',
-        options: ['Minimal and tidy', 'Full of things you love'],
-      },
-      {
-        id: 'q_decide',
-        label: 'When you decide, you trust…',
-        type: 'choice',
-        options: ['The logic and facts', 'Your gut and the people involved'],
-      },
-      {
-        id: 'q_trip',
-        label: 'A trip you’d choose…',
-        type: 'choice',
-        options: ['A packed itinerary', 'Wandering with no plan'],
-      },
-    ],
-  },
-  {
-    id: 'assistant',
-    title: 'Working with the AI',
-    description: 'How you’d like the assistant to show up for you.',
-    fields: [
-      {
+        { id: 'about', label: f.professional.about.label, type: 'text', hint: f.professional.about.hint, placeholder: f.professional.about.placeholder },
+        { id: 'tools', label: f.professional.tools.label, type: 'tags', hint: f.professional.tools.hint, options: f.professional.tools.options, placeholder: f.professional.tools.placeholder },
+        { id: 'goals', label: f.professional.goals.label, type: 'chips', options: f.professional.goals.options },
+      ],
+    },
+    {
+      id: 'personal',
+      title: f.personal.title,
+      description: f.personal.description,
+      fields: [
+        { id: 'name', label: f.personal.name.label, type: 'text', placeholder: f.personal.name.placeholder },
+        { id: 'interests', label: f.personal.interests.label, type: 'tags', options: f.personal.interests.options, placeholder: f.personal.interests.placeholder },
+        { id: 'music', label: f.personal.music.label, type: 'tags', hint: f.personal.music.hint, placeholder: f.personal.music.placeholder },
+        { id: 'screen', label: f.personal.screen.label, type: 'tags', hint: f.personal.screen.hint, placeholder: f.personal.screen.placeholder },
+        { id: 'books', label: f.personal.books.label, type: 'tags', hint: f.personal.books.hint, placeholder: f.personal.books.placeholder },
+        { id: 'dreamTrip', label: f.personal.dreamTrip.label, type: 'text', hint: f.personal.dreamTrip.hint, placeholder: f.personal.dreamTrip.placeholder },
+      ],
+    },
+    {
+      id: 'style',
+      title: f.style.title,
+      description: f.style.description,
+      fields: [
+        { id: 'personality', label: f.style.personality.label, type: 'chips', options: f.style.personality.options },
+        { id: 'q_weekend', label: f.style.q_weekend.label, type: 'choice', options: f.style.q_weekend.options },
+        { id: 'q_recharge', label: f.style.q_recharge.label, type: 'choice', options: f.style.q_recharge.options },
+        { id: 'q_drawn', label: f.style.q_drawn.label, type: 'choice', options: f.style.q_drawn.options },
+        { id: 'q_space', label: f.style.q_space.label, type: 'choice', options: f.style.q_space.options },
+        { id: 'q_decide', label: f.style.q_decide.label, type: 'choice', options: f.style.q_decide.options },
+        { id: 'q_trip', label: f.style.q_trip.label, type: 'choice', options: f.style.q_trip.options },
+      ],
+    },
+    {
+      id: 'assistant',
+      title: f.assistant.title,
+      description: f.assistant.description,
+      fields: [
         // The key lever for tuning the assistant's tone.
-        id: 'communication',
-        label: 'How should the AI talk to you?',
-        type: 'chips',
-        options: ['Concise & direct', 'Detailed & thorough', 'Casual & friendly', 'Formal', 'Encouraging', 'Challenge my ideas', 'Step by step', 'Use examples'],
-      },
-      {
-        id: 'extra',
-        label: 'Anything else',
-        type: 'text',
-        placeholder: 'Optional — anything else that would help the AI understand you',
-      },
-    ],
-  },
-]
+        { id: 'communication', label: f.assistant.communication.label, type: 'chips', options: f.assistant.communication.options },
+        { id: 'extra', label: f.assistant.extra.label, type: 'text', placeholder: f.assistant.extra.placeholder },
+      ],
+    },
+  ]
+}
 
 /** Flattened field list — for consumers that iterate fields regardless of section. */
-export const PROFILE_FIELDS: ProfileField[] = PROFILE_SECTIONS.flatMap((s) => s.fields)
+export function getProfileFields(t: Messages): ProfileField[] {
+  return getProfileQuestions(t).flatMap((s) => s.fields)
+}
 
+/**
+ * The language the model should WRITE the profile in. Follows the app's language
+ * setting (via the store) rather than the OS/browser locale, so the profile matches
+ * the rest of the UI. Returned as an English language name for a clean prompt.
+ */
 export function detectLocale(): string {
-  return (typeof navigator !== 'undefined' && navigator.language) || 'en'
+  const lang = useLanguageStore.getState().lang
+  return lang === 'es' ? 'Spanish' : 'English'
 }

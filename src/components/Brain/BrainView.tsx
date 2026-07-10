@@ -1,9 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Brain, Loader2, PanelLeftOpen, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useAiStore } from '../../stores/aiStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useNotesStore } from '../../stores/notesStore'
 import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
+import { useT } from '../../i18n/useT'
+import { plural, tf } from '../../i18n/format'
 import { useBrainGraph } from './useBrainGraph'
 import { BrainCanvas } from './BrainCanvas'
 import { AiPanel } from '../AiPanel/AiPanel'
@@ -13,6 +15,24 @@ import { BrainNodePreview, type PinnedPreview } from './BrainNodePreview'
 const BrainScene = lazy(() => import('./BrainScene'))
 
 const SPLIT_KEY = 'noteflow:brain-split-width' // left (AI panel) width as a %
+
+// Wraps each `term` found in `text` with the accent-emphasis span, so dialog bodies
+// stay whole, translatable strings while still highlighting a couple of key phrases.
+function highlightTerms(text: string, terms: string[]): ReactNode {
+  let parts: ReactNode[] = [text]
+  terms.forEach((term, ti) => {
+    parts = parts.flatMap((part, pi) => {
+      if (typeof part !== 'string') return [part]
+      const out: ReactNode[] = []
+      part.split(term).forEach((seg, i) => {
+        if (i > 0) out.push(<span key={`t${ti}-${pi}-${i}`} className="text-text">{term}</span>)
+        if (seg) out.push(seg)
+      })
+      return out
+    })
+  })
+  return parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)
+}
 
 function detectWebGL(): boolean {
   try {
@@ -24,6 +44,7 @@ function detectWebGL(): boolean {
 }
 
 export function BrainView({ onClose }: { onClose: () => void }) {
+  const t = useT()
   const enabled = useAiStore((s) => s.enabled)
   const indexState = useAiStore((s) => s.indexState)
   const stale = useAiStore((s) => s.stale)
@@ -165,7 +186,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
         <div
           onMouseDown={() => setDragging(true)}
           className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50 transition-colors z-10"
-          title="Drag to resize"
+          title={t.brain.dragResize}
         />
       )}
 
@@ -173,7 +194,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
       {aiCollapsed && (
         <button
           onClick={() => setAiCollapsed(false)}
-          title="Show AI panel"
+          title={t.brain.showAiPanel}
           className="flex-shrink-0 flex items-center justify-center w-6 h-full
                      text-text-muted/40 hover:text-text-muted hover:bg-surface-2
                      border-r border-border transition-colors"
@@ -210,27 +231,27 @@ export function BrainView({ onClose }: { onClose: () => void }) {
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-2.5 pointer-events-none">
           <div className="flex items-center gap-2 text-text/80">
             <Brain size={15} />
-            <span className="text-xs font-mono tracking-wide">Brain</span>
-            <span className="text-[11px] font-mono text-text-muted/60">{model.nodes.length} nodes</span>
+            <span className="text-xs font-mono tracking-wide">{t.brain.title}</span>
+            <span className="text-[11px] font-mono text-text-muted/60">{plural(t.brain.nodesCount, model.nodes.length)}</span>
           </div>
           <div className="flex items-center gap-1.5 pointer-events-auto">
             <button
               onClick={() => setShowDialog(true)}
               disabled={enabling}
-              title={enabled ? 'Local AI enabled' : 'Local AI disabled'}
+              title={enabled ? t.brain.localAiEnabled : t.brain.localAiDisabled}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono border transition-colors disabled:opacity-60 ${
                 enabled || enabling ? 'border-text/30 text-text bg-surface-2' : 'border-border text-text-muted hover:text-text'
               }`}
             >
               {enabling ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-              <span>Local AI</span>
+              <span>{t.brain.localAi}</span>
               <span className={`flex-shrink-0 w-1.5 h-1.5 rounded-full transition-colors ${enabled ? 'bg-emerald-400' : 'bg-text-muted/40'}`} />
             </button>
             {enabled && (
               <button
                 onClick={() => reindexAll()}
                 disabled={indexing}
-                title={indexing ? 'Indexing in progress…' : stale ? 'Notes changed — reindex to update results' : 'Reindex all notes'}
+                title={indexing ? t.brain.indexingInProgress : stale ? t.brain.reindexStale : t.brain.reindexAll}
                 className="relative flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw size={12} className={indexing ? 'animate-spin' : ''} />
@@ -242,7 +263,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
             )}
             <button
               onClick={onClose}
-              title="Close brain view"
+              title={t.brain.close}
               className="flex items-center justify-center w-7 h-7 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
             >
               <X size={14} />
@@ -253,7 +274,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
         {/* Empty state */}
         {model.nodes.length === 0 && !indexing && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-xs font-mono text-text-muted/70">No notes to display yet.</p>
+            <p className="text-xs font-mono text-text-muted/70">{t.brain.emptyNotes}</p>
           </div>
         )}
 
@@ -263,10 +284,10 @@ export function BrainView({ onClose }: { onClose: () => void }) {
             <Loader2 size={12} className="animate-spin text-text" />
             <span className="text-[11px] font-mono text-text-muted">
               {indexState === 'downloading-model'
-                ? `Downloading model${pct != null ? ` ${pct}%` : '…'}`
+                ? (pct != null ? tf(t.brain.downloadingModelPct, { pct }) : t.brain.downloadingModel)
                 : indexState === 'indexing'
-                  ? `Indexing${pct != null ? ` ${pct}%` : '…'}`
-                  : 'Starting…'}
+                  ? (pct != null ? tf(t.brain.indexingPct, { pct }) : t.brain.indexing)
+                  : t.brain.starting}
             </span>
           </div>
         )}
@@ -277,27 +298,14 @@ export function BrainView({ onClose }: { onClose: () => void }) {
             <div className="w-[380px] max-w-[85%] rounded-lg border border-border bg-surface-1 p-5 shadow-2xl">
               <div className="flex items-center gap-2 mb-2 text-text">
                 <Sparkles size={16} />
-                <h2 className="text-sm font-mono font-bold tracking-wide">{enabled ? 'Disable local AI' : 'Enable local AI'}</h2>
+                <h2 className="text-sm font-mono font-bold tracking-wide">{enabled ? t.brain.disableTitle : t.brain.enableTitle}</h2>
               </div>
               <p className="text-[12px] leading-relaxed text-text-muted font-mono mb-4">
-                {enabled ? (
-                  <>
-                    Local AI is on. Disabling hides <span className="text-text">content connections</span> in Brain and
-                    stops giving the chat context from your notes. Your existing index is kept, so you can re-enable it
-                    later without re-downloading or re-indexing.
-                  </>
-                ) : (
-                  <>
-                    Brain already shows your notes and groups structure. Enable local AI (100% offline) to also reveal{' '}
-                    <span className="text-text">content connections</span> and give the chat context from your notes. On
-                    first use, a small model is downloaded and your notes are indexed — the app may use more CPU for a
-                    while.
-                  </>
-                )}
+                {highlightTerms(enabled ? t.brain.disableBody : t.brain.enableBody, [t.brain.contentConnections])}
               </p>
               {enableError && (
                 <div className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2">
-                  <p className="text-[10px] font-mono font-bold text-red-400 mb-1">Activation failed</p>
+                  <p className="text-[10px] font-mono font-bold text-red-400 mb-1">{t.brain.activationFailed}</p>
                   <pre className="text-[10px] font-mono text-red-300/90 whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{enableError}</pre>
                 </div>
               )}
@@ -306,14 +314,14 @@ export function BrainView({ onClose }: { onClose: () => void }) {
                   onClick={() => setShowDialog(false)}
                   className="flex-1 flex items-center justify-center px-3 py-2 rounded border border-border text-text-muted text-xs font-mono hover:text-text hover:border-text/30 transition-colors"
                 >
-                  Cancel
+                  {t.common.cancel}
                 </button>
                 {enabled ? (
                   <button
                     onClick={disableAi}
                     className="flex-1 flex items-center justify-center px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity"
                   >
-                    Disable local AI
+                    {t.brain.disableTitle}
                   </button>
                 ) : (
                   <button
@@ -322,7 +330,7 @@ export function BrainView({ onClose }: { onClose: () => void }) {
                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity disabled:opacity-60"
                   >
                     {enabling ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                    {enabling ? 'Enabling…' : 'Enable local AI'}
+                    {enabling ? t.brain.enabling : t.brain.enableTitle}
                   </button>
                 )}
               </div>
@@ -336,26 +344,23 @@ export function BrainView({ onClose }: { onClose: () => void }) {
             <div className="w-[380px] max-w-[85%] rounded-lg border border-border bg-surface-1 p-5 shadow-2xl">
               <div className="flex items-center gap-2 mb-2 text-text">
                 <Brain size={16} />
-                <h2 className="text-sm font-mono font-bold tracking-wide">Low-powered device detected</h2>
+                <h2 className="text-sm font-mono font-bold tracking-wide">{t.brain.lowEndTitle}</h2>
               </div>
               <p className="text-[12px] leading-relaxed text-text-muted font-mono mb-4">
-                This machine looks low on resources, so Brain is showing the lighter{' '}
-                <span className="text-text">2D view</span>, which uses less CPU and GPU. You can switch
-                to the <span className="text-text">3D view</span> for a more immersive brain — it looks
-                nicer but is heavier on your hardware.
+                {highlightTerms(t.brain.lowEndBody, [t.brain.view2d, t.brain.view3d])}
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={dismissLowEndPrompt}
                   className="flex-1 flex items-center justify-center px-3 py-2 rounded border border-border text-text-muted text-xs font-mono hover:text-text hover:border-text/30 transition-colors"
                 >
-                  Keep 2D
+                  {t.brain.keep2d}
                 </button>
                 <button
                   onClick={() => setPrefer3D(true)}
                   className="flex-1 flex items-center justify-center px-3 py-2 rounded bg-text text-surface-0 text-xs font-mono font-bold hover:opacity-90 transition-opacity"
                 >
-                  Use 3D
+                  {t.brain.use3d}
                 </button>
               </div>
             </div>

@@ -13,6 +13,7 @@ import {
   AlignRight,
 } from 'lucide-react'
 import { setColumnAlign } from './tableUtils'
+import { useT } from '../../i18n/useT'
 
 interface Props {
   editor: Editor
@@ -24,6 +25,7 @@ interface MenuPos {
 }
 
 export function TableContextMenu({ editor }: Props) {
+  const t = useT()
   const [pos, setPos] = useState<MenuPos | null>(null)
 
   useEffect(() => {
@@ -82,37 +84,37 @@ export function TableContextMenu({ editor }: Props) {
       onMouseDown={(e) => e.stopPropagation()}
     >
       <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().addRowBefore().run())}>
-        <Plus size={11} /> Row <ArrowUp size={11} />
+        <Plus size={11} /> {t.editor.table.row} <ArrowUp size={11} />
       </MenuItem>
       <MenuItem onClick={run(() => editor.chain().focus().addRowAfter().run())}>
-        <Plus size={11} /> Row <ArrowDown size={11} />
+        <Plus size={11} /> {t.editor.table.row} <ArrowDown size={11} />
       </MenuItem>
       <MenuItem disabled={inHeader} onClick={run(() => editor.chain().focus().deleteRow().run())}>
-        <Minus size={11} /> Row
+        <Minus size={11} /> {t.editor.table.row}
       </MenuItem>
       <div className="my-1 border-t border-border" />
       <MenuItem onClick={run(() => editor.chain().focus().addColumnBefore().run())}>
-        <Plus size={11} /> Col <ArrowLeft size={11} />
+        <Plus size={11} /> {t.editor.table.col} <ArrowLeft size={11} />
       </MenuItem>
       <MenuItem onClick={run(() => editor.chain().focus().addColumnAfter().run())}>
-        <Plus size={11} /> Col <ArrowRight size={11} />
+        <Plus size={11} /> {t.editor.table.col} <ArrowRight size={11} />
       </MenuItem>
       <MenuItem onClick={run(() => editor.chain().focus().deleteColumn().run())}>
-        <Minus size={11} /> Col
+        <Minus size={11} /> {t.editor.table.col}
       </MenuItem>
       <div className="my-1 border-t border-border" />
       <MenuItem onClick={run(() => setColumnAlign(editor, 'left'))}>
-        <AlignLeft size={11} /> Align left
+        <AlignLeft size={11} /> {t.editor.table.alignLeftMenu}
       </MenuItem>
       <MenuItem onClick={run(() => setColumnAlign(editor, 'center'))}>
-        <AlignCenter size={11} /> Align center
+        <AlignCenter size={11} /> {t.editor.table.alignCenterMenu}
       </MenuItem>
       <MenuItem onClick={run(() => setColumnAlign(editor, 'right'))}>
-        <AlignRight size={11} /> Align right
+        <AlignRight size={11} /> {t.editor.table.alignRightMenu}
       </MenuItem>
       <div className="my-1 border-t border-border" />
       <MenuItem onClick={run(() => editor.chain().focus().deleteTable().run())}>
-        <Trash2 size={11} /> Delete table
+        <Trash2 size={11} /> {t.editor.table.deleteTableMenu}
       </MenuItem>
     </div>
   )

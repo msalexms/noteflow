@@ -4,6 +4,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getRootZoom } from '../../stores/themeStore'
+import { useT } from '../../i18n/useT'
 
 // Pretty labels for common lowlight language ids. Anything not listed falls back
 // to capitalising the id. The value stored in `node.attrs.language` is ALWAYS the
@@ -53,9 +54,8 @@ function labelFor(id: string): string {
   return LANGUAGE_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1)
 }
 
-const PLAIN_TEXT_LABEL = 'Plain text'
-
 function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewProps) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -155,7 +155,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
     }
   }, [open, editor])
 
-  const currentLabel = language ? labelFor(language) : PLAIN_TEXT_LABEL
+  const currentLabel = language ? labelFor(language) : t.editor.codeBlock.plainText
 
   return (
     <NodeViewWrapper className="group code-block-node">
@@ -185,7 +185,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
             lineHeight: 1,
           }}
         >
-          {copied ? '✓ Copied' : 'Copy'}
+          {copied ? t.editor.codeBlock.copied : t.editor.codeBlock.copy}
         </button>
         <NodeViewContent as="code" className={language ? `language-${language}` : undefined} />
       </pre>
@@ -202,7 +202,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search language…"
+              placeholder={t.editor.codeBlock.searchLanguage}
               className="code-lang-search"
             />
             <div className="code-lang-list">
@@ -214,7 +214,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
                   selectLanguage(null)
                 }}
               >
-                {PLAIN_TEXT_LABEL}
+                {t.editor.codeBlock.plainText}
               </button>
               {filtered.map((l) => (
                 <button
@@ -229,7 +229,7 @@ function CodeBlockView({ node, extension, updateAttributes, editor }: NodeViewPr
                   {l.label}
                 </button>
               ))}
-              {filtered.length === 0 && <div className="code-lang-empty">No languages</div>}
+              {filtered.length === 0 && <div className="code-lang-empty">{t.editor.codeBlock.noLanguages}</div>}
             </div>
           </div>,
           document.body

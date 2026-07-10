@@ -17,6 +17,8 @@ import { StickyApp } from './components/StickyApp'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { HoverPreviewProvider } from './components/SectionPreview/HoverPreviewProvider'
 import { modKey } from './lib/platform'
+import { useT } from './i18n/useT'
+import { tf } from './i18n/format'
 
 const SIDEBAR_MIN = 180
 const SIDEBAR_MAX = 480
@@ -27,6 +29,7 @@ const PANE_DEFAULT_WIDTH = 520
 
 export function App() {
   const [isSticky] = useState(() => window.location.hash.startsWith('#sticky'))
+  const t = useT()
 
   const { loadNotes, isLoading, createNote, createTempNote, setCommandPaletteOpen } = useNotesStore()
   const notes = useNotesStore((s) => s.notes)
@@ -491,7 +494,7 @@ export function App() {
             onMouseDown={handleDragStart}
             className="w-1 flex-shrink-0 cursor-col-resize hover:bg-text/30 active:bg-text/50
                        transition-colors group relative z-10"
-            title="Drag to resize"
+            title={t.shell.dragToResize}
           />
         )}
 
@@ -499,7 +502,7 @@ export function App() {
         {!(brainViewOpen ? brainSidebarVisible : sidebarVisible) && (
           <button
             onClick={() => (brainViewOpen ? setBrainSidebarVisible(true) : setSidebarVisible(true))}
-            title={brainViewOpen ? 'Show notes' : `Show sidebar (${modKey}+')`}
+            title={brainViewOpen ? t.shell.showNotes : tf(t.shell.showSidebar, { key: modKey })}
             className={`flex-shrink-0 flex items-center justify-center h-full
                        text-text-muted/40 hover:text-text-muted hover:bg-surface-2
                        border-r border-border transition-colors ${brainViewOpen ? 'w-6' : 'w-7'}`}
@@ -532,7 +535,7 @@ export function App() {
             // focus to the top, which is the "the note resets when it syncs" bug.
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-5 h-5 border-2 border-text/20 border-t-text rounded-full animate-spin" />
-              <div className="text-xs font-mono text-text-muted">Loading notes...</div>
+              <div className="text-xs font-mono text-text-muted">{t.shell.loadingNotes}</div>
             </div>
           ) : (
             visibleOpenNoteIds.length <= 1 ? (
@@ -552,7 +555,7 @@ export function App() {
                   >
                     {visibleOpenNoteIds.map((noteId, index) => {
                       const paneNote = notes.find((n) => n.id === noteId)
-                      const paneTitle = paneNote?.title?.trim() || 'Untitled'
+                      const paneTitle = paneNote?.title?.trim() || t.common.untitled
                       // A pane is "pinned" once the user has resized it by hand
                       // (it then has a stored width). Otherwise it stays "auto" and
                       // shares the available width via flexbox, recomputed natively
@@ -586,15 +589,15 @@ export function App() {
                                 onDragEnd={handlePaneDragEnd}
                                 onClick={(e) => e.preventDefault()}
                                 className="px-2 py-1 rounded border border-text/20 bg-surface-2 text-text hover:bg-surface-3 hover:border-text/30 cursor-grab active:cursor-grabbing transition-colors inline-flex items-center gap-1"
-                                title="Reorder columns"
+                                title={t.shell.reorderColumns}
                               >
                                 <GripVertical size={13} />
-                                <span className="text-[10px] font-mono hidden xl:inline">Drag</span>
+                                <span className="text-[10px] font-mono hidden xl:inline">{t.shell.drag}</span>
                               </button>
                               <button
                                 onClick={() => closeOpenNote(noteId)}
                                 className="px-2 py-1 rounded border border-red-400/40 bg-red-400/15 text-red-300 hover:bg-red-400/25 hover:border-red-400/70 transition-colors"
-                                title="Close pane"
+                                title={t.shell.closePane}
                               >
                                 <X size={13} />
                               </button>
@@ -607,7 +610,7 @@ export function App() {
                           <div
                             onMouseDown={(e) => beginPaneResize(e, noteId)}
                             className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-text/20 active:bg-text/35 transition-colors z-20"
-                            title="Resize column"
+                            title={t.shell.resizeColumn}
                           />
                         </section>
                       )
@@ -622,7 +625,7 @@ export function App() {
                 {hasPaneOverflow && (
                   <div className="h-6 border-t border-border/70 bg-surface-1/70 flex items-center justify-center px-3">
                     <span className="text-[10px] font-mono text-text-muted/60">
-                      Scroll horizontally for more panes · drag handle to reorder
+                      {t.shell.paneOverflowHint}
                     </span>
                   </div>
                 )}
@@ -641,7 +644,7 @@ export function App() {
               />
 
               <div className="absolute top-3 left-3 z-30 pointer-events-none px-2 py-1 rounded border border-text/20 bg-surface-1/90 text-[10px] font-mono text-text-muted">
-                Drop in editor to open side by side
+                {t.shell.dropInEditor}
               </div>
 
               <div
@@ -665,7 +668,7 @@ export function App() {
                 }}
                 onDrop={handleStickyDrop}
               >
-                Drag here to open in a separate window
+                {t.shell.dragToSeparateWindow}
               </div>
             </>
           )}

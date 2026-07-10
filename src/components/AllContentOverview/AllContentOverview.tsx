@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { X, Folder, FolderOpen, Star, LayoutGrid, ChevronRight, ChevronLeft, CalendarDays, Maximize2 } from 'lucide-react'
-import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
+import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
@@ -8,6 +8,9 @@ import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { OverviewNoteCard } from '../OverviewNoteCard'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
+import { useT } from '../../i18n/useT'
+import { tf, plural } from '../../i18n/format'
+import { formatDate } from '../../i18n/formatDate'
 import type { GroupColor, Note, NoteGroup } from '../../types'
 
 interface AllContentOverviewProps {
@@ -42,6 +45,7 @@ function dayKeyToDate(dayKey: string): Date {
 }
 
 export function AllContentOverview({ onClose }: AllContentOverviewProps) {
+  const t = useT()
   const notes = useNotesStore((s) => s.notes)
   const filterDate = useNotesStore((s) => s.filterDate)
   const setFilterDate = useNotesStore((s) => s.setFilterDate)
@@ -249,20 +253,20 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
         style={{ background: 'rgb(var(--bg-1) / 0.85)' }}
       >
         <LayoutGrid size={16} className="text-text-muted flex-shrink-0" />
-        <h1 className="text-sm font-mono uppercase tracking-wider text-text truncate">All content</h1>
+        <h1 className="text-sm font-mono uppercase tracking-wider text-text truncate">{t.common.allContent}</h1>
 
         <div className="flex-1" />
 
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search..."
+          placeholder={t.allContent.searchPlaceholder}
           className="w-56 max-w-[40vw] text-xs font-mono bg-surface-1 border border-border rounded px-2.5 py-1.5 outline-none text-text placeholder:text-text-muted/60 focus:border-text/25 transition-colors"
         />
         <button
           onClick={onClose}
           className="ml-1 flex items-center justify-center w-7 h-7 rounded border border-border bg-surface-2 text-text-muted hover:text-text hover:border-text/25 transition-colors"
-          title="Close (Esc)"
+          title={t.common.closeEsc}
         >
           <X size={14} />
         </button>
@@ -277,7 +281,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
           {/* All / Today / Week / Month segmented buttons */}
           <div className="flex gap-1">
             {(['all', 'today', 'week', 'month'] as const).map((opt) => {
-              const labels = { all: 'All', today: 'Today', week: 'Week', month: 'Month' }
+              const labels = { all: t.allContent.dateAll, today: t.allContent.dateToday, week: t.allContent.dateWeek, month: t.allContent.dateMonth }
               const active = !selectedDayKey && filterDate === opt
               return (
                 <button
@@ -306,7 +310,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
               ? { color: 'rgb(var(--text))', background: 'rgb(var(--text) / 0.12)', border: '1px solid rgb(var(--text) / 0.25)' }
               : { color: 'rgb(var(--text-muted))', background: 'transparent', border: '1px solid rgb(var(--border))' }
             }
-            title={calendarExpanded ? 'Hide calendar' : 'Show calendar'}
+            title={calendarExpanded ? t.allContent.hideCalendar : t.allContent.showCalendar}
           >
             <CalendarDays size={14} />
           </button>
@@ -316,14 +320,14 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
             <div className="flex items-center gap-1">
               {!calendarExpanded && (
                 <span className="text-[11px] font-mono text-text">
-                  {format(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
+                  {formatDate(dayKeyToDate(selectedDayKey), 'EEEE, MMM d')}
                 </span>
               )}
               <button
                 onClick={() => setSelectedDayKey(null)}
                 className="p-0.5 rounded transition-colors"
                 style={{ color: 'rgb(var(--text))' }}
-                title="Clear day filter"
+                title={t.allContent.clearDayFilter}
               >
                 <X size={13} />
               </button>
@@ -342,26 +346,26 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
                 <button
                   onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, -1)))}
                   className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                  title="Previous month"
+                  title={t.allContent.prevMonth}
                 >
                   <ChevronLeft size={12} />
                 </button>
                 <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted uppercase tracking-wider">
                   <CalendarDays size={10} />
-                  <span>{format(calendarMonth, 'MMMM yyyy')}</span>
+                  <span>{formatDate(calendarMonth, 'MMMM yyyy')}</span>
                 </div>
                 <button
                   onClick={() => setCalendarMonth((prev) => startOfMonth(addMonths(prev, 1)))}
                   className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
-                  title="Next month"
+                  title={t.allContent.nextMonth}
                 >
                   <ChevronRight size={12} />
                 </button>
               </div>
 
               <div className="grid grid-cols-7 gap-1 mb-1">
-                {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((label) => (
-                  <div key={label} className="text-[9px] font-mono text-text-muted/60 text-center">
+                {t.allContent.weekdays.map((label, i) => (
+                  <div key={i} className="text-[9px] font-mono text-text-muted/60 text-center">
                     {label}
                   </div>
                 ))}
@@ -384,8 +388,12 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
                         setCalendarExpanded(false)
                       }}
                       title={hasActivity
-                        ? `${format(day, 'PPP')} · created ${marker?.created ?? 0}, updated ${marker?.updated ?? 0}`
-                        : format(day, 'PPP')
+                        ? tf(t.allContent.dayActivityTooltip, {
+                            date: formatDate(day, 'PPP'),
+                            created: marker?.created ?? 0,
+                            updated: marker?.updated ?? 0,
+                          })
+                        : formatDate(day, 'PPP')
                       }
                       className="h-7 rounded text-[10px] font-mono transition-colors flex flex-col items-center justify-center"
                       style={isSelected
@@ -401,7 +409,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
                           }
                       }
                     >
-                      <span>{format(day, 'd')}</span>
+                      <span>{formatDate(day, 'd')}</span>
                       <span className="h-[3px] flex items-center gap-[2px] mt-[1px]">
                         {marker && marker.created > 0 && (
                           <span className="w-[4px] h-[4px] rounded-full bg-emerald-400" />
@@ -426,7 +434,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
             <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
               <LayoutGrid size={28} className="text-text-muted/40" />
               <p className="text-sm font-mono text-text-muted">
-                {hasQuery || hasDateFilter ? 'No matching content' : 'Nothing here yet'}
+                {hasQuery || hasDateFilter ? t.allContent.noMatchingContent : t.allContent.nothingHereYet}
               </p>
             </div>
           ) : (
@@ -436,7 +444,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
                 <section>
                   <div className="flex items-center gap-1.5 mb-3 uppercase tracking-wider text-[11px] text-text-muted">
                     <Star size={12} className="flex-shrink-0" />
-                    <span>Favorites</span>
+                    <span>{t.allContent.favorites}</span>
                     <span className="text-text-muted/50">{favorites.length}</span>
                   </div>
                   <div className="grid gap-4" style={GRID_STYLE}>
@@ -459,7 +467,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
               {groupTiles.length > 0 && (
                 <section>
                   <div className="mb-3 uppercase tracking-wider text-[11px] text-text-muted">
-                    Groups <span className="text-text-muted/50">{groupTiles.length}</span>
+                    {t.allContent.groups} <span className="text-text-muted/50">{groupTiles.length}</span>
                   </div>
                   <div className="grid gap-4" style={GRID_STYLE}>
                     {groupTiles.map(({ group, count, looseNotes: groupLoose, folders: groupFolders }) => {
@@ -574,7 +582,7 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
               {looseNotes.length > 0 && (
                 <section>
                   <div className="mb-3 uppercase tracking-wider text-[11px] text-text-muted">
-                    Notes <span className="text-text-muted/50">{looseNotes.length}</span>
+                    {t.allContent.notes} <span className="text-text-muted/50">{looseNotes.length}</span>
                   </div>
                   <div className="grid gap-4" style={GRID_STYLE}>
                     {looseNotes.map((note) => (
@@ -663,6 +671,7 @@ interface GroupTileProps {
 }
 
 function GroupTile({ group, count, expanded, onToggle, onOpen }: GroupTileProps) {
+  const t = useT()
   return (
     // Container (not a button) so the "open group view" action can be a nested button — HTML
     // forbids buttons inside buttons.
@@ -692,7 +701,7 @@ function GroupTile({ group, count, expanded, onToggle, onOpen }: GroupTileProps)
           {group.name}
         </span>
         <span className="flex-shrink-0 text-[11px] font-mono text-text-muted/60">
-          {count} {count === 1 ? 'note' : 'notes'}
+          {plural(t.common.notesPlural, count)}
         </span>
         <ChevronRight
           size={15}
@@ -707,7 +716,7 @@ function GroupTile({ group, count, expanded, onToggle, onOpen }: GroupTileProps)
           onOpen()
         }}
         className="absolute top-1.5 right-1.5 z-10 flex items-center justify-center w-6 h-6 rounded border border-border bg-surface-2 text-text-muted hover:text-text hover:border-text/25 opacity-0 group-hover:opacity-100 transition-opacity"
-        title="Open group view"
+        title={t.common.openGroupView}
       >
         <Maximize2 size={12} />
       </button>

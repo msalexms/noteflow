@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronUp, ChevronDown, X, CaseSensitive } from 'lucide-react'
 import type { EditorHandle } from './Editor'
+import { useT } from '../../i18n/useT'
 
 interface InNoteSearchBarProps {
   editorRef: RefObject<EditorHandle | null>
@@ -8,6 +9,7 @@ interface InNoteSearchBarProps {
 }
 
 export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [matchCount, setMatchCount] = useState(0)
@@ -115,7 +117,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Find in note"
+        placeholder={t.editor.search.findInNote}
         className="w-44 bg-transparent text-sm text-text placeholder:text-text-muted outline-none"
       />
 
@@ -130,7 +132,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
       <button
         type="button"
         onClick={() => setCaseSensitive((v) => !v)}
-        title="Match case"
+        title={t.editor.search.matchCase}
         aria-pressed={caseSensitive}
         className={`p-1 rounded hover:bg-surface-3 ${
           caseSensitive ? 'bg-surface-3 text-text' : 'text-text-muted'
@@ -143,7 +145,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
         type="button"
         onClick={prev}
         disabled={matchCount === 0}
-        title="Previous match (Shift+Enter)"
+        title={t.editor.search.previousMatch}
         className="p-1 rounded text-text-muted hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent"
       >
         <ChevronUp size={14} />
@@ -153,7 +155,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
         type="button"
         onClick={next}
         disabled={matchCount === 0}
-        title="Next match (Enter)"
+        title={t.editor.search.nextMatch}
         className="p-1 rounded text-text-muted hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent"
       >
         <ChevronDown size={14} />
@@ -162,7 +164,7 @@ export function InNoteSearchBar({ editorRef, onClose }: InNoteSearchBarProps) {
       <button
         type="button"
         onClick={onClose}
-        title="Close (Escape)"
+        title={t.editor.search.close}
         className="p-1 rounded text-text-muted hover:bg-surface-3"
       >
         <X size={14} />

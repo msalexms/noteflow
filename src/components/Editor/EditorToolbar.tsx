@@ -31,6 +31,7 @@ import {
   AlignRight,
 } from 'lucide-react'
 import { setColumnAlign, getColumnAlign } from './tableUtils'
+import { useT } from '../../i18n/useT'
 
 interface ToolbarProps {
   editor: Editor
@@ -44,6 +45,7 @@ interface ToolbarButton {
 }
 
 export function EditorToolbar({ editor }: ToolbarProps) {
+  const t = useT()
   const [linkInputOpen, setLinkInputOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const linkInputRef = useRef<HTMLInputElement>(null)
@@ -74,87 +76,87 @@ export function EditorToolbar({ editor }: ToolbarProps) {
       icon: <Heading1 size={14} />,
       action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(),
       isActive: editor.isActive('heading', { level: 1 }),
-      title: 'Heading 1',
+      title: t.editor.toolbar.heading1,
     },
     {
       icon: <Heading2 size={14} />,
       action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(),
       isActive: editor.isActive('heading', { level: 2 }),
-      title: 'Heading 2',
+      title: t.editor.toolbar.heading2,
     },
     {
       icon: <Heading3 size={14} />,
       action: () => editor.chain().focus().toggleHeading({ level: 3 }).run(),
       isActive: editor.isActive('heading', { level: 3 }),
-      title: 'Heading 3',
+      title: t.editor.toolbar.heading3,
     },
     'sep',
     {
       icon: <Bold size={14} />,
       action: () => editor.chain().focus().toggleBold().run(),
       isActive: editor.isActive('bold'),
-      title: 'Bold (Ctrl+B)',
+      title: t.editor.toolbar.bold,
     },
     {
       icon: <Italic size={14} />,
       action: () => editor.chain().focus().toggleItalic().run(),
       isActive: editor.isActive('italic'),
-      title: 'Italic (Ctrl+I)',
+      title: t.editor.toolbar.italic,
     },
     {
       icon: <Underline size={14} />,
       action: () => editor.chain().focus().toggleUnderline().run(),
       isActive: editor.isActive('underline'),
-      title: 'Underline (Ctrl+U)',
+      title: t.editor.toolbar.underline,
     },
     {
       icon: <Strikethrough size={14} />,
       action: () => editor.chain().focus().toggleStrike().run(),
       isActive: editor.isActive('strike'),
-      title: 'Strikethrough',
+      title: t.editor.toolbar.strikethrough,
     },
     {
       icon: <Highlighter size={14} />,
       action: () => editor.chain().focus().toggleHighlight().run(),
       isActive: editor.isActive('highlight'),
-      title: 'Highlight (accent color)',
+      title: t.editor.toolbar.highlight,
     },
     {
       icon: <Code size={14} />,
       action: () => editor.chain().focus().toggleCode().run(),
       isActive: editor.isActive('code'),
-      title: 'Inline code (Ctrl+E)',
+      title: t.editor.toolbar.inlineCode,
     },
     {
       icon: <Code2 size={14} />,
       action: () => editor.chain().focus().toggleCodeBlock().run(),
       isActive: editor.isActive('codeBlock'),
-      title: 'Code block (Ctrl+Shift+B)',
+      title: t.editor.toolbar.codeBlock,
     },
     'sep',
     {
       icon: <List size={14} />,
       action: () => editor.chain().focus().toggleBulletList().run(),
       isActive: editor.isActive('bulletList'),
-      title: 'Bullet list',
+      title: t.editor.toolbar.bulletList,
     },
     {
       icon: <ListOrdered size={14} />,
       action: () => editor.chain().focus().toggleOrderedList().run(),
       isActive: editor.isActive('orderedList'),
-      title: 'Ordered list',
+      title: t.editor.toolbar.orderedList,
     },
     {
       icon: <CheckSquare size={14} />,
       action: () => editor.chain().focus().toggleTaskList().run(),
       isActive: editor.isActive('taskList'),
-      title: 'Task list',
+      title: t.editor.toolbar.taskList,
     },
     {
       icon: <Quote size={14} />,
       action: () => editor.chain().focus().toggleBlockquote().run(),
       isActive: editor.isActive('blockquote'),
-      title: 'Blockquote',
+      title: t.editor.toolbar.blockquote,
     },
     'sep',
     {
@@ -164,7 +166,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
         else openLinkInput()
       },
       isActive: editor.isActive('link'),
-      title: 'Insert link',
+      title: t.editor.toolbar.insertLink,
     },
     {
       icon: <TableIcon size={14} />,
@@ -177,18 +179,18 @@ export function EditorToolbar({ editor }: ToolbarProps) {
         }
       },
       isActive: editor.isActive('table'),
-      title: editor.isActive('table') ? 'Delete table' : 'Insert table',
+      title: editor.isActive('table') ? t.editor.toolbar.deleteTable : t.editor.toolbar.insertTable,
     },
     'sep',
     {
       icon: <Undo2 size={14} />,
       action: () => editor.chain().focus().undo().run(),
-      title: 'Undo (Ctrl+Z)',
+      title: t.editor.toolbar.undo,
     },
     {
       icon: <Redo2 size={14} />,
       action: () => editor.chain().focus().redo().run(),
-      title: 'Redo (Ctrl+Y)',
+      title: t.editor.toolbar.redo,
     },
   ]
 
@@ -235,7 +237,7 @@ export function EditorToolbar({ editor }: ToolbarProps) {
             onMouseDown={(e) => { e.preventDefault(); commitLink() }}
             className="text-xs font-mono text-text/70 hover:text-text transition-colors px-1"
           >
-            Set
+            {t.editor.toolbar.set}
           </button>
           <button
             onMouseDown={(e) => { e.preventDefault(); cancelLink() }}
@@ -253,59 +255,59 @@ export function EditorToolbar({ editor }: ToolbarProps) {
         const align = getColumnAlign(editor)
         return (
         <div className="flex items-center gap-1 px-3 py-1.5 border-t border-border flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-text-muted/60 mr-1">Table</span>
+          <span className="text-[10px] uppercase tracking-wider text-text-muted/60 mr-1">{t.editor.table.label}</span>
           <TableOpButton
-            title={inHeader ? "Can't add a row above the header" : 'Insert row above the current one'}
+            title={inHeader ? t.editor.table.addRowAboveBlocked : t.editor.table.addRowAbove}
             disabled={inHeader}
             onClick={() => editor.chain().focus().addRowBefore().run()}
           >
-            <Plus size={11} /> Row <ArrowUp size={11} />
+            <Plus size={11} /> {t.editor.table.row} <ArrowUp size={11} />
           </TableOpButton>
-          <TableOpButton title="Insert row below the current one" onClick={() => editor.chain().focus().addRowAfter().run()}>
-            <Plus size={11} /> Row <ArrowDown size={11} />
+          <TableOpButton title={t.editor.table.addRowBelow} onClick={() => editor.chain().focus().addRowAfter().run()}>
+            <Plus size={11} /> {t.editor.table.row} <ArrowDown size={11} />
           </TableOpButton>
           <TableOpButton
-            title={inHeader ? "The header row can't be deleted" : 'Delete current row'}
+            title={inHeader ? t.editor.table.deleteRowBlocked : t.editor.table.deleteRow}
             disabled={inHeader}
             onClick={() => editor.chain().focus().deleteRow().run()}
           >
-            <Minus size={11} /> Row
+            <Minus size={11} /> {t.editor.table.row}
           </TableOpButton>
           <div className="w-px h-4 bg-border mx-1" />
-          <TableOpButton title="Insert column to the left" onClick={() => editor.chain().focus().addColumnBefore().run()}>
-            <Plus size={11} /> Col <ArrowLeft size={11} />
+          <TableOpButton title={t.editor.table.addColLeft} onClick={() => editor.chain().focus().addColumnBefore().run()}>
+            <Plus size={11} /> {t.editor.table.col} <ArrowLeft size={11} />
           </TableOpButton>
-          <TableOpButton title="Insert column to the right" onClick={() => editor.chain().focus().addColumnAfter().run()}>
-            <Plus size={11} /> Col <ArrowRight size={11} />
+          <TableOpButton title={t.editor.table.addColRight} onClick={() => editor.chain().focus().addColumnAfter().run()}>
+            <Plus size={11} /> {t.editor.table.col} <ArrowRight size={11} />
           </TableOpButton>
-          <TableOpButton title="Delete current column" onClick={() => editor.chain().focus().deleteColumn().run()}>
-            <Minus size={11} /> Col
+          <TableOpButton title={t.editor.table.deleteCol} onClick={() => editor.chain().focus().deleteColumn().run()}>
+            <Minus size={11} /> {t.editor.table.col}
           </TableOpButton>
           <div className="w-px h-4 bg-border mx-1" />
           <TableOpButton
-            title="Align column left"
+            title={t.editor.table.alignLeft}
             isActive={align === 'left' || align === null}
             onClick={() => setColumnAlign(editor, 'left')}
           >
             <AlignLeft size={11} />
           </TableOpButton>
           <TableOpButton
-            title="Align column center"
+            title={t.editor.table.alignCenter}
             isActive={align === 'center'}
             onClick={() => setColumnAlign(editor, 'center')}
           >
             <AlignCenter size={11} />
           </TableOpButton>
           <TableOpButton
-            title="Align column right"
+            title={t.editor.table.alignRight}
             isActive={align === 'right'}
             onClick={() => setColumnAlign(editor, 'right')}
           >
             <AlignRight size={11} />
           </TableOpButton>
           <div className="w-px h-4 bg-border mx-1" />
-          <TableOpButton title="Delete the whole table" onClick={() => editor.chain().focus().deleteTable().run()}>
-            <Trash2 size={11} /> Table
+          <TableOpButton title={t.editor.table.deleteWholeTable} onClick={() => editor.chain().focus().deleteTable().run()}>
+            <Trash2 size={11} /> {t.editor.table.tableWord}
           </TableOpButton>
         </div>
         )

@@ -1,0 +1,127 @@
+export const editor = {
+  noNoteSelected: 'Ninguna nota seleccionada',
+  createHint: 'Ctrl+N para crear una',
+
+  dragToReorder: 'Arrastra para reordenar la sección',
+  addSection: 'Añadir sección (Ctrl+T)',
+  sectionFallback: 'Sección',
+  sectionStartWriting: '{name} — empieza a escribir...',
+  noteOverview: 'Vista de la nota — todas las secciones de un vistazo',
+  sectionOptions: 'Opciones de sección',
+  renameSection: 'Renombrar sección',
+
+  saveAsTemplate: 'Guardar como plantilla',
+  saveAsTemplateHint: 'Guarda esta nota (título + secciones) como plantilla reutilizable',
+  templateName: 'Nombre de la plantilla',
+  untitledTemplate: 'Plantilla sin título',
+
+  deletesAt: 'Se elimina el {date}',
+
+  sectionDeleted: 'Sección "{name}" eliminada',
+  undo: 'Deshacer',
+
+  auto: 'Auto',
+
+  noteEncrypted: 'Esta nota está cifrada',
+  clickToUnlock: 'Haz clic para desbloquear',
+
+  menu: {
+    editorMode: 'Modo editor',
+    rawMode: 'Modo markdown en crudo',
+    copySectionText: 'Copiar texto de la sección',
+    showToAiHint: 'La IA volverá a indexar y usar esta sección',
+    hideFromAiHint: 'La IA nunca indexará, leerá ni referenciará esta sección',
+    openAsSticky: 'Abrir como nota adhesiva',
+    archiveNote: 'Archivar nota',
+    unarchiveNote: 'Desarchivar nota',
+    encryptNote: 'Cifrar nota',
+    removeEncryption: 'Quitar cifrado',
+  },
+
+  toolbar: {
+    heading1: 'Encabezado 1',
+    heading2: 'Encabezado 2',
+    heading3: 'Encabezado 3',
+    bold: 'Negrita (Ctrl+B)',
+    italic: 'Cursiva (Ctrl+I)',
+    underline: 'Subrayado (Ctrl+U)',
+    strikethrough: 'Tachado',
+    highlight: 'Resaltado (color de acento)',
+    inlineCode: 'Código en línea (Ctrl+E)',
+    codeBlock: 'Bloque de código (Ctrl+Shift+B)',
+    bulletList: 'Lista con viñetas',
+    orderedList: 'Lista numerada',
+    taskList: 'Lista de tareas',
+    blockquote: 'Cita',
+    insertLink: 'Insertar enlace',
+    insertTable: 'Insertar tabla',
+    deleteTable: 'Eliminar tabla',
+    undo: 'Deshacer (Ctrl+Z)',
+    redo: 'Rehacer (Ctrl+Y)',
+    set: 'Aplicar',
+  },
+
+  table: {
+    label: 'Tabla',
+    row: 'Fila',
+    col: 'Col',
+    tableWord: 'Tabla',
+    addRowAboveBlocked: 'No se puede añadir una fila encima del encabezado',
+    addRowAbove: 'Insertar fila encima de la actual',
+    addRowBelow: 'Insertar fila debajo de la actual',
+    deleteRowBlocked: 'La fila de encabezado no se puede eliminar',
+    deleteRow: 'Eliminar fila actual',
+    addColLeft: 'Insertar columna a la izquierda',
+    addColRight: 'Insertar columna a la derecha',
+    deleteCol: 'Eliminar columna actual',
+    alignLeft: 'Alinear columna a la izquierda',
+    alignCenter: 'Alinear columna al centro',
+    alignRight: 'Alinear columna a la derecha',
+    deleteWholeTable: 'Eliminar toda la tabla',
+    alignLeftMenu: 'Alinear a la izquierda',
+    alignCenterMenu: 'Alinear al centro',
+    alignRightMenu: 'Alinear a la derecha',
+    deleteTableMenu: 'Eliminar tabla',
+  },
+
+  search: {
+    findInNote: 'Buscar en la nota',
+    matchCase: 'Distinguir mayúsculas',
+    previousMatch: 'Coincidencia anterior (Shift+Enter)',
+    nextMatch: 'Coincidencia siguiente (Enter)',
+    close: 'Cerrar (Escape)',
+  },
+
+  slash: {
+    linkSection: 'Enlazar sección',
+    linkSectionDescription: 'Enlazar a otra sección',
+    noCommands: 'Sin comandos',
+  },
+
+  sectionLink: {
+    placeholder: 'Enlazar a una sección…',
+    noSectionsFound: 'No se encontraron secciones',
+  },
+
+  codeBlock: {
+    plainText: 'Texto plano',
+    copy: 'Copiar',
+    copied: '✓ Copiado',
+    searchLanguage: 'Buscar lenguaje…',
+    noLanguages: 'Sin lenguajes',
+  },
+
+  task: {
+    importanceLow: 'Baja',
+    importanceMedium: 'Media',
+    importanceHigh: 'Alta',
+    setImportance: 'Definir importancia',
+    importanceTooltip: 'Importancia: {level}',
+    setDeadline: 'Definir fecha límite',
+    deadlineTooltip: 'Fecha límite: {date}',
+    date: 'Fecha',
+    alarm: 'Alarma',
+    clear: 'Quitar',
+    done: 'Hecho',
+  },
+}
