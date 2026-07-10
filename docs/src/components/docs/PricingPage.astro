@@ -1,0 +1,255 @@
+---
+// The /pricing docs page (both locales render through this component — see
+// src/pages/pricing.astro and src/pages/es/pricing.astro). Layout + shell behaviour
+// come from DocsShell; all prose lives in src/i18n/docs/pricing.{en,es}.ts.
+// Content facts come from .claude/context/monetization.md — no price figures are
+// published (pricing is shown at the Lemon Squeezy checkout). Accent = pink.
+import DocsShell from '../../layouts/DocsShell.astro';
+import { getRelativeLocaleUrl } from 'astro:i18n';
+import { getPricingContent } from '../../i18n/docs/pricing';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = getPricingContent(lang);
+
+// Cross-page links (locale-aware). Dict strings carry %AI_PROVIDERS_URL% /
+// %AI_PRIVACY_URL% placeholders so the prose stays plain data (pattern of FeaturesPage).
+const aiUrl = getRelativeLocaleUrl(lang, '/ai');
+const fillLinks = (s: string) =>
+  s.replace(/%AI_PROVIDERS_URL%/g, `${aiUrl}#providers`).replace(/%AI_PRIVACY_URL%/g, `${aiUrl}#privacy`);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: t.meta.title,
+  description: t.meta.description,
+  inLanguage: lang,
+  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+};
+
+// Mono section kicker: "01 / free", numbered from the TOC order.
+const kickerFor = (id: string) => {
+  const i = t.toc.findIndex((item) => item.id === id);
+  return `${String(i + 1).padStart(2, '0')} / ${id.replace(/-/g, ' ')}`;
+};
+---
+
+<DocsShell
+  lang={lang}
+  page="pricing"
+  accent="pink"
+  title={t.meta.title}
+  description={t.meta.description}
+  kicker={t.hero.kicker}
+  h1={t.hero.h1}
+  tagline={t.hero.tagline}
+  toc={t.toc}
+  jsonLd={jsonLd}
+>
+  <!-- ── Free forever ── -->
+  <section id="free" data-reveal>
+    <div class="nf-sec-head">{kickerFor('free')}</div>
+    <h2>{t.free.title}</h2>
+    {t.free.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-price-grid">
+      {t.free.cards.map((c) => (
+        <article class="nf-price-card nf-edge">
+          <h3>{c.title}</h3>
+          <p set:html={fillLinks(c.html)} />
+        </article>
+      ))}
+    </div>
+    <aside class="nf-pr-callout">
+      <h3>{t.free.keep.title}</h3>
+      <p set:html={t.free.keep.html} />
+    </aside>
+  </section>
+
+  <!-- ── NoteFlow AI ── -->
+  <section id="ai" data-reveal>
+    <div class="nf-sec-head">{kickerFor('ai')}</div>
+    <h2>{t.ai.title} <span class="nf-plan-badge">{t.ai.badge}</span></h2>
+    {t.ai.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.ai.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <h3>{t.ai.modelsTitle}</h3>
+    <div class="nf-model-chips">
+      {t.ai.models.map((m) => <span class="nf-model-chip">{m}</span>)}
+    </div>
+    <p class="nf-docs-p" set:html={t.ai.modelsNote} />
+    <aside class="nf-pr-callout">
+      <h3>{t.ai.alt.title}</h3>
+      <p set:html={t.ai.alt.html} />
+    </aside>
+  </section>
+
+  <!-- ── NoteFlow Cloud ── -->
+  <section id="cloud" data-reveal>
+    <div class="nf-sec-head">{kickerFor('cloud')}</div>
+    <h2>{t.cloud.title} <span class="nf-plan-badge nf-plan-badge--soon">{t.cloud.badge}</span></h2>
+    {t.cloud.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <ul class="nf-docs-ul">
+      {t.cloud.bullets.map((b) => <li set:html={b} />)}
+    </ul>
+    <aside class="nf-pr-callout">
+      <h3>{t.cloud.alt.title}</h3>
+      <p set:html={t.cloud.alt.html} />
+    </aside>
+  </section>
+
+  <!-- ── Managed vs self-managed ── -->
+  <section id="compare" data-reveal>
+    <div class="nf-sec-head">{kickerFor('compare')}</div>
+    <h2>{t.compare.title}</h2>
+    {t.compare.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <table class="nf-ref-table nf-compare-table">
+      <thead>
+        <tr>
+          <th>{t.compare.cols.capability}</th>
+          <th>{t.compare.cols.managed}</th>
+          <th>{t.compare.cols.self}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {t.compare.rows.map((r) => (
+          <tr>
+            <td class="nf-compare-cap">{r.capability}</td>
+            <td set:html={r.managed} />
+            <td set:html={r.self} />
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Privacy ── -->
+  <section id="privacy" data-reveal>
+    <div class="nf-sec-head">{kickerFor('privacy')}</div>
+    <h2>{t.privacy.title}</h2>
+    {t.privacy.intro.map((p) => <p class="nf-docs-p" set:html={fillLinks(p)} />)}
+    <div class="nf-pr-priv-list">
+      {t.privacy.items.map((item) => (
+        <article class="nf-pr-priv-card nf-edge">
+          <h3>{item.title}</h3>
+          <p set:html={item.html} />
+        </article>
+      ))}
+    </div>
+  </section>
+</DocsShell>
+
+<style is:global>
+  /* ── /pricing page-specific styles (shared widgets live in docs.css). Accent = pink. ── */
+
+  /* Free-tier cards */
+  .nf-price-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+    margin: 20px 0 20px;
+  }
+  .nf-price-card {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 16px 17px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .nf-price-card h3 { margin: 0; font-size: 15.5px; font-weight: 600; color: var(--ink-strong); }
+  .nf-price-card p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-dim); flex: 1; }
+
+  /* Plan status badge next to the section h2 */
+  .nf-plan-badge {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 12px;
+    padding: 3.5px 11px;
+    border: 1px solid rgb(var(--pink) / .55);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgb(var(--pink));
+    box-shadow: 0 0 10px rgb(var(--pink) / .18);
+    white-space: nowrap;
+  }
+  .nf-plan-badge--soon {
+    border-color: var(--line-2);
+    color: var(--ink-faint);
+    box-shadow: none;
+  }
+
+  /* Curated model chips */
+  .nf-model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 14px; }
+  .nf-model-chip {
+    display: inline-block;
+    padding: 5px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: var(--card);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: .04em;
+    color: rgb(var(--pink));
+    white-space: nowrap;
+  }
+
+  /* Highlighted callout ("the free alternative stays") */
+  .nf-pr-callout {
+    margin: 22px 0 6px;
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-left: 2px solid rgb(var(--pink));
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: 0 0 24px rgb(var(--pink) / .07);
+  }
+  .nf-pr-callout h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-pr-callout p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Comparison table */
+  .nf-compare-table { margin-top: 20px; }
+  .nf-compare-cap {
+    width: 22%;
+    min-width: 140px;
+    padding-right: 20px !important;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .nf-compare-table td { padding-right: 20px; }
+  @media (max-width: 719px) {
+    .nf-compare-table thead { display: none; }
+    .nf-compare-table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .nf-compare-table td { display: block; border-bottom: 0; padding: 2px 0; }
+    .nf-compare-cap { width: auto; min-width: 0; }
+  }
+
+  /* Privacy cards */
+  .nf-pr-priv-list { display: flex; flex-direction: column; gap: 14px; margin: 18px 0 18px; }
+  .nf-pr-priv-card {
+    border: 1px solid var(--line-2);
+    border-left: 2px solid rgb(var(--pink));
+    border-radius: 10px;
+    background: var(--card);
+    padding: 18px 20px;
+  }
+  .nf-pr-priv-card h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-pr-priv-card p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Prose links on this page underline with the pink accent (mirrors AiPage) */
+  .nf-pr-priv-card a, .nf-price-card a, .nf-docs-p a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--page-accent);
+    text-underline-offset: 3px;
+  }
+</style>
