@@ -17,12 +17,14 @@ exports.pushPathsNow = pushPathsNow;
 exports.schedulePush = schedulePush;
 exports.scheduleDelete = scheduleDelete;
 exports.scheduleDeleteDir = scheduleDeleteDir;
+exports.retrySyncJournal = retrySyncJournal;
 exports.migrateRemoteToV2IfNeeded = migrateRemoteToV2IfNeeded;
 const electron_1 = require("electron");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const https_1 = __importDefault(require("https"));
 const noteFormat_1 = require("./noteFormat");
+const syncState_1 = require("./syncState");
 // ── Constants ─────────────────────────────────────────────────────────────────
 const README_CONTENT = `# Your notes are synced with GitHub
 
@@ -348,6 +350,38 @@ let initialPullStatus = 'pending';
 let statusListener = null;
 // Pending push timers per filename (debounce)
 const pushTimers = new Map();
+// ── Durable sync state (journal + reconciled-SHA cache) ───────────────────────
+// Persisted in userData/sync-state.json — LOCAL device state, deliberately kept
+// out of the notes dir so it never syncs. The journal records every pending
+// remote mutation so a failed push/delete survives restarts and gets retried
+// (retrySyncJournal); the SHA cache lets pullNotes skip unchanged dirs/files
+// without a per-file GET. All transition logic is pure in syncState.ts.
+let syncState = null;
+function getSyncStatePath() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'sync-state.json');
+}
+function getState() {
+    if (!syncState) {
+        let raw = null;
+        try {
+            raw = fs_1.default.readFileSync(getSyncStatePath(), 'utf-8');
+        }
+        catch {
+            raw = null; // missing file — start empty
+        }
+        syncState = (0, syncState_1.parseSyncState)(raw); // corrupt content also degrades to empty
+    }
+    return syncState;
+}
+function persistState() {
+    try {
+        fs_1.default.writeFileSync(getSyncStatePath(), (0, syncState_1.serializeSyncState)(getState()), 'utf-8');
+    }
+    catch (err) {
+        // Never let state persistence block sync itself.
+        console.error('[GitHubSync] failed to persist sync-state.json:', String(err));
+    }
+}
 // ── Remote-mutation serialization ──────────────────────────────────────────────
 // The GitHub Contents API commits one change at a time per branch: every PUT/DELETE
 // moves the branch HEAD, so a concurrent write holding a now-stale file SHA gets a
@@ -516,6 +550,9 @@ function disconnectGitHub() {
     syncSettings = { enabled: false };
     syncError = undefined;
     cachedDefaultBranch = null;
+    // Drop the journal + SHA cache — they describe the repo we just disconnected from.
+    syncState = (0, syncState_1.emptySyncState)();
+    persistState();
     setInitialPullStatus('pending');
     const settings = readSettings();
     delete settings.githubSync;
@@ -551,8 +588,11 @@ async function pullNotes(notesDir) {
     const updatedFiles = [];
     let hadMetadataChanges = false;
     const previousLastSync = s.lastSync;
+    const state = getState();
+    let stateChanged = false;
     try {
         const blobs = await listRemoteTree(token, s.owner, s.repo);
+        const treeShaByPath = new Map(blobs.map((b) => [b.path, b.sha]));
         const remoteNoteDirs = groupRemoteNoteDirs(blobs);
         const remoteHasMarker = blobs.some((b) => b.path === noteFormat_1.FORMAT_MARKER_FILE);
         const remoteHasFlatNotes = rootFlatNoteBlobs(blobs).length > 0;
@@ -566,7 +606,17 @@ async function pullNotes(notesDir) {
         // WHOLESALE (all its section files mirrored, stale local sections removed).
         for (const [dir, remoteFilesInDir] of remoteNoteDirs) {
             try {
+                // Journal guard: a pending remote deleteDir means this dir was deleted
+                // locally but the remote delete hasn't landed — pulling it would
+                // resurrect the note.
+                if ((0, syncState_1.shouldPullSkipDir)(state, dir))
+                    continue;
                 const anchorRel = `${dir}/${noteFormat_1.NOTE_MD}`;
+                // SHA cache: if the anchor blob is exactly the one we already
+                // reconciled, nothing changed remotely — skip the dir without any GET.
+                const anchorTreeSha = treeShaByPath.get(anchorRel);
+                if (anchorTreeSha && (0, syncState_1.getCachedSha)(state, anchorRel) === anchorTreeSha)
+                    continue;
                 const remoteAnchor = await getRemoteFile(token, s.owner, s.repo, anchorRel);
                 if (!remoteAnchor)
                     continue;
@@ -575,14 +625,22 @@ async function pullNotes(notesDir) {
                 if (fs_1.default.existsSync(localAnchorPath)) {
                     const localUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs_1.default.readFileSync(localAnchorPath, 'utf-8')));
                     const remoteUpdatedTs = parseUpdatedTimestamp(extractUpdatedTimestamp(remoteAnchor.content));
-                    // Skip the whole dir if local is newer or equal
-                    if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs)
+                    // Skip the whole dir if local is newer or equal — decision made, so
+                    // remember this remote blob as reconciled (skip it without a GET
+                    // until it changes remotely again).
+                    if (localUpdatedTs !== null && remoteUpdatedTs !== null && remoteUpdatedTs <= localUpdatedTs) {
+                        if (anchorTreeSha && (0, syncState_1.setCachedSha)(state, anchorRel, anchorTreeSha))
+                            stateChanged = true;
                         continue;
+                    }
                 }
                 fs_1.default.mkdirSync(localDirPath, { recursive: true });
                 fs_1.default.writeFileSync(localAnchorPath, remoteAnchor.content, 'utf-8');
                 for (const f of remoteFilesInDir) {
                     if (f === noteFormat_1.NOTE_MD)
+                        continue;
+                    // Journal guard: don't resurrect a section whose remote delete is pending.
+                    if ((0, syncState_1.shouldPullSkipFile)(state, `${dir}/${f}`))
                         continue;
                     const remoteSection = await getRemoteFile(token, s.owner, s.repo, `${dir}/${f}`);
                     if (remoteSection)
@@ -602,6 +660,8 @@ async function pullNotes(notesDir) {
                     }
                 }
                 catch { /* ignore */ }
+                if (anchorTreeSha && (0, syncState_1.setCachedSha)(state, anchorRel, anchorTreeSha))
+                    stateChanged = true;
                 updatedFiles.push(localDirPath);
                 pulled++;
             }
@@ -618,6 +678,11 @@ async function pullNotes(notesDir) {
         if (lastSyncTime !== null && remoteIsV2) {
             for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
                 if (remoteNoteDirs.has(dir))
+                    continue;
+                // Journal guard: a pending upsert under this dir means its push never
+                // landed — the remote absence doesn't mean "deleted remotely", and
+                // removing the dir locally would lose the unpushed edit.
+                if ((0, syncState_1.shouldDeletionRuleSkipDir)(state, dir))
                     continue;
                 const localDirPath = path_1.default.join(notesDir, dir);
                 try {
@@ -636,6 +701,13 @@ async function pullNotes(notesDir) {
         // Pull optional metadata JSON files used by non-note features.
         for (const metadataFilename of METADATA_FILENAMES) {
             try {
+                // The tree already tells us whether the file exists and its blob SHA —
+                // only GET when it differs from the last reconciled one.
+                const metadataTreeSha = treeShaByPath.get(metadataFilename);
+                if (!metadataTreeSha)
+                    continue; // not on remote
+                if ((0, syncState_1.getCachedSha)(state, metadataFilename) === metadataTreeSha)
+                    continue;
                 const remoteMetadata = await getRemoteFile(token, s.owner, s.repo, metadataFilename);
                 if (!remoteMetadata)
                     continue;
@@ -647,11 +719,16 @@ async function pullNotes(notesDir) {
                     fs_1.default.writeFileSync(metadataPath, remoteMetadata.content, 'utf-8');
                     hadMetadataChanges = true;
                 }
+                if ((0, syncState_1.setCachedSha)(state, metadataFilename, metadataTreeSha))
+                    stateChanged = true;
             }
             catch {
                 // Optional metadata file is missing or unreadable remotely.
             }
         }
+        // Keep the SHA cache bounded: drop entries for blobs gone from the tree.
+        if ((0, syncState_1.pruneShas)(state, new Set(blobs.map((b) => b.path))))
+            stateChanged = true;
         syncSettings = { ...s, lastSync: new Date().toISOString() };
         const settings = readSettings();
         settings.githubSync = syncSettings;
@@ -670,6 +747,8 @@ async function pullNotes(notesDir) {
         if (initialPullStatus === 'pending')
             setInitialPullStatus('failed');
     }
+    if (stateChanged)
+        persistState();
     return {
         pulled,
         deleted,
@@ -717,17 +796,28 @@ async function pushAllNotes(notesDir) {
     catch {
         return { pushed: 0, errors: [] };
     }
+    let stateChanged = false;
     for (const relPath of relPaths) {
         try {
             const content = fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8');
             await upsertRemoteFile(token, s.owner, s.repo, relPath, content);
             pushed++;
+            if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
+                stateChanged = true;
         }
         catch (err) {
             errors.push(relPath);
+            // Journal the failed upsert so retrySyncJournal picks it up later.
+            // IfAbsent: must not clobber a newer delete/deleteDir intent recorded for
+            // this key while the push was in flight (see journalRecordIfAbsent).
+            (0, syncState_1.journalRecordIfAbsent)(getState(), relPath, 'upsert', new Date().toISOString());
+            (0, syncState_1.journalFail)(getState(), relPath, 'upsert');
+            stateChanged = true;
             console.error(`[GitHubSync] pushAll failed for ${relPath}:`, String(err));
         }
     }
+    if (stateChanged)
+        persistState();
     return { pushed, errors };
 }
 /**
@@ -759,6 +849,7 @@ async function pushPathsNow(notesDir, relPaths) {
     }
     let pushed = 0;
     const errors = [];
+    let stateChanged = false;
     for (const relPath of relPaths) {
         // Supersede any debounced timer for this path — we're pushing it now.
         const existing = pushTimers.get(relPath);
@@ -770,12 +861,22 @@ async function pushPathsNow(notesDir, relPaths) {
             const content = fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8');
             await upsertRemoteFile(token, s.owner, s.repo, relPath, content);
             pushed++;
+            if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
+                stateChanged = true;
         }
         catch (err) {
             errors.push(relPath);
+            // Journal the failed upsert so retrySyncJournal picks it up later.
+            // IfAbsent: must not clobber a newer delete/deleteDir intent recorded for
+            // this key while the push was in flight (see journalRecordIfAbsent).
+            (0, syncState_1.journalRecordIfAbsent)(getState(), relPath, 'upsert', new Date().toISOString());
+            (0, syncState_1.journalFail)(getState(), relPath, 'upsert');
+            stateChanged = true;
             console.error(`[GitHubSync] pushPathsNow failed for ${relPath}:`, String(err));
         }
     }
+    if (stateChanged)
+        persistState();
     if (pushed > 0)
         syncError = undefined;
     return { pushed, errors };
@@ -813,12 +914,19 @@ function schedulePushUnguarded(relPath, content, onStart, onComplete) {
     const existing = pushTimers.get(relPath);
     if (existing)
         clearTimeout(existing);
+    // Journal the pending upsert at timer-arming time (not when it fires) so it
+    // survives the app closing during the debounce window. Cleared on success;
+    // kept on failure so retrySyncJournal re-pushes the on-disk content later.
+    if ((0, syncState_1.journalRecord)(getState(), relPath, 'upsert', new Date().toISOString()))
+        persistState();
     const timer = setTimeout(async () => {
         pushTimers.delete(relPath);
         onStart?.(); // timer fired → HTTP request is about to start
         try {
             const token = decryptToken(s.encryptedToken);
             await upsertRemoteFile(token, s.owner, s.repo, relPath, content);
+            if ((0, syncState_1.journalComplete)(getState(), relPath, 'upsert'))
+                persistState();
             syncSettings = { ...s, lastSync: new Date().toISOString() };
             const settings = readSettings();
             settings.githubSync = syncSettings;
@@ -827,6 +935,17 @@ function schedulePushUnguarded(relPath, content, onStart, onComplete) {
             onComplete?.();
         }
         catch (err) {
+            // Re-record before failing: the entry may have been completed by a racing
+            // retrySyncJournal while this push was in flight — journalFail alone would
+            // be a no-op then and the failed push would be silently lost (same pattern
+            // as the pushPathsNow/pushAllNotes catch blocks). IfAbsent: must not
+            // clobber a newer delete/deleteDir intent recorded for this key while the
+            // push was in flight — e.g. scheduleDelete of this very section — or a
+            // correlated delete failure would leave an 'upsert' entry for a locally
+            // deleted file, which the retry then DISCARDS: remote delete lost.
+            (0, syncState_1.journalRecordIfAbsent)(getState(), relPath, 'upsert', new Date().toISOString());
+            (0, syncState_1.journalFail)(getState(), relPath, 'upsert');
+            persistState();
             syncError = err instanceof Error ? err.message : String(err);
             console.error('[GitHubSync] push failed:', syncError);
             onComplete?.(syncError);
@@ -875,13 +994,46 @@ async function scheduleDelete(relPath) {
         clearTimeout(existing);
         pushTimers.delete(relPath);
     }
+    // Journal the delete before attempting it — a lost remote delete makes the
+    // section resurrect on the next pull. Also supersedes any journaled upsert
+    // for this path.
+    if ((0, syncState_1.journalRecord)(getState(), relPath, 'delete', new Date().toISOString()))
+        persistState();
     try {
         const token = decryptToken(s.encryptedToken);
         await removeRemoteFile(token, s.owner, s.repo, relPath);
+        if ((0, syncState_1.journalComplete)(getState(), relPath, 'delete'))
+            persistState();
     }
     catch (err) {
+        (0, syncState_1.journalFail)(getState(), relPath, 'delete');
+        persistState();
+        syncError = `Failed to delete ${relPath} on GitHub: ${String(err)}`;
         console.error('[GitHubSync] delete failed:', String(err));
     }
+}
+/**
+ * Deletes every remote blob under '<dir>/'. One blob failure must not abort the
+ * rest (a half-deleted dir would be re-pulled on the next sync), but the call
+ * THROWS if any blob failed so callers journal it for retry.
+ */
+async function deleteRemoteDirNow(token, owner, repo, dir) {
+    const blobs = await listRemoteTree(token, owner, repo);
+    const targets = blobs.filter((b) => b.path.startsWith(`${dir}/`));
+    let failures = 0;
+    let lastError = '';
+    for (const b of targets) {
+        try {
+            await removeRemoteFile(token, owner, repo, b.path);
+        }
+        catch (err) {
+            failures++;
+            lastError = String(err);
+            console.error(`[GitHubSync] delete dir blob failed for ${b.path}:`, String(err));
+        }
+    }
+    if (failures > 0)
+        throw new Error(`${failures} file(s) could not be deleted (${lastError})`);
 }
 /** Removes a whole remote note directory (every blob under '<dir>/'). */
 async function scheduleDeleteDir(dir) {
@@ -895,29 +1047,113 @@ async function scheduleDeleteDir(dir) {
             pushTimers.delete(key);
         }
     }
+    // Journal the dir delete before attempting it (also drops any file-level ops
+    // under the dir — they are superseded). A lost remote delete makes the note
+    // resurrect on the next pull, so failures keep the entry for retry.
+    if ((0, syncState_1.journalRecord)(getState(), dir, 'deleteDir', new Date().toISOString()))
+        persistState();
     try {
         const token = decryptToken(s.encryptedToken);
-        const blobs = await listRemoteTree(token, s.owner, s.repo);
-        const targets = blobs.filter((b) => b.path.startsWith(`${dir}/`));
-        // Delete every blob; one failure must not abort the rest (a half-deleted dir
-        // would be re-pulled on the next sync). Surface failures via syncError so the
-        // delete isn't silently dropped — the cause of notes "coming back".
-        let failures = 0;
-        for (const b of targets) {
-            try {
-                await removeRemoteFile(token, s.owner, s.repo, b.path);
-            }
-            catch (err) {
-                failures++;
-                console.error(`[GitHubSync] delete dir blob failed for ${b.path}:`, String(err));
-            }
-        }
-        if (failures > 0)
-            syncError = `Failed to delete ${failures} remote file(s) in ${dir}`;
+        await deleteRemoteDirNow(token, s.owner, s.repo, dir);
+        if ((0, syncState_1.journalComplete)(getState(), dir, 'deleteDir'))
+            persistState();
     }
     catch (err) {
-        syncError = `delete dir ${dir} failed: ${String(err)}`;
+        (0, syncState_1.journalFail)(getState(), dir, 'deleteDir');
+        persistState();
+        syncError = `Failed to delete note folder "${dir}" on GitHub: ${String(err)}`;
         console.error('[GitHubSync] delete dir failed:', String(err));
+    }
+}
+// ── Journal retry (durability for failed remote mutations) ───────────────────
+let retryInFlight = false;
+/**
+ * Drains the persistent journal of pending remote mutations, executing each op:
+ * upserts re-read the CURRENT on-disk content (an upsert whose local file is
+ * gone is discarded — its removal is covered by its own delete/deleteDir
+ * entry); deletes/deleteDirs re-run the remote removal. Successful ops leave
+ * the journal; failed ones stay (attempts++) for the next round — there is no
+ * attempt cap that would silently drop a delete (a lost remote delete = a note
+ * that resurrects). Called from main.ts on every auto-sync tick BEFORE
+ * pullNotes, and once after the initial pull succeeds.
+ *
+ * Retried upserts do NOT bump `lastSync` — same rationale as pushPathsNow:
+ * bumping it would expose OTHER still-pending local notes to the pull's
+ * deletion rule.
+ *
+ * Gated on initialPullStatus === 'ok' like regular pushes: retrying before the
+ * first successful pull could overwrite a newer remote version.
+ */
+async function retrySyncJournal(notesDir) {
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return;
+    if (initialPullStatus !== 'ok')
+        return;
+    if (retryInFlight)
+        return;
+    const state = getState();
+    const entries = Object.entries(state.ops)
+        .sort((a, b) => a[1].queuedAt.localeCompare(b[1].queuedAt));
+    if (entries.length === 0)
+        return;
+    retryInFlight = true;
+    try {
+        let token;
+        try {
+            token = decryptToken(s.encryptedToken);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            syncError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`;
+            return;
+        }
+        const owner = s.owner;
+        const repo = s.repo;
+        for (const [key, entry] of entries) {
+            // A live debounce timer for this path will push fresher content shortly —
+            // let it handle the upsert instead of racing it here.
+            if (entry.op === 'upsert' && pushTimers.has(key))
+                continue;
+            const action = (0, syncState_1.resolveRetryAction)(entry.op, fs_1.default.existsSync(path_1.default.join(notesDir, key)));
+            if (action === 'discard') {
+                if ((0, syncState_1.journalComplete)(state, key, entry.op))
+                    persistState();
+                continue;
+            }
+            try {
+                if (action === 'upsert') {
+                    const content = fs_1.default.readFileSync(path_1.default.join(notesDir, key), 'utf-8');
+                    await upsertRemoteFile(token, owner, repo, key, content);
+                    // Race guard: if the user edited this file WHILE the retry push was in
+                    // flight, schedulePushUnguarded armed a new debounce timer and its
+                    // journalRecord was a same-op no-op (the entry we're retrying was kept).
+                    // Completing it here would erase that NEWER intent — if the app closed
+                    // during the debounce window, the fresh edit would be lost from the
+                    // journal. Leave the entry alive; the pending timer will complete or
+                    // fail it.
+                    if (pushTimers.has(key))
+                        continue;
+                }
+                else if (action === 'delete') {
+                    await removeRemoteFile(token, owner, repo, key);
+                }
+                else {
+                    await deleteRemoteDirNow(token, owner, repo, key);
+                }
+                if ((0, syncState_1.journalComplete)(state, key, entry.op))
+                    persistState();
+            }
+            catch (err) {
+                (0, syncState_1.journalFail)(state, key, entry.op);
+                persistState();
+                syncError = `Sync retry (${entry.op} ${key}) failed: ${String(err)}`;
+                console.error(`[GitHubSync] journal retry failed for ${entry.op} ${key}:`, String(err));
+            }
+        }
+    }
+    finally {
+        retryInFlight = false;
     }
 }
 // ── One-time remote format migration (v1 flat files → v2 folders) ────────────
