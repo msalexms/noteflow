@@ -173,29 +173,58 @@ es **un preset más**, no una implementación nueva.
 **Decisión: E2EE total.** El servidor solo ve ciphertext; ni el operador puede leer las notas.
 Es el argumento de privacidad del plan y encaja con el ADN local-first de la app.
 
-### Jerarquía de claves
+> **Estado: tramo 1 implementado** (fundación criptográfica + esquema de servidor): migración
+> `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y `electron/cloudCrypto.ts`
+> (capa criptográfica pura, testeada en `tests/electron/cloudCrypto.test.ts`). Pendientes los
+> tramos siguientes: `cloudSync.ts` / interfaz `SyncProvider`, Realtime y el onboarding
+> passphrase/recovery en UI. Sin UI ni sync, el esquema y el módulo quedan inertes.
+
+### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
-- **KEK** derivada de una **passphrase** del usuario (PBKDF2-SHA256 con iteraciones altas —
-  reutilizar primitivas de `src/lib/cryptoUtils.ts`, hoy usadas para el cifrado por nota) que
-  **envuelve** la DEK.
+- **KEK** derivada de una **passphrase** del usuario (PBKDF2-SHA256, 310.000 iteraciones por
+  defecto — mismos parámetros que `src/lib/cryptoUtils.ts`, el cifrado por nota; módulo propio
+  en `electron/` porque `tsconfig.electron.json` no puede importar de `src/`) que **envuelve**
+  la DEK.
 - **Recovery code** aleatorio mostrado UNA vez, que también envuelve la DEK (segunda vía de
-  acceso). Perder passphrase + recovery = **datos irrecuperables** — avisar explícitamente en UI.
-- Las DEK envueltas se guardan en el servidor (tabla `user_keys`) — el servidor nunca ve la DEK.
+  acceso). Formato: 6 grupos de 5 chars (`XXXXX-XXXXX-...`), alfabeto de 32 chars sin ambiguos
+  (sin 0/O/1/I) → 150 bits de entropía; el input del usuario se normaliza (mayúsculas, sin
+  separadores). Perder passphrase + recovery = **datos irrecuperables** — avisar explícitamente
+  en UI.
+- Las DEK envueltas se guardan en el servidor (tabla `user_keys` de la migración 0004: una fila
+  por usuario con `dek_pass_ct`/`pass_salt`/`pass_iterations` + `dek_recovery_ct`/`recovery_salt`/
+  `recovery_iterations`) — el servidor nunca ve la DEK. RLS: solo ownership (select/insert/
+  update/delete con `auth.uid() = user_id`); las claves deben poder crearse/leerse siempre,
+  también sin suscripción activa.
 - **Clave por nota desde el día 1**, envuelta por la master key: habilita compartir (re-envolver
   la clave de esa nota para el destinatario) y rotación sin recifrar todo el corpus.
+- **Formato de blob sellado** (todas las columnas `*_ct`): `base64url(iv de 12 bytes || AES-256-
+  GCM ciphertext+tag)` — IV aleatorio por operación, viaja con el ciphertext.
 
-### Modelo de datos
+### Modelo de datos (migración `0004_cloud.sql`)
 ```
-files(user_id, path_key, path_ct, content_ct, updated_at, deleted,
+files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
       PRIMARY KEY (user_id, path_key))
++ índice (user_id, updated_at) para el pull incremental
 ```
-- `path_key = HMAC(clave derivada de la DEK, relPath)` — identificador opaco; no filtra
-  títulos/slugs (el relPath actual contiene el título de la nota).
-- `path_ct` = relPath cifrado (para reconstruir el árbol en un dispositivo nuevo).
+- `path_key = HMAC-SHA256(subclave de la DEK, relPath)` en base64url — identificador opaco y
+  determinista; no filtra títulos/slugs (el relPath actual contiene el título de la nota). La
+  subclave HMAC se deriva de la DEK con HKDF (info `'noteflow-cloud-path'`) para no reutilizar
+  la DEK cruda en dos usos.
+- `path_ct` = relPath cifrado con la clave de la nota (para reconstruir el árbol en un
+  dispositivo nuevo).
 - `content_ct` = contenido AES-256-GCM (IV aleatorio por escritura).
+- `key_ct` = **clave de la nota envuelta por la DEK, duplicada en cada fila**: las filas de una
+  misma carpeta de nota comparten la misma clave de nota, pero cada fila lleva su propia copia
+  envuelta — la tabla queda auto-contenida (una fila basta para descifrarse) y permite
+  re-envolver por nota para compartir/rotar en el futuro.
 - `updated_at` **en claro** (solo filtra timing): lo pone el cliente desde el frontmatter y es la
   base de la resolución de conflictos con la **carpeta como unidad** (misma regla que el pull del
   GitHub Sync).
+- **RLS con gating por entitlement:** `select` y `delete` solo piden ownership (un usuario cuya
+  suscripción caduca sigue pudiendo bajar y borrar sus datos), pero `insert` y `update` exigen
+  además fila en `subscriptions` con product `cloud`/`bundle` y `status = 'active'`. Ojo: el
+  tombstone (`deleted = true` vía update) también queda gateado — sin suscripción, propagar
+  borrados es vía `DELETE` físico.
 
 ### Sync engine (`electron/cloudSync.ts`, futuro)
 - El GitHub Sync ya es un modelo "archivo por ruta relativa" (`schedulePush(relPath, content)`,
@@ -221,7 +250,7 @@ files(user_id, path_key, path_ct, content_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube E2EE** | Jerarquía de claves + `cloudSync.ts` (interfaz `SyncProvider`) + Realtime + onboarding passphrase/recovery + coexistencia/migración desde GitHub Sync |
+| **4.2 Nube E2EE** | 🔨 **En curso — tramo 1 hecho:** fundación criptográfica (`electron/cloudCrypto.ts` + tests) y esquema de servidor (migración 0004: `user_keys` + `files` + RLS con gating de escritura por entitlement). Pendiente: `cloudSync.ts` (interfaz `SyncProvider`) + Realtime + onboarding passphrase/recovery + coexistencia/migración desde GitHub Sync |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)

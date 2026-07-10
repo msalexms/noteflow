@@ -1,4 +1,4 @@
-# Supabase — backend de la cuenta NoteFlow (Fase 4.0)
+# Supabase — backend de NoteFlow (fases 4.x: cuenta, IA gestionada, nube E2EE)
 
 Instrucciones para el **operador** (el dueño del proyecto Supabase). El código cliente ya está
 implementado (`electron/account.ts` + panel Account en Settings) y queda **inerte** hasta que
@@ -163,3 +163,19 @@ del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens
    `electron/cloudConfig.ts`. Mientras esté vacía, el botón "Subscribe to NoteFlow AI" de
    Settings → Account queda oculto (se muestra "Subscriptions are coming soon."). La app añade
    sola el parámetro `checkout[custom][user_id]` al abrirla.
+
+## 7. NoteFlow Cloud (nube E2EE — tramo 1: esquema)
+
+La migración 0004 crea el esquema de la nube de notas E2EE: `user_keys` (DEK envuelta por
+passphrase y por recovery code) y `files` (blobs cifrados por archivo). El servidor solo ve
+ciphertext; el cliente lee/escribe directamente vía PostgREST + RLS (sin Edge Functions).
+
+1. **Correr la migración 0004** (`supabase/migrations/0004_cloud.sql`), igual que las anteriores
+   (SQL Editor o `supabase db push`).
+
+No hay más pasos: **este tramo no añade secrets ni Edge Functions**. La seguridad la dan las RLS
+policies: cada usuario solo accede a sus filas, y en `files` la **escritura** (insert/update)
+exige además una suscripción `cloud`/`bundle` con `status = 'active'` en `public.subscriptions`
+— la lectura y el borrado solo piden ownership, para que un usuario con la suscripción caducada
+pueda seguir bajando y borrando sus datos (pero no subiendo). En `user_keys` basta ownership en
+todas las operaciones (el material de claves debe poder crearse/leerse siempre).
