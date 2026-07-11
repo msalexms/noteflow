@@ -192,6 +192,7 @@ function getCloudSyncStatus() {
         enabled: s.enabled,
         signedIn: account.getAccountStatus().signedIn,
         keysState: cloudKeys.getKeysState(),
+        keysMode: cloudKeys.getKeysMode(),
         lastSync: s.lastSync,
         error: syncError,
         initialPullStatus,

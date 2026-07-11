@@ -89,6 +89,8 @@ export interface CloudSyncSettings {
   pullCursor?: string
   /** DEK cached encrypted with safeStorage — owned by cloudKeys.ts. */
   encryptedDek?: string
+  /** Encryption mode of the account's keys ('managed' | 'e2ee') — owned by cloudKeys.ts. */
+  keysMode?: string
 }
 
 export type InitialPullStatus = 'pending' | 'ok' | 'failed'
@@ -99,6 +101,8 @@ export interface CloudSyncStatus {
   enabled: boolean
   signedIn: boolean
   keysState: cloudKeys.CloudKeysState
+  /** 'managed' | 'e2ee' | null (no keys, or mode unknown yet) — drives the Cloud panel. */
+  keysMode: cloudKeys.CloudKeysMode
   lastSync?: string
   error?: string
   initialPullStatus: InitialPullStatus
@@ -224,6 +228,7 @@ export function getCloudSyncStatus(): CloudSyncStatus {
     enabled: s.enabled,
     signedIn: account.getAccountStatus().signedIn,
     keysState: cloudKeys.getKeysState(),
+    keysMode: cloudKeys.getKeysMode(),
     lastSync: s.lastSync,
     error: syncError,
     initialPullStatus,

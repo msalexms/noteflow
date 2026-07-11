@@ -11,8 +11,10 @@
 > del preset al suscribirse + sección dedicada en `LlmConfigView` (ver § 3, "implementación"). El
 > **proyecto Supabase real está conectado** (`electron/cloudConfig.ts`).
 > Decisiones tomadas con el usuario (2026-07): backend **Supabase**, pagos por **Merchant of
-> Record = Lemon Squeezy**, nube con **E2EE total**, IA gestionada con **OpenRouter** como único
-> upstream. Las opciones gratuitas actuales (IA local/API propia, GitHub Sync) **se mantienen**.
+> Record = Lemon Squeezy**, nube con **cifrado dual managed/e2ee** (modelo Obsidian: managed por
+> defecto, E2EE estricto opt-in — decisión revisada, antes "E2EE total"; ver § 4), IA gestionada
+> con **OpenRouter** como único upstream. Las opciones gratuitas actuales (IA local/API propia,
+> GitHub Sync) **se mantienen**.
 
 ## Visión de producto
 
@@ -168,20 +170,65 @@ es **un preset más**, no una implementación nueva.
   recuperados). Las secciones `aiHidden` y las notas cifradas ya quedan fuera del índice y por
   tanto nunca salen. La IA gestionada NO pasa por la nube de notas (subsistemas independientes).
 
-## 4. NoteFlow Cloud — nube de notas E2EE
+## 4. NoteFlow Cloud — nube de notas cifrada (managed | e2ee)
 
-**Decisión: E2EE total.** El servidor solo ve ciphertext; ni el operador puede leer las notas.
-Es el argumento de privacidad del plan y encaja con el ADN local-first de la app.
+**Decisión (2026-07, revisada): modelo Obsidian Sync — dos modos de cifrado a elegir.** El modo
+**estándar "managed"** es el DEFAULT (cero secretos que guardar; el operador custodia la clave y
+técnicamente podría leer las notas — se comunica con honestidad en la UI) y el modo **privado
+"e2ee"** es opt-in (E2EE estricto con passphrase + recovery: el servidor solo ve ciphertext, ni
+el operador puede leer). La decisión original "E2EE total" se relajó porque obligar a todo
+usuario a custodiar una passphrase es hostil para el usuario medio; el E2EE queda como feature
+diferencial de privacidad, no como peaje.
 
-> **Estado: tramos 1, 2 y 4 implementados.** Tramo 1 (fundación): migración
-> `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y `electron/cloudCrypto.ts`
-> (capa criptográfica pura, testeada en `tests/electron/cloudCrypto.test.ts`). Tramo 2 (motor de
-> sync): `electron/cloudKeys.ts` (sesión de claves), `electron/cloudSync.ts` +
-> `electron/cloudSyncLogic.ts` (motor, lógica pura testeada en `tests/electron/cloudSync.test.ts`),
-> interfaz `SyncProvider` (`electron/syncProvider.ts`) y los IPC `cloud:*`. Tramo 4 (UI):
-> onboarding passphrase/recovery + panel en Settings → Sync + enforcement visual de la exclusión
-> mutua con GitHub Sync (ver "Settings UI" abajo). Pendiente: tramo 3 (Realtime — de momento
-> **polling interino** cada 60 s, `CLOUD_AUTO_SYNC_INTERVAL_MS`).
+> **Estado: tramos 1, 2 y 4 implementados + modo dual managed/e2ee.** Tramo 1 (fundación):
+> migración `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y
+> `electron/cloudCrypto.ts` (capa criptográfica pura, testeada en
+> `tests/electron/cloudCrypto.test.ts`). Tramo 2 (motor de sync): `electron/cloudKeys.ts`
+> (sesión de claves), `electron/cloudSync.ts` + `electron/cloudSyncLogic.ts` (motor, lógica pura
+> testeada en `tests/electron/cloudSync.test.ts`), interfaz `SyncProvider`
+> (`electron/syncProvider.ts`) y los IPC `cloud:*`. Tramo 4 (UI): onboarding con elección de modo
+> + panel en Settings → Sync + enforcement visual de la exclusión mutua con GitHub Sync (ver
+> "Settings UI" abajo). Modo dual: migración `0005_cloud_managed.sql` + Edge Function
+> `cloud-keys` + rama managed en `cloudKeys.ts` (ver "Modos de cifrado" abajo). Pendiente:
+> tramo 3 (Realtime — de momento **polling interino** cada 60 s, `CLOUD_AUTO_SYNC_INTERVAL_MS`).
+
+### Modos de cifrado (managed | e2ee)
+
+- **`managed` (estándar, DEFAULT):** la DEK se genera igual en el cliente, pero se deposita en
+  el servidor envuelta por la **KEK del operador** (secret `CLOUD_MANAGED_KEK`, 32 bytes base64,
+  solo conocida por la Edge Function `supabase/functions/cloud-keys`; lógica pura en `logic.ts`
+  testeada en `tests/supabase/cloud-keys.test.ts`). El usuario no guarda NINGÚN secreto: con
+  sesión iniciada el unlock es silencioso y automático. Trade-off honesto (copy de la UI): las
+  notas van cifradas en tránsito y en reposo, pero NoteFlow **técnicamente podría** leerlas.
+  - `POST cloud-keys/setup` `{dek}` → envuelve e inserta la fila `user_keys` con `mode='managed'`
+    (409 si ya hay fila, mismo contrato que el setup e2ee). `POST cloud-keys/unlock` → devuelve
+    `{dek}` al dueño de la sesión (404 sin fila; 409 si la fila es e2ee). **Sin gating por
+    entitlement** (las claves siempre se pueden crear/leer, espejo de la RLS de `user_keys`).
+    Se despliega CON verify JWT (default).
+  - **Auto-unlock** (`autoUnlockManaged`, single-flight, nunca lanza): se intenta en el boot,
+    al pasar a signed-in, desde el tick del autosync y desde la UI (IPC `cloud:auto-unlock`,
+    polling de 10 s del panel mientras esté `locked`+managed). **Requisito duro: un usuario
+    managed con sesión iniciada jamás ve una pantalla de unlock** (offline → `locked` con
+    reintento silencioso). Cache local de la DEK: con `safeStorage` si está disponible; si no,
+    simplemente NO se cachea (managed puede re-pedir la DEK al servidor en cada boot).
+- **`e2ee` (privado, opt-in):** el flujo original passphrase + recovery code (secciones
+  siguientes). El servidor nunca ve la DEK; perder passphrase + recovery = datos irrecuperables.
+- **Esquema (migración `0005_cloud_managed.sql`):** columnas de passphrase/recovery de
+  `user_keys` pasan a NULLABLE + `mode text not null default 'e2ee'` (default e2ee para que las
+  filas preexistentes queden correctas sin backfill) + `dek_managed_ct` (DEK envuelta por la KEK
+  del operador, mismo formato de blob sellado) + CHECK `user_keys_mode_coherent` (managed exige
+  `dek_managed_ct`; e2ee exige el juego completo passphrase+recovery). RLS sin cambios;
+  `dek_managed_ct` lo escribe solo el service role **por convención** (un write directo del
+  cliente es inocuo: no conoce la KEK del operador).
+- **Upgrade managed → e2ee, ONE-WAY** (`upgradeCloudKeysToE2ee`, IPC `cloud:upgrade-e2ee`, botón
+  "Switch to private mode" del panel): requiere `unlocked`; envuelve la DEK vigente con la nueva
+  passphrase + recovery code nuevo y hace PATCH de la fila (`mode='e2ee'`, `dek_managed_ct=NULL`)
+  — lo permite la RLS de ownership. La **DEK no cambia** (no se recifra el corpus): las notas ya
+  subidas pudieron ser técnicamente accesibles durante el modo managed — se avisa en la UI, no se
+  resuelve (rotar la DEK cambiaría todos los `path_key` HMAC → re-upload completo, fuera de
+  alcance). **No hay downgrade** e2ee → managed (debilitaría el cifrado en silencio).
+- El estado público (`CloudSyncStatus`) lleva `keysMode: 'managed' | 'e2ee' | null` (null = sin
+  fila o aún desconocido); persiste en `settings.cloudSync.keysMode` como cache de arranque.
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
@@ -335,7 +382,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube E2EE** | 🔨 **En curso — tramos 1, 2 y 4 hechos:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migración 0004) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s) + **Settings UI** (`CloudPanel.tsx`: onboarding passphrase/recovery, unlock, enable/disable/pull/lock, enforcement visual de la exclusión con GitHub Sync). Pendiente: tramo 3 (Realtime) + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
+| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004 y 0005) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). Pendiente: tramo 3 (Realtime) + desplegar `cloud-keys` + migración 0005 + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)

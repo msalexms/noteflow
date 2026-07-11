@@ -203,22 +203,31 @@ const api = {
     return () => ipcRenderer.removeListener('account:status-changed', wrapper)
   },
 
-  // NoteFlow Cloud (E2EE sync) — public status only; key material NEVER
-  // crosses this bridge. The recovery code returned by cloudSetup is shown
-  // once and never persisted anywhere.
+  // NoteFlow Cloud (encrypted sync) — public status only; key material NEVER
+  // crosses this bridge. The recovery code returned by cloudSetup /
+  // cloudUpgradeE2ee is shown once and never persisted anywhere.
   getCloudStatus: (): Promise<{
     configured: boolean
     enabled: boolean
     signedIn: boolean
     keysState: 'unlocked' | 'locked' | 'no-keys'
+    keysMode: 'managed' | 'e2ee' | null
     lastSync?: string
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
   }> => ipcRenderer.invoke('cloud:get-status'),
   cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:setup', passphrase),
+  // Managed (standard) mode setup — no passphrase, no recovery code.
+  cloudSetupManaged: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('cloud:setup-managed'),
+  // One-way managed → e2ee upgrade; returns the new recovery code ONCE.
+  cloudUpgradeE2ee: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
+    ipcRenderer.invoke('cloud:upgrade-e2ee', passphrase),
   cloudUnlock: (secret: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('cloud:unlock', secret),
+  // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).
+  cloudAutoUnlock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:auto-unlock'),
   cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
   cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
   cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),
@@ -236,6 +245,7 @@ const api = {
       enabled: boolean
       signedIn: boolean
       keysState: 'unlocked' | 'locked' | 'no-keys'
+      keysMode: 'managed' | 'e2ee' | null
       lastSync?: string
       error?: string
       initialPullStatus: 'pending' | 'ok' | 'failed'

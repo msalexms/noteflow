@@ -10,7 +10,7 @@
 // embedded for the sync Device Flow): it grants nothing by itself — security
 // comes from Row Level Security policies and per-user Auth JWTs.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
+exports.LEMONSQUEEZY_CHECKOUT_URLS = exports.CLOUD_KEYS_URL = exports.AI_PROXY_URL = exports.SUPABASE_ANON_KEY = exports.SUPABASE_URL = void 0;
 exports.isCloudConfigured = isCloudConfigured;
 /** Supabase project URL, e.g. 'https://xyzcompany.supabase.co' (no trailing slash). */
 exports.SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co';
@@ -18,6 +18,8 @@ exports.SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co';
 exports.SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx';
 /** NoteFlow AI managed-LLM proxy (Edge Function ai-proxy, OpenAI-compatible). */
 exports.AI_PROXY_URL = `${exports.SUPABASE_URL}/functions/v1/ai-proxy`;
+/** NoteFlow Cloud managed-mode key service (Edge Function cloud-keys: setup/unlock). */
+exports.CLOUD_KEYS_URL = `${exports.SUPABASE_URL}/functions/v1/cloud-keys`;
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, the

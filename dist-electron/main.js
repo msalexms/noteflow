@@ -218,6 +218,15 @@ function handleAccountStatusChanged() {
     else {
         aiEntitlementBaseline = identity === null ? null : aiActive;
     }
+    // Managed cloud keys unlock silently as soon as a session exists (fresh
+    // sign-in, or account events on a restored one). No-op for e2ee / no-keys /
+    // already-unlocked sessions — see cloudKeys.autoUnlockManaged.
+    if (status.signedIn) {
+        cloudKeys.autoUnlockManaged()
+            .then((changed) => { if (changed)
+            emitCloudStatusChanged(); })
+            .catch(() => { });
+    }
     emitAccountStatusChanged();
 }
 function broadcastPullResult(result) {
@@ -292,10 +301,16 @@ function startCloudAutoSync() {
     cloudAutoSyncTimer = setInterval(async () => {
         if (!cloudSync.isCloudSyncEnabled())
             return;
-        // Locked keys: nothing can be encrypted/decrypted — pending ops stay
-        // journaled and drain after the user unlocks.
-        if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked')
-            return;
+        // Locked keys: managed sessions re-unlock silently (e.g. the boot attempt
+        // ran offline); e2ee stays locked until the user types the passphrase.
+        // Pending ops stay journaled and drain after unlock either way.
+        if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') {
+            const changed = await cloudKeys.autoUnlockManaged().catch(() => false);
+            if (changed)
+                emitCloudStatusChanged();
+            if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked')
+                return;
+        }
         // Same ordering as the GitHub tick: drain the journal first, then stand
         // down if writes are still in flight, then pull.
         try {
@@ -1558,19 +1573,43 @@ electron_1.ipcMain.handle('account:open-checkout', (_event, product) => {
     });
     return { ok: true };
 });
-// ── NoteFlow Cloud (E2EE sync — phase 4.2) ────────────────────────────────────
+// ── NoteFlow Cloud (encrypted sync — phase 4.2) ───────────────────────────────
 // Key material lives in electron/cloudKeys.ts (main-process memory only); the
-// renderer exchanges exclusively the public CloudSyncStatus. No Settings UI
-// yet (stage 4) — these handlers are the complete main-side surface.
+// renderer exchanges exclusively the public CloudSyncStatus. These handlers
+// are the complete main-side surface (UI: Settings → Sync → CloudPanel).
 electron_1.ipcMain.handle('cloud:get-status', () => {
     return cloudSync.getCloudSyncStatus();
 });
 // passphrase → generates DEK + recovery code, uploads user_keys, unlocks.
-// The recovery code is returned ONCE for display and never persisted.
+// E2EE (private) mode — opt-in. The recovery code is returned ONCE for display
+// and never persisted.
 electron_1.ipcMain.handle('cloud:setup', async (_event, passphrase) => {
     const res = await cloudKeys.setupCloudKeys(passphrase);
     emitCloudStatusChanged();
     return res;
+});
+// Managed (standard) mode — the default: the DEK is generated client-side and
+// deposited in the cloud-keys Edge Function (wrapped by the operator key).
+// Nothing to remember; the session ends up unlocked directly.
+electron_1.ipcMain.handle('cloud:setup-managed', async () => {
+    const res = await cloudKeys.setupCloudKeysManaged();
+    emitCloudStatusChanged();
+    return res;
+});
+// One-way upgrade managed → e2ee. Returns the new recovery code ONCE.
+electron_1.ipcMain.handle('cloud:upgrade-e2ee', async (_event, passphrase) => {
+    const res = await cloudKeys.upgradeCloudKeysToE2ee(passphrase);
+    emitCloudStatusChanged();
+    return res;
+});
+// Silent managed unlock (no-op for e2ee/no-keys/unlocked). The Cloud panel
+// polls this while it shows the "Unlocking…" state so an offline boot recovers
+// as soon as the network is back.
+electron_1.ipcMain.handle('cloud:auto-unlock', async () => {
+    const changed = await cloudKeys.autoUnlockManaged();
+    if (changed)
+        emitCloudStatusChanged();
+    return { ok: true };
 });
 // passphrase or recovery code → unlocks the key session. Pending journaled
 // pushes drain on the next autosync tick.
@@ -2804,6 +2843,29 @@ electron_1.app.whenReady().then(async () => {
         }
         startCloudAutoSync();
     }
+    // Managed-mode silent unlock, deferred so it never competes with the boot
+    // path (same spirit as initAccount's entitlements refresh). If the initial
+    // cloud pull above failed because the keys were still locked (no safeStorage
+    // cache), retry it now that the DEK is in memory.
+    setTimeout(() => {
+        cloudKeys.autoUnlockManaged()
+            .then((changed) => {
+            if (!changed)
+                return;
+            emitCloudStatusChanged();
+            const status = cloudSync.getCloudSyncStatus();
+            if (status.enabled && status.keysState === 'unlocked' && status.initialPullStatus !== 'ok') {
+                cloudSync
+                    .pullNotes(NOTES_DIR)
+                    .then((result) => {
+                    broadcastPullResult(result);
+                    emitCloudStatusChanged();
+                })
+                    .catch((err) => console.error('[Startup] cloud pull after managed unlock failed:', String(err)));
+            }
+        })
+            .catch((err) => console.error('[Startup] managed auto-unlock failed:', String(err)));
+    }, 5000);
     // Initial GitHub pull. In startup mode we block for up to 10s so sticky
     // windows open with up-to-date content — otherwise an edit on stale data
     // would overwrite newer remote changes (data loss). In normal mode we keep

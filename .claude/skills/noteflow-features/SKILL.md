@@ -765,27 +765,44 @@ Settings → Startup:
 
 ## NoteFlow Cloud (Settings → Sync, sección superior)
 
-Nube de notas **E2EE** de pago (suscripción): las notas se cifran en el dispositivo antes de
-subir; el servidor solo ve ciphertext. Convive en la página **Sync** con GitHub Sync (debajo) —
-son **mutuamente excluyentes**: con Cloud activado, GitHub Sync queda en pausa (aviso ámbar en su
-sección; la config de GitHub se conserva).
+Nube de notas **cifrada** de pago (suscripción) con **dos modos de cifrado a elegir** (modelo
+Obsidian Sync). Convive en la página **Sync** con GitHub Sync (debajo) — son **mutuamente
+excluyentes**: con Cloud activado, GitHub Sync queda en pausa (aviso ámbar en su sección; la
+config de GitHub se conserva).
+
+Los dos modos (se eligen al configurar, con dos cards):
+- **Standard (managed, DEFAULT y recomendado):** el usuario no guarda NINGÚN secreto — la clave
+  la custodia NoteFlow en el servidor y el desbloqueo es automático con la sesión iniciada
+  (nunca se le pide nada). Copy honesto en la card: las notas van cifradas en tránsito y en
+  reposo, pero NoteFlow técnicamente podría acceder a ellas.
+- **Private (E2EE estricto, opt-in):** passphrase + recovery code; ni NoteFlow puede leer las
+  notas. Perderlos ambos = notas irrecuperables (aviso explícito).
 
 Flujo del panel según estado:
 - **Sin sesión:** mensaje "inicia sesión en Settings → Account".
-- **Sin claves (`no-keys`):** crear **passphrase** (input + confirmación, mínimo 8 caracteres) →
-  se muestra el **recovery code UNA sola vez** en un bloque ámbar destacado (copiable, con aviso
-  rojo: perder passphrase + recovery = notas irrecuperables, NoteFlow no puede resetearlas) →
-  botón "I have saved my recovery code" para continuar. El código no vuelve a mostrarse jamás.
-- **Bloqueado (`locked`):** un único input acepta **passphrase o recovery code** → "Unlock".
-- **Desbloqueado:** badge Sync enabled/disabled, "Last sync", botones **Enable/Disable sync**,
-  **Sync now** (pull manual con resultado tipo GitHub) y **Lock** (descarta las claves de memoria).
+- **Sin claves (`no-keys`):** elección de modo con dos cards (Standard preseleccionada).
+  Standard = un click ("Enable") y directo a desbloqueado. Private = crear **passphrase**
+  (input + confirmación, mínimo 8 caracteres) → se muestra el **recovery code UNA sola vez** en
+  un bloque ámbar destacado (copiable, con aviso rojo: perder passphrase + recovery = notas
+  irrecuperables, NoteFlow no puede resetearlas) → botón "I have saved my recovery code" para
+  continuar. El código no vuelve a mostrarse jamás.
+- **Bloqueado (`locked`):** en modo managed el panel se desbloquea solo (spinner "unlocking…",
+  reintento silencioso cada 10 s — típico de un arranque offline); en modo private, un único
+  input acepta **passphrase o recovery code** → "Unlock".
+- **Desbloqueado:** badge del modo activo (Standard / Private E2EE), badge Sync enabled/disabled,
+  "Last sync", botones **Enable/Disable sync**, **Sync now** (pull manual con resultado tipo
+  GitHub) y **Lock** (solo en modo private — en managed se re-desbloquearía solo). En managed,
+  botón **"Switch to private mode"**: upgrade ONE-WAY a E2EE (pide passphrase, muestra el
+  recovery code una vez y borra la copia del servidor), con aviso de que las notas ya
+  sincronizadas pudieron ser técnicamente accesibles hasta ese momento. No hay vuelta a Standard.
 - **Gating por suscripción:** solo el botón **Enable sync** exige la entitlement `cloud` (sin
   ella: mensaje "requires subscription" + botón de checkout si la build trae URL). Crear claves,
   unlock, pull y disable funcionan sin suscripción (un suscriptor caducado puede seguir bajando
   sus datos).
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa".
 
-Detalle técnico (jerarquía de claves, motor de sync): `.claude/context/monetization.md` § 4.
+Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
+`.claude/context/monetization.md` § 4.
 
 ---
 

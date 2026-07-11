@@ -18,6 +18,9 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx
 /** NoteFlow AI managed-LLM proxy (Edge Function ai-proxy, OpenAI-compatible). */
 export const AI_PROXY_URL = `${SUPABASE_URL}/functions/v1/ai-proxy`
 
+/** NoteFlow Cloud managed-mode key service (Edge Function cloud-keys: setup/unlock). */
+export const CLOUD_KEYS_URL = `${SUPABASE_URL}/functions/v1/cloud-keys`
+
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, the

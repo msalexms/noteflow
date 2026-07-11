@@ -124,17 +124,26 @@ export const settings = {
     connectWithGitHub: 'Connect with GitHub',
   },
 
-  // NoteFlow Cloud (E2EE sync) — lives on the Sync page above GitHub Sync.
+  // NoteFlow Cloud (encrypted sync) — lives on the Sync page above GitHub Sync.
   cloud: {
     title: 'NoteFlow Cloud',
-    desc: 'End-to-end encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
+    desc: 'Encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
     notAvailable: "NoteFlow Cloud isn't available in this build yet.",
     signInFirst: 'Sign in to your NoteFlow account (Settings → Account) to use NoteFlow Cloud.',
     // Entitlement gate (enable only — unlock/pull/disable stay available).
     requiresSubscription: 'Enabling NoteFlow Cloud sync requires an active subscription.',
     subscribe: 'Subscribe to NoteFlow Cloud',
     subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh in Settings → Account if it does not show up.',
-    // Key setup (state: no-keys).
+    // Encryption mode choice (state: no-keys) — two cards, Standard preselected.
+    chooseModeDesc: 'Choose how your encryption keys are managed. You can switch from Standard to Private later — never the other way around.',
+    modeStandardTitle: 'Standard',
+    modeStandardBadge: 'Recommended',
+    modeStandardDesc: 'Your notes are encrypted in transit and on our servers. NoteFlow manages the key for you — nothing to remember. We could technically access your notes; choose Private if that matters to you.',
+    modeStandardEnable: 'Enable',
+    modePrivateTitle: 'Private (end-to-end encrypted)',
+    modePrivateDesc: 'Only you can read your notes — not even NoteFlow. Requires a passphrase; if you lose it and the recovery code, your notes are unrecoverable.',
+    setupManagedFailed: 'Could not set up NoteFlow Cloud.',
+    // Key setup (state: no-keys, Private card selected).
     setupDesc: 'Create a passphrase to protect your encryption keys. It never leaves this device: NoteFlow cannot read your notes — and cannot reset the passphrase.',
     passphrase: 'Passphrase',
     confirmPassphrase: 'Confirm passphrase',
@@ -149,11 +158,13 @@ export const settings = {
     copyCode: 'Copy code',
     copied: 'Copied',
     recoverySaved: 'I have saved my recovery code',
-    // Unlock (state: locked).
+    // Unlock (state: locked + e2ee mode).
     lockedDesc: 'Your cloud encryption keys are locked on this device. Enter your passphrase — or your recovery code — to unlock.',
     passphraseOrRecovery: 'Passphrase or recovery code',
     unlock: 'Unlock',
     unlockFailed: 'Could not unlock.',
+    // Silent unlock (state: locked + managed/unknown mode) — never asks for a secret.
+    unlocking: 'Unlocking…',
     // Unlocked controls.
     syncEnabled: 'Sync enabled',
     syncDisabled: 'Sync disabled',
@@ -161,6 +172,15 @@ export const settings = {
     disableSync: 'Disable sync',
     enableFailed: 'Could not enable cloud sync.',
     lock: 'Lock',
+    // Encryption-mode badge (state: unlocked).
+    badgeStandard: 'Standard encryption',
+    badgePrivate: 'Private E2EE',
+    // One-way Standard → Private upgrade (state: unlocked + managed).
+    switchToPrivate: 'Switch to private mode',
+    upgradeDesc: 'Create a passphrase to switch to end-to-end encryption. From then on only you can read your notes — NoteFlow cannot reset the passphrase or recover them for you.',
+    upgradeNotice: 'Note: while in Standard mode, notes synced so far were technically accessible to NoteFlow. Switching does not rewrite them, but everything stays encrypted and only you hold the key from now on.',
+    upgradeSubmit: 'Create passphrase & switch',
+    upgradeFailed: 'Could not switch to private mode.',
     // Mutual exclusion warning shown BEFORE enabling, when GitHub Sync is connected.
     willPauseGitHub: 'GitHub Sync is connected. While NoteFlow Cloud is enabled it takes over, and GitHub Sync stays paused (your GitHub configuration is kept).',
   },

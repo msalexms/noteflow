@@ -288,8 +288,14 @@ export interface CloudSyncStatus {
   configured: boolean   // false while the build has no Supabase project configured
   enabled: boolean
   signedIn: boolean
-  /** 'no-keys' = the account has no E2EE keys yet (setup needed); 'locked' = keys exist (or unknown) but the DEK is not in memory. */
+  /** 'no-keys' = the account has no cloud keys yet (setup needed); 'locked' = keys exist (or unknown) but the DEK is not in memory. */
   keysState: 'unlocked' | 'locked' | 'no-keys'
+  /**
+   * Encryption mode of the account's keys: 'managed' (standard — server-held
+   * key, silent unlock, the default) | 'e2ee' (private — passphrase + recovery
+   * code) | null (no keys, or unknown yet — e.g. a locked pre-dual-mode device).
+   */
+  keysMode: 'managed' | 'e2ee' | null
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
@@ -383,10 +389,13 @@ declare global {
       accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
       accountOpenCheckout: (product: 'ai' | 'cloud') => Promise<{ ok: boolean; error?: string }>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
-      // NoteFlow Cloud (E2EE sync) — keys never cross this bridge
+      // NoteFlow Cloud (encrypted sync) — keys never cross this bridge
       getCloudStatus: () => Promise<CloudSyncStatus>
       cloudSetup: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
+      cloudSetupManaged: () => Promise<{ ok: boolean; error?: string }>
+      cloudUpgradeE2ee: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
       cloudUnlock: (secret: string) => Promise<{ ok: boolean; error?: string }>
+      cloudAutoUnlock: () => Promise<{ ok: boolean }>
       cloudLock: () => Promise<{ ok: boolean }>
       cloudEnable: () => Promise<{ ok: boolean; error?: string }>
       cloudDisable: () => Promise<{ ok: boolean }>

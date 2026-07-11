@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react'
+import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck, Sparkles } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
@@ -9,11 +9,16 @@ import { useT } from '../../i18n/useT'
 // the DEK so any reasonable floor works.
 const MIN_PASSPHRASE_LENGTH = 8
 
-type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle'
+type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade'
 
-// Settings → Sync → NoteFlow Cloud (E2EE sync, phase 4.2). Key material never
-// reaches this panel: it only exchanges the public CloudSyncStatus plus the
-// recovery code, which is held in local state and discarded once confirmed.
+// Settings → Sync → NoteFlow Cloud (encrypted sync, phase 4.2). Key material
+// never reaches this panel: it only exchanges the public CloudSyncStatus plus
+// the recovery code, which is held in local state and discarded once confirmed.
+//
+// Two encryption modes (keysMode): 'managed' (standard — the default; the key
+// is held server-side and unlocking is silent, so this panel NEVER asks a
+// managed user for a secret) and 'e2ee' (private — passphrase + recovery code,
+// with a one-way "switch to private mode" upgrade from managed).
 export function CloudPanel() {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
@@ -25,13 +30,19 @@ export function CloudPanel() {
   const [error, setError] = useState<string | null>(null)
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
 
-  // Setup form (state: no-keys)
+  // Onboarding (state: no-keys): which mode card is selected. Standard is the
+  // default and the recommended one.
+  const [setupMode, setSetupMode] = useState<'standard' | 'private'>('standard')
+  // Passphrase form — shared by the private setup and the managed → e2ee upgrade.
   const [passphrase, setPassphrase] = useState('')
   const [confirmPassphrase, setConfirmPassphrase] = useState('')
-  // Unlock form (state: locked)
+  // Managed → private upgrade form visibility (state: unlocked + managed).
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  // Unlock form (state: locked + e2ee)
   const [secret, setSecret] = useState('')
   // Recovery code: local component state ONLY — never persisted anywhere. It is
-  // shown once after setup and discarded when the user confirms having saved it.
+  // shown once after setup/upgrade and discarded when the user confirms having
+  // saved it.
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -50,15 +61,42 @@ export function CloudPanel() {
     window.noteflow.getSyncStatus().then((s) => setGithubConnected(s.connected))
   }, [])
 
-  async function handleSetup() {
+  // Managed keys unlock silently (the main process also tries at boot, on
+  // sign-in and on the autosync tick) — while the locked state is visible,
+  // poll so an offline boot recovers as soon as the connection is back. Only
+  // e2ee mode is excluded: that unlock is user-driven via the passphrase form.
+  const managedLocked =
+    status !== null && status.signedIn && status.keysState === 'locked' && status.keysMode !== 'e2ee'
+  useEffect(() => {
+    if (!managedLocked) return
+    window.noteflow.cloudAutoUnlock()
+    const timer = setInterval(() => window.noteflow.cloudAutoUnlock(), 10_000)
+    return () => clearInterval(timer)
+  }, [managedLocked])
+
+  function validatePassphraseForm(): boolean {
     if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
       setError(tf(t.settings.cloud.passphraseTooShort, { min: MIN_PASSPHRASE_LENGTH }))
-      return
+      return false
     }
     if (passphrase !== confirmPassphrase) {
       setError(t.settings.cloud.passphraseMismatch)
-      return
+      return false
     }
+    return true
+  }
+
+  // Standard (managed) setup: one click, no secrets — lands directly on unlocked.
+  async function handleSetupManaged() {
+    setBusy('setup')
+    setError(null)
+    const result = await window.noteflow.cloudSetupManaged()
+    setBusy('idle')
+    if (!result.ok) setError(result.error ?? t.settings.cloud.setupManagedFailed)
+  }
+
+  async function handleSetup() {
+    if (!validatePassphraseForm()) return
     setBusy('setup')
     setError(null)
     const result = await window.noteflow.cloudSetup(passphrase)
@@ -69,6 +107,24 @@ export function CloudPanel() {
       setConfirmPassphrase('')
     } else {
       setError(result.error ?? t.settings.cloud.setupFailed)
+    }
+  }
+
+  // One-way managed → e2ee upgrade; surfaces the new recovery code ONCE via
+  // the same block as the private setup.
+  async function handleUpgrade() {
+    if (!validatePassphraseForm()) return
+    setBusy('upgrade')
+    setError(null)
+    const result = await window.noteflow.cloudUpgradeE2ee(passphrase)
+    setBusy('idle')
+    if (result.ok && result.recoveryCode) {
+      setRecoveryCode(result.recoveryCode)
+      setShowUpgrade(false)
+      setPassphrase('')
+      setConfirmPassphrase('')
+    } else {
+      setError(result.error ?? t.settings.cloud.upgradeFailed)
     }
   }
 
@@ -231,50 +287,119 @@ export function CloudPanel() {
         </div>
       )}
 
-      {/* ── Key setup (no keys on this account yet) ── */}
+      {/* ── Onboarding (no keys yet): choose the encryption mode — two cards,
+             Standard (managed) preselected and recommended ── */}
       {status.keysState === 'no-keys' && (
         <div className="space-y-3">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-            {t.settings.cloud.setupDesc}
+            {t.settings.cloud.chooseModeDesc}
           </p>
-          <div>
-            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              {t.settings.cloud.passphrase}
-            </label>
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              disabled={isLoading}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-            />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setSetupMode('standard')}
+              aria-pressed={setupMode === 'standard'}
+              className={`text-left p-3 rounded border transition-colors ${
+                setupMode === 'standard' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+              }`}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <Cloud size={12} className={setupMode === 'standard' ? 'text-accent' : 'text-text-muted'} />
+                <span className="text-xs font-mono font-semibold text-text">
+                  {t.settings.cloud.modeStandardTitle}
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent/15 text-accent">
+                  {t.settings.cloud.modeStandardBadge}
+                </span>
+              </div>
+              <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
+                {t.settings.cloud.modeStandardDesc}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSetupMode('private')}
+              aria-pressed={setupMode === 'private'}
+              className={`text-left p-3 rounded border transition-colors ${
+                setupMode === 'private' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={12} className={setupMode === 'private' ? 'text-accent' : 'text-text-muted'} />
+                <span className="text-xs font-mono font-semibold text-text">
+                  {t.settings.cloud.modePrivateTitle}
+                </span>
+              </div>
+              <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">
+                {t.settings.cloud.modePrivateDesc}
+              </p>
+            </button>
           </div>
-          <div>
-            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
-              {t.settings.cloud.confirmPassphrase}
-            </label>
-            <input
-              type="password"
-              value={confirmPassphrase}
-              onChange={(e) => setConfirmPassphrase(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSetup() }}
+
+          {setupMode === 'standard' ? (
+            <button
+              onClick={handleSetupManaged}
               disabled={isLoading}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
-            />
-          </div>
-          <button
-            onClick={handleSetup}
-            disabled={isLoading || !passphrase || !confirmPassphrase}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
-            {t.settings.cloud.createPassphrase}
-          </button>
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
+              {t.settings.cloud.modeStandardEnable}
+            </button>
+          ) : (
+            <>
+              <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+                {t.settings.cloud.setupDesc}
+              </p>
+              <div>
+                <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+                  {t.settings.cloud.passphrase}
+                </label>
+                <input
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  disabled={isLoading}
+                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+                  {t.settings.cloud.confirmPassphrase}
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassphrase}
+                  onChange={(e) => setConfirmPassphrase(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSetup() }}
+                  disabled={isLoading}
+                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                />
+              </div>
+              <button
+                onClick={handleSetup}
+                disabled={isLoading || !passphrase || !confirmPassphrase}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
+                {t.settings.cloud.createPassphrase}
+              </button>
+            </>
+          )}
         </div>
       )}
 
-      {/* ── Locked: unlock with passphrase or recovery code ── */}
-      {status.keysState === 'locked' && (
+      {/* ── Locked + managed (or unknown) mode: silent auto-unlock in progress —
+             NEVER ask a managed user for a secret (retry polled in the effect
+             above; unknown mode resolves to e2ee via the same probe) ── */}
+      {status.keysState === 'locked' && status.keysMode !== 'e2ee' && (
+        <div className="flex items-center gap-2 text-text-muted">
+          <Loader size={12} className="animate-spin" />
+          <span className="text-xs font-mono">{t.settings.cloud.unlocking}</span>
+        </div>
+      )}
+
+      {/* ── Locked + e2ee: unlock with passphrase or recovery code ── */}
+      {status.keysState === 'locked' && status.keysMode === 'e2ee' && (
         <div className="space-y-3">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
             {t.settings.cloud.lockedDesc}
@@ -306,7 +431,7 @@ export function CloudPanel() {
       {/* ── Unlocked: sync controls ── */}
       {status.keysState === 'unlocked' && (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {status.enabled ? (
               <>
                 <Cloud size={12} className="text-green-400" />
@@ -317,6 +442,14 @@ export function CloudPanel() {
                 <CloudOff size={12} className="text-text-muted" />
                 <span className="text-xs font-mono text-text-muted">{t.settings.cloud.syncDisabled}</span>
               </>
+            )}
+            {/* Active encryption-mode badge (null on pre-dual-mode devices until
+                the next unlock backfills it — no badge is better than a wrong one) */}
+            {status.keysMode !== null && (
+              <span className="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-text-muted">
+                {status.keysMode === 'e2ee' ? <ShieldCheck size={10} /> : <Cloud size={10} />}
+                {status.keysMode === 'e2ee' ? t.settings.cloud.badgePrivate : t.settings.cloud.badgeStandard}
+              </span>
             )}
           </div>
 
@@ -410,15 +543,92 @@ export function CloudPanel() {
                 </button>
               )
             )}
-            <button
-              onClick={handleLock}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
-            >
-              <Lock size={11} />
-              {t.settings.cloud.lock}
-            </button>
+            {/* Lock only makes sense for e2ee (and for pre-dual-mode devices whose
+                mode is still unknown): a signed-in managed session re-unlocks
+                itself silently, so offering Lock there would be a no-op loop. */}
+            {status.keysMode !== 'managed' && (
+              <button
+                onClick={handleLock}
+                disabled={isLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+              >
+                <Lock size={11} />
+                {t.settings.cloud.lock}
+              </button>
+            )}
           </div>
+
+          {/* ── One-way Standard → Private upgrade (managed only) ── */}
+          {status.keysMode === 'managed' && (
+            <div className="space-y-3 pt-3 border-t border-border">
+              {!showUpgrade ? (
+                <button
+                  onClick={() => { setShowUpgrade(true); setError(null) }}
+                  disabled={isLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+                >
+                  <ShieldCheck size={11} />
+                  {t.settings.cloud.switchToPrivate}
+                </button>
+              ) : (
+                <>
+                  <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+                    {t.settings.cloud.upgradeDesc}
+                  </p>
+                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-[11px] font-mono text-yellow-400 leading-relaxed">
+                    {t.settings.cloud.upgradeNotice}
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+                      {t.settings.cloud.passphrase}
+                    </label>
+                    <input
+                      type="password"
+                      value={passphrase}
+                      onChange={(e) => setPassphrase(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+                      {t.settings.cloud.confirmPassphrase}
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPassphrase}
+                      onChange={(e) => setConfirmPassphrase(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleUpgrade() }}
+                      disabled={isLoading}
+                      className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleUpgrade}
+                      disabled={isLoading || !passphrase || !confirmPassphrase}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {busy === 'upgrade' ? <Loader size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
+                      {t.settings.cloud.upgradeSubmit}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowUpgrade(false)
+                        setPassphrase('')
+                        setConfirmPassphrase('')
+                        setError(null)
+                      }}
+                      disabled={isLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+                    >
+                      {t.common.cancel}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

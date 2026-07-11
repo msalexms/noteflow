@@ -117,12 +117,18 @@ const api = {
         electron_1.ipcRenderer.on('account:status-changed', wrapper);
         return () => electron_1.ipcRenderer.removeListener('account:status-changed', wrapper);
     },
-    // NoteFlow Cloud (E2EE sync) — public status only; key material NEVER
-    // crosses this bridge. The recovery code returned by cloudSetup is shown
-    // once and never persisted anywhere.
+    // NoteFlow Cloud (encrypted sync) — public status only; key material NEVER
+    // crosses this bridge. The recovery code returned by cloudSetup /
+    // cloudUpgradeE2ee is shown once and never persisted anywhere.
     getCloudStatus: () => electron_1.ipcRenderer.invoke('cloud:get-status'),
     cloudSetup: (passphrase) => electron_1.ipcRenderer.invoke('cloud:setup', passphrase),
+    // Managed (standard) mode setup — no passphrase, no recovery code.
+    cloudSetupManaged: () => electron_1.ipcRenderer.invoke('cloud:setup-managed'),
+    // One-way managed → e2ee upgrade; returns the new recovery code ONCE.
+    cloudUpgradeE2ee: (passphrase) => electron_1.ipcRenderer.invoke('cloud:upgrade-e2ee', passphrase),
     cloudUnlock: (secret) => electron_1.ipcRenderer.invoke('cloud:unlock', secret),
+    // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).
+    cloudAutoUnlock: () => electron_1.ipcRenderer.invoke('cloud:auto-unlock'),
     cloudLock: () => electron_1.ipcRenderer.invoke('cloud:lock'),
     cloudEnable: () => electron_1.ipcRenderer.invoke('cloud:enable'),
     cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),

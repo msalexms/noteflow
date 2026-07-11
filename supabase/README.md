@@ -164,18 +164,44 @@ del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens
    Settings → Account queda oculto (se muestra "Subscriptions are coming soon."). La app añade
    sola el parámetro `checkout[custom][user_id]` al abrirla.
 
-## 7. NoteFlow Cloud (nube E2EE — tramo 1: esquema)
+## 7. NoteFlow Cloud (nube cifrada)
 
-La migración 0004 crea el esquema de la nube de notas E2EE: `user_keys` (DEK envuelta por
-passphrase y por recovery code) y `files` (blobs cifrados por archivo). El servidor solo ve
-ciphertext; el cliente lee/escribe directamente vía PostgREST + RLS (sin Edge Functions).
+La migración 0004 crea el esquema de la nube de notas: `user_keys` (la DEK del usuario, envuelta)
+y `files` (blobs cifrados por archivo). El cliente lee/escribe directamente vía PostgREST + RLS.
+La migración 0005 añade el **modo de cifrado dual** (modelo Obsidian Sync): modo **managed**
+(default — el usuario no guarda secretos; su DEK se deposita envuelta por la clave del operador)
+y modo **e2ee** (opt-in — passphrase + recovery code; el servidor solo ve ciphertext). El modo
+managed lo sirve la Edge Function `cloud-keys`. Pasos del operador:
 
-1. **Correr la migración 0004** (`supabase/migrations/0004_cloud.sql`), igual que las anteriores
-   (SQL Editor o `supabase db push`).
+1. **Correr las migraciones 0004 y 0005** (`supabase/migrations/0004_cloud.sql` y
+   `0005_cloud_managed.sql`), igual que las anteriores (SQL Editor o `supabase db push`).
 
-No hay más pasos: **este tramo no añade secrets ni Edge Functions**. La seguridad la dan las RLS
-policies: cada usuario solo accede a sus filas, y en `files` la **escritura** (insert/update)
-exige además una suscripción `cloud`/`bundle` con `status = 'active'` en `public.subscriptions`
-— la lectura y el borrado solo piden ownership, para que un usuario con la suscripción caducada
-pueda seguir bajando y borrando sus datos (pero no subiendo). En `user_keys` basta ownership en
-todas las operaciones (el material de claves debe poder crearse/leerse siempre).
+2. **Configurar la clave del operador** para el modo managed — 32 bytes aleatorios en base64.
+   Es el ÚNICO secret de esta función; quien la tenga puede descifrar las DEK de los usuarios
+   managed, así que trátala como la service role key. **No rotarla a la ligera**: las DEK ya
+   envueltas con la clave anterior dejarían de poder desenvolverse (los unlock managed fallarían
+   con `unwrap_failed` en los logs).
+
+   ```bash
+   supabase secrets set CLOUD_MANAGED_KEK=$(openssl rand -base64 32)
+   ```
+
+3. **Desplegar la función** — CON verificación de JWT (el default; el caller es la app con el
+   access token del usuario, como el ai-proxy):
+
+   ```bash
+   supabase functions deploy cloud-keys
+   ```
+
+4. **Checkout de Lemon Squeezy (cuando se lance el plan):** copiar la URL de compra de la
+   variante del producto Cloud y pegarla en `LEMONSQUEEZY_CHECKOUT_URLS.cloud` de
+   `electron/cloudConfig.ts` + añadir sus variant IDs a `LEMONSQUEEZY_VARIANT_MAP` (§ 5).
+   Mientras la URL esté vacía, el botón Subscribe del panel Cloud queda oculto.
+
+La seguridad la dan las RLS policies: cada usuario solo accede a sus filas, y en `files` la
+**escritura** (insert/update) exige además una suscripción `cloud`/`bundle` con
+`status = 'active'` en `public.subscriptions` — la lectura y el borrado solo piden ownership,
+para que un usuario con la suscripción caducada pueda seguir bajando y borrando sus datos (pero
+no subiendo). En `user_keys` basta ownership en todas las operaciones (el material de claves
+debe poder crearse/leerse siempre); los endpoints de `cloud-keys` tampoco exigen entitlement,
+por el mismo motivo.
