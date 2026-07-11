@@ -27,9 +27,16 @@ noteflow/
 │   ├── migration.ts     # Migración única v1→v2 (flat .md → carpetas), idempotente
 │   ├── githubSync.ts    # Sync con GitHub (Device Flow OAuth, push/pull por carpeta,
 │   │                    #   Trees API, migración remota, cifrado token)
+│   ├── syncState.ts     # Lógica pura del journal de mutaciones + sha-cache (la usan GitHub y Cloud)
+│   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
 │   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
+│   ├── cloudCrypto.ts   # Capa criptográfica pura de NoteFlow Cloud (DEK/KEK/recovery, AES-GCM, path_key)
+│   ├── cloudKeys.ts     # Sesión de claves E2EE en main (setup/unlock/lock, DEK solo en memoria,
+│   │                    #   cache safeStorage) + helper supabaseRest — ver monetization.md § 4
+│   ├── cloudSync.ts     # Motor de sync de NoteFlow Cloud (push/pull/tombstones vía PostgREST)
+│   ├── cloudSyncLogic.ts# Lógica pura del motor (mapeo fila↔fichero, conflictos, cursor) — testeada
 │   ├── entitlements.ts  # computeEntitlements(rows) pura ({ai,cloud} desde subscriptions)
 │   └── ai/              # Índice semántico local + LLM ("El Cerebro" Fases 1-3)
 │       ├── protocol.ts  #   Tipos de mensajes worker↔main + constantes (modelo, schema)
@@ -233,6 +240,12 @@ Renderer (React)
 | `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` |
 | `account:open-checkout` | handle | Abre el checkout de Lemon Squeezy en el navegador con `checkout[custom][user_id]` (URL construida en main — el userId no cruza al renderer) |
+| `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', lastSync, error, initialPullStatus}`) — **nunca** material de claves |
+| `cloud:setup` | handle | Passphrase → genera DEK + recovery code, sube `user_keys` y desbloquea; **devuelve el recovery code UNA vez** (no se persiste) |
+| `cloud:unlock` | handle | Desbloquea la sesión de claves con passphrase o recovery code (DEK solo en memoria del main + cache safeStorage) |
+| `cloud:lock` | handle | Descarta la DEK en memoria y su cache cifrada |
+| `cloud:enable` / `cloud:disable` | handle | Activa/desactiva el motor Cloud (activarlo toma prioridad sobre GitHub Sync — mutuamente excluyentes — y lanza pull inicial + polling); desactivar conserva journal y marcas |
+| `cloud:pull` | handle | Pull manual incremental desde la nube (mismo contrato de broadcast que `sync:pull`) |
 | `ai:get-settings` / `ai:set-settings` | handle | Lee/escribe `settings.ai` (enabled, modelId); `set` aplica al worker y emite estado |
 | `ai:related` | handle | Notas relacionadas con la **sección activa** (centroides + coseno) |
 | `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
@@ -255,6 +268,7 @@ Renderer (React)
 `update:installing` (fase de instalación, post-descarga),
 `sync-auth-complete`, `sync:push-state` (`'pushing'|'idle'`), `sync:status-changed`,
 `account:status-changed` (broadcast del status público de la cuenta a todas las ventanas),
+`cloud:status-changed` (broadcast del status público de NoteFlow Cloud — mismo shape que `cloud:get-status`),
 `ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
 `ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
 `ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),
@@ -319,6 +333,12 @@ Estructura de `settings.json`:
     "userId": "<uuid de auth.users>",
     "encryptedRefreshToken": "<cifrado con safeStorage o base64 fallback>"
   },
+  "cloudSync": {
+    "enabled": true,
+    "lastSync": "2026-07-10T12:00:00.000Z",
+    "pullCursor": "2026-07-10T11:58:03.214Z",
+    "encryptedDek": "safe:<solo si safeStorage está disponible — NUNCA base64 fallback>"
+  },
   "ai": { "enabled": false, "modelId": "..." },
   "aiLlm": {
     "active": "anthropic",
@@ -335,3 +355,6 @@ Estructura de `settings.json`:
 > archivos JSON dentro del dir de notas para poder sincronizarse entre dispositivos. El **historial
 > de chats** vive en `userData/ai-chats.json` (local, no se sincroniza); las **API keys del LLM** se
 > cifran por proveedor en `settings.aiLlm.byPreset[*].encryptedApiKey` (nunca cruzan al renderer).
+> Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
+> `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
+> de notas.

@@ -13,6 +13,7 @@ import {
   deriveKek,
   generateRecoveryCode,
   normalizeRecoveryCode,
+  looksLikeRecoveryCode,
   deriveRecoveryKek,
   wrapKey,
   unwrapKey,
@@ -145,6 +146,14 @@ describe('DEK <-> recovery code', () => {
   it('normalizeRecoveryCode strips separators and uppercases', () => {
     expect(normalizeRecoveryCode('ab2de-fg3hj')).toBe('AB2DEFG3HJ')
     expect(normalizeRecoveryCode(' AB2DE  FG3HJ ')).toBe('AB2DEFG3HJ')
+  })
+
+  it('looksLikeRecoveryCode requires exactly 30 normalized chars', () => {
+    expect(looksLikeRecoveryCode(generateRecoveryCode())).toBe(true)
+    expect(looksLikeRecoveryCode(generateRecoveryCode().toLowerCase().replace(/-/g, ' '))).toBe(true)
+    expect(looksLikeRecoveryCode('my ordinary passphrase')).toBe(false)
+    expect(looksLikeRecoveryCode('AB2DE-FG3HJ')).toBe(false) // too short
+    expect(looksLikeRecoveryCode(generateRecoveryCode() + 'X')).toBe(false) // too long
   })
 })
 

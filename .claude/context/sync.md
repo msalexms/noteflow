@@ -1,5 +1,27 @@
 # NoteFlow — GitHub Sync
 
+### Interfaz `SyncProvider` (`electron/syncProvider.ts`) — fase 4.2, tramo 2
+
+`main.ts` **no llama a `githubSync` en duro** en el flujo de escritura de notas: enruta por
+`getActiveSyncProvider()`, que devuelve el backend activo — **NoteFlow Cloud si
+`settings.cloudSync.enabled` (prioridad), GitHub en caso contrario**. Son **mutuamente
+excluyentes** (el enforcement en Settings UI llega en el tramo 4; mientras tanto esta función es
+la única fuente de verdad, y el tick del autosync de GitHub se salta si Cloud está habilitado).
+
+Superficie (extraída de lo que `main.ts` consumía de `githubSync.ts`; ambos adapters son finos y
+delegan 1:1 sin cambiar comportamiento): `isConnected()`, `schedulePush(relPath, content,
+onStart?, onComplete?)`, `pushPathsNow(notesDir, relPaths)`, `scheduleDelete(relPath)`,
+`scheduleDeleteDir(dir)`, `pullNotes(notesDir)` (mismo shape de resultado en ambos),
+`retrySyncJournal(notesDir)`, `hasPendingRemoteMutations()`. Lo específico de cada backend
+(Device Flow, migración remota v2, claves E2EE/unlock) queda FUERA de la interfaz — sus IPC
+propios llaman a los módulos directamente.
+
+**Cloud Sync** (`electron/cloudSync.ts`, mismo modelo y regla de conflicto que GitHub pero
+contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de mutaciones y
+con pull incremental por `updated_at`): detalle completo en `monetization.md` § 4. Su journal
+reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
+(`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
+
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en
   `github.com/login/device`. Client ID `Ov23liut9QOJ2pJFF0KR` (público por diseño).

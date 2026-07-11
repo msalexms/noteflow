@@ -27,6 +27,7 @@ exports.generateKdfSalt = generateKdfSalt;
 exports.deriveKek = deriveKek;
 exports.generateRecoveryCode = generateRecoveryCode;
 exports.normalizeRecoveryCode = normalizeRecoveryCode;
+exports.looksLikeRecoveryCode = looksLikeRecoveryCode;
 exports.deriveRecoveryKek = deriveRecoveryKek;
 exports.wrapKey = wrapKey;
 exports.unwrapKey = unwrapKey;
@@ -111,6 +112,16 @@ function normalizeRecoveryCode(code) {
             out += ch;
     }
     return out;
+}
+/**
+ * Heuristic used by the unlock flow: a user-typed secret is treated as a
+ * possible recovery code only when its normalized form has EXACTLY the length
+ * of a generated code (30 chars). Deriving a recovery KEK from an arbitrary
+ * passphrase-looking string would silently succeed at the KDF and fail at
+ * unwrap — checking the length first lets the caller give a clear error.
+ */
+function looksLikeRecoveryCode(input) {
+    return normalizeRecoveryCode(input).length === exports.RECOVERY_CODE_GROUPS * exports.RECOVERY_CODE_GROUP_LEN;
 }
 /** PBKDF2-SHA256 recovery code → 256-bit KEK (code normalized first). */
 async function deriveRecoveryKek(code, salt, iterations = exports.DEFAULT_KDF_ITERATIONS) {

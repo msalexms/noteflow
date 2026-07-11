@@ -44,6 +44,9 @@ const os_1 = __importDefault(require("os"));
 const child_process_1 = require("child_process");
 const crypto_1 = require("crypto");
 const githubSync = __importStar(require("./githubSync"));
+const cloudSync = __importStar(require("./cloudSync"));
+const cloudKeys = __importStar(require("./cloudKeys"));
+const syncProvider_1 = require("./syncProvider");
 const account = __importStar(require("./account"));
 const cloudConfig_1 = require("./cloudConfig");
 const aiIndex = __importStar(require("./ai/aiIndex"));
@@ -136,7 +139,7 @@ function checkExpiredNotes() {
                 catch { /* ignore */ }
                 fs_1.default.rmSync(dirPath, { recursive: true, force: true });
                 electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
-                githubSync.scheduleDeleteDir(dir);
+                (0, syncProvider_1.getActiveSyncProvider)().scheduleDeleteDir(dir);
             }
             catch {
                 // ignore per-note errors
@@ -234,6 +237,11 @@ function startAutoSync() {
     if (autoSyncTimer)
         return;
     autoSyncTimer = setInterval(async () => {
+        // Mutual exclusion: while NoteFlow Cloud is enabled it owns the sync loop
+        // (see syncProvider.ts) — the GitHub timer stands down without being torn
+        // down, so disabling Cloud resumes GitHub on the next tick.
+        if (cloudSync.isCloudSyncEnabled())
+            return;
         if (!githubSync.getSyncStatus().connected)
             return;
         // Drain the journal of failed remote mutations BEFORE pulling: a pending
@@ -267,6 +275,53 @@ function stopAutoSync() {
     if (autoSyncTimer) {
         clearInterval(autoSyncTimer);
         autoSyncTimer = null;
+    }
+}
+// ── NoteFlow Cloud autosync (interim polling — stage 3 replaces it with Realtime)
+let cloudAutoSyncTimer = null;
+// Broadcasts the PUBLIC cloud status (never key material) to every window.
+function emitCloudStatusChanged() {
+    const status = cloudSync.getCloudSyncStatus();
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send('cloud:status-changed', status);
+    });
+}
+function startCloudAutoSync() {
+    if (cloudAutoSyncTimer)
+        return;
+    cloudAutoSyncTimer = setInterval(async () => {
+        if (!cloudSync.isCloudSyncEnabled())
+            return;
+        // Locked keys: nothing can be encrypted/decrypted — pending ops stay
+        // journaled and drain after the user unlocks.
+        if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked')
+            return;
+        // Same ordering as the GitHub tick: drain the journal first, then stand
+        // down if writes are still in flight, then pull.
+        try {
+            await cloudSync.retrySyncJournal(NOTES_DIR);
+        }
+        catch (err) {
+            console.error('[CloudAutoSync] journal retry failed:', String(err));
+        }
+        if (cloudSync.hasPendingRemoteMutations()) {
+            console.log('[CloudAutoSync] skipping pull — remote mutations pending');
+            return;
+        }
+        try {
+            const result = await cloudSync.pullNotes(NOTES_DIR);
+            broadcastPullResult(result);
+        }
+        catch (err) {
+            console.error('[CloudAutoSync] pull failed:', String(err));
+        }
+        emitCloudStatusChanged();
+    }, cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS);
+}
+function stopCloudAutoSync() {
+    if (cloudAutoSyncTimer) {
+        clearInterval(cloudAutoSyncTimer);
+        cloudAutoSyncTimer = null;
     }
 }
 const OLD_NOTES_DIR = path_1.default.join(os_1.default.homedir(), 'scratch-notes');
@@ -883,9 +938,10 @@ function applyNoteWrite(payload, senderId, opts) {
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
         win.webContents.send('notes-updated', dirPath, senderId);
     });
-    const connected = githubSync.getSyncStatus().connected;
+    const sync = (0, syncProvider_1.getActiveSyncProvider)();
+    const connected = sync.isConnected();
     for (const f of deletes)
-        githubSync.scheduleDelete(`${dir}/${f}`);
+        sync.scheduleDelete(`${dir}/${f}`);
     // Keep the semantic index up to date (debounced; no-op when AI is disabled).
     if (aiIndex.isEnabled())
         aiIndex.scheduleIndex(dirPath);
@@ -902,7 +958,7 @@ function applyNoteWrite(payload, senderId, opts) {
         const relPaths = writes.map(([f]) => `${dir}/${f}`);
         relPaths.forEach((p) => pendingPushFiles.add(p));
         notifyPushState();
-        return githubSync
+        return sync
             .pushPathsNow(NOTES_DIR, relPaths)
             .then(() => undefined)
             .catch((err) => { console.error('[chat] durable push failed:', String(err)); })
@@ -914,10 +970,10 @@ function applyNoteWrite(payload, senderId, opts) {
     for (const [f, content] of writes) {
         const relPath = `${dir}/${f}`;
         if (connected) {
-            githubSync.schedulePush(relPath, content, () => { pendingPushFiles.add(relPath); notifyPushState(); }, () => { pendingPushFiles.delete(relPath); notifyPushState(); });
+            sync.schedulePush(relPath, content, () => { pendingPushFiles.add(relPath); notifyPushState(); }, () => { pendingPushFiles.delete(relPath); notifyPushState(); });
         }
         else {
-            githubSync.schedulePush(relPath, content);
+            sync.schedulePush(relPath, content);
         }
     }
 }
@@ -935,7 +991,7 @@ function applyNoteDelete(dirOrPath) {
     electron_1.BrowserWindow.getAllWindows().forEach((win) => {
         win.webContents.send('notes-updated');
     });
-    githubSync.scheduleDeleteDir(dir);
+    (0, syncProvider_1.getActiveSyncProvider)().scheduleDeleteDir(dir);
     aiIndex.removeFromIndex(dirPath);
 }
 electron_1.ipcMain.handle('fs:write-note', (event, payload) => {
@@ -1358,7 +1414,8 @@ electron_1.ipcMain.handle('notes:write-imported', async (_event, entries) => {
     const written = [];
     const errors = [];
     const writtenPaths = [];
-    const connected = githubSync.getSyncStatus().connected;
+    const sync = (0, syncProvider_1.getActiveSyncProvider)();
+    const connected = sync.isConnected();
     for (const entry of entries) {
         try {
             const dir = ensureSafeDirname(entry.dir);
@@ -1393,7 +1450,7 @@ electron_1.ipcMain.handle('notes:write-imported', async (_event, entries) => {
     // up front prevents that.
     if (connected && writtenPaths.length > 0) {
         try {
-            const res = await githubSync.pushPathsNow(NOTES_DIR, writtenPaths);
+            const res = await sync.pushPathsNow(NOTES_DIR, writtenPaths);
             if (res.errors.length > 0)
                 errors.push(...res.errors.map((p) => `push failed: ${p}`));
         }
@@ -1496,6 +1553,70 @@ electron_1.ipcMain.handle('account:open-checkout', (_event, product) => {
         console.error('Failed to open checkout URL:', err);
     });
     return { ok: true };
+});
+// ── NoteFlow Cloud (E2EE sync — phase 4.2) ────────────────────────────────────
+// Key material lives in electron/cloudKeys.ts (main-process memory only); the
+// renderer exchanges exclusively the public CloudSyncStatus. No Settings UI
+// yet (stage 4) — these handlers are the complete main-side surface.
+electron_1.ipcMain.handle('cloud:get-status', () => {
+    return cloudSync.getCloudSyncStatus();
+});
+// passphrase → generates DEK + recovery code, uploads user_keys, unlocks.
+// The recovery code is returned ONCE for display and never persisted.
+electron_1.ipcMain.handle('cloud:setup', async (_event, passphrase) => {
+    const res = await cloudKeys.setupCloudKeys(passphrase);
+    emitCloudStatusChanged();
+    return res;
+});
+// passphrase or recovery code → unlocks the key session. Pending journaled
+// pushes drain on the next autosync tick.
+electron_1.ipcMain.handle('cloud:unlock', async (_event, secret) => {
+    const res = await cloudKeys.unlockCloudKeys(secret);
+    emitCloudStatusChanged();
+    return res;
+});
+electron_1.ipcMain.handle('cloud:lock', () => {
+    cloudKeys.lockCloudKeys();
+    emitCloudStatusChanged();
+    return { ok: true };
+});
+// Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
+// syncProvider.ts): the GitHub autosync stands down and the cloud polling
+// loop starts, kicking an initial pull (which flushes local changes after).
+electron_1.ipcMain.handle('cloud:enable', () => {
+    const res = cloudSync.enableCloudSync();
+    if (res.ok) {
+        startCloudAutoSync();
+        cloudSync
+            .pullNotes(NOTES_DIR)
+            .then((result) => {
+            broadcastPullResult(result);
+            emitCloudStatusChanged();
+        })
+            .catch((err) => console.error('[Cloud] initial pull failed:', String(err)));
+    }
+    emitCloudStatusChanged();
+    return res;
+});
+electron_1.ipcMain.handle('cloud:disable', () => {
+    const res = cloudSync.disableCloudSync();
+    stopCloudAutoSync();
+    emitCloudStatusChanged();
+    return res;
+});
+// Manual pull (same broadcast contract as sync:pull).
+electron_1.ipcMain.handle('cloud:pull', async () => {
+    const result = await cloudSync.pullNotes(NOTES_DIR);
+    if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
+        electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
+    }
+    else {
+        for (const filePath of result.updatedFiles) {
+            electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null));
+        }
+    }
+    emitCloudStatusChanged();
+    return result;
 });
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
@@ -2445,15 +2566,16 @@ function applyGroupsSet(groups, senderId, opts) {
     // Durable push for agentic chat tools (see applyNoteWrite): land groups.json on
     // the remote NOW so a racing pull doesn't overwrite the new group with the stale
     // remote copy before the debounced push fires.
+    const sync = (0, syncProvider_1.getActiveSyncProvider)();
     if (opts?.durablePush) {
-        if (!githubSync.getSyncStatus().connected)
+        if (!sync.isConnected())
             return Promise.resolve();
-        return githubSync
+        return sync
             .pushPathsNow(NOTES_DIR, ['groups.json'])
             .then(() => undefined)
             .catch((err) => { console.error('[chat] durable push failed:', String(err)); });
     }
-    githubSync.schedulePush('groups.json', content);
+    sync.schedulePush('groups.json', content);
 }
 electron_1.ipcMain.handle('groups:set', (event, groups) => {
     applyGroupsSet(groups, event.sender.id);
@@ -2476,15 +2598,16 @@ function applyFoldersSet(folders, senderId, opts) {
         }
     });
     // Durable push for agentic chat tools — see applyGroupsSet / applyNoteWrite.
+    const sync = (0, syncProvider_1.getActiveSyncProvider)();
     if (opts?.durablePush) {
-        if (!githubSync.getSyncStatus().connected)
+        if (!sync.isConnected())
             return Promise.resolve();
-        return githubSync
+        return sync
             .pushPathsNow(NOTES_DIR, ['folders.json'])
             .then(() => undefined)
             .catch((err) => { console.error('[chat] durable push failed:', String(err)); });
     }
-    githubSync.schedulePush('folders.json', content);
+    sync.schedulePush('folders.json', content);
 }
 electron_1.ipcMain.handle('folders:set', (event, folders) => {
     applyFoldersSet(folders, event.sender.id);
@@ -2507,7 +2630,7 @@ electron_1.ipcMain.handle('section-colors:set', (event, colors) => {
             win.webContents.send('notes-updated');
         }
     });
-    githubSync.schedulePush('section-colors.json', content);
+    (0, syncProvider_1.getActiveSyncProvider)().schedulePush('section-colors.json', content);
 });
 electron_1.ipcMain.handle('note-order:get', () => {
     try {
@@ -2525,7 +2648,7 @@ electron_1.ipcMain.handle('note-order:set', (event, order) => {
             win.webContents.send('notes-updated');
         }
     });
-    githubSync.schedulePush('note-order.json', content);
+    (0, syncProvider_1.getActiveSyncProvider)().schedulePush('note-order.json', content);
 });
 electron_1.ipcMain.handle('templates:get', () => {
     try {
@@ -2543,7 +2666,7 @@ electron_1.ipcMain.handle('templates:set', (event, templates) => {
             win.webContents.send('notes-updated');
         }
     });
-    githubSync.schedulePush('templates.json', content);
+    (0, syncProvider_1.getActiveSyncProvider)().schedulePush('templates.json', content);
 });
 // Window controls
 electron_1.ipcMain.on('window:minimize', (event) => {
@@ -2637,18 +2760,53 @@ electron_1.app.whenReady().then(async () => {
     githubSync.loadSyncSettings();
     githubSync.onStatusChanged(() => emitSyncStatusChanged());
     const connected = githubSync.getSyncStatus().connected;
+    // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
+    // settings. Mutually exclusive with GitHub Sync — when enabled, Cloud owns
+    // the sync loop and GitHub's is skipped (see syncProvider.ts).
+    cloudKeys.initCloudKeys();
+    cloudSync.initCloudSync(NOTES_DIR);
+    cloudSync.onStatusChanged(() => emitCloudStatusChanged());
+    const cloudEnabled = cloudSync.isCloudSyncEnabled();
     // NoteFlow account: load the persisted session and refresh entitlements in
     // the background (deferred inside initAccount — never blocks boot).
     account.onStatusChanged(() => handleAccountStatusChanged());
     account.initAccount();
     const isStartupMode = process.argv.includes('--noteflow-startup');
     const startupStickies = (readSettings().startupStickies ?? []);
+    // Initial NoteFlow Cloud pull + interim polling loop. Same rationale as the
+    // GitHub block below: in startup mode block briefly so stickies open fresh;
+    // otherwise pull in the background (pushes are gated until it succeeds).
+    if (cloudEnabled) {
+        const runInitialCloudPull = () => cloudSync
+            .pullNotes(NOTES_DIR)
+            .then((result) => {
+            broadcastPullResult(result);
+            emitCloudStatusChanged();
+            cloudSync.retrySyncJournal(NOTES_DIR).catch((err) => {
+                console.error('[Startup] cloud journal retry failed:', String(err));
+            });
+        })
+            .catch((err) => {
+            console.error('[Startup] initial cloud pull failed:', String(err));
+        });
+        if (isStartupMode) {
+            await Promise.race([
+                runInitialCloudPull(),
+                new Promise((resolve) => setTimeout(resolve, 10000)),
+            ]);
+        }
+        else {
+            runInitialCloudPull();
+        }
+        startCloudAutoSync();
+    }
     // Initial GitHub pull. In startup mode we block for up to 10s so sticky
     // windows open with up-to-date content — otherwise an edit on stale data
     // would overwrite newer remote changes (data loss). In normal mode we keep
     // the fast-open UX and pull in the background; schedulePush is gated until
     // the first pull succeeds, so no unsafe pushes happen in the meantime.
-    if (connected) {
+    // Skipped while Cloud is enabled (mutual exclusion — Cloud takes priority).
+    if (connected && !cloudEnabled) {
         const runInitialPull = () => githubSync
             .pullNotes(NOTES_DIR)
             .then((result) => {

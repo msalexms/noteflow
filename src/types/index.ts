@@ -280,6 +280,20 @@ export interface AccountStatus {
   aiCheckoutConfigured: boolean   // true when the build ships a NoteFlow AI checkout URL
 }
 
+// ── NoteFlow Cloud (E2EE sync) ───────────────────────────────────────────────
+
+// Renderer-safe view of the cloud sync engine — never carries key material.
+export interface CloudSyncStatus {
+  configured: boolean   // false while the build has no Supabase project configured
+  enabled: boolean
+  signedIn: boolean
+  /** 'no-keys' = the account has no E2EE keys yet (setup needed); 'locked' = keys exist (or unknown) but the DEK is not in memory. */
+  keysState: 'unlocked' | 'locked' | 'no-keys'
+  lastSync?: string
+  error?: string
+  initialPullStatus: 'pending' | 'ok' | 'failed'
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -368,6 +382,22 @@ declare global {
       accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
       accountOpenCheckout: (product: 'ai') => Promise<{ ok: boolean; error?: string }>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
+      // NoteFlow Cloud (E2EE sync) — keys never cross this bridge
+      getCloudStatus: () => Promise<CloudSyncStatus>
+      cloudSetup: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
+      cloudUnlock: (secret: string) => Promise<{ ok: boolean; error?: string }>
+      cloudLock: () => Promise<{ ok: boolean }>
+      cloudEnable: () => Promise<{ ok: boolean; error?: string }>
+      cloudDisable: () => Promise<{ ok: boolean }>
+      cloudPull: () => Promise<{
+        pulled: number
+        deleted: number
+        errors: string[]
+        updatedFiles: string[]
+        hadDeletions: boolean
+        hadMetadataChanges: boolean
+      }>
+      onCloudStatusChanged: (cb: (status: CloudSyncStatus) => void) => () => void
       scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) => void
       // AI / Semantic index
       getAiSettings: () => Promise<AiSettings>

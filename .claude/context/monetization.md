@@ -173,11 +173,16 @@ es **un preset más**, no una implementación nueva.
 **Decisión: E2EE total.** El servidor solo ve ciphertext; ni el operador puede leer las notas.
 Es el argumento de privacidad del plan y encaja con el ADN local-first de la app.
 
-> **Estado: tramo 1 implementado** (fundación criptográfica + esquema de servidor): migración
+> **Estado: tramos 1 y 2 implementados.** Tramo 1 (fundación): migración
 > `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y `electron/cloudCrypto.ts`
-> (capa criptográfica pura, testeada en `tests/electron/cloudCrypto.test.ts`). Pendientes los
-> tramos siguientes: `cloudSync.ts` / interfaz `SyncProvider`, Realtime y el onboarding
-> passphrase/recovery en UI. Sin UI ni sync, el esquema y el módulo quedan inertes.
+> (capa criptográfica pura, testeada en `tests/electron/cloudCrypto.test.ts`). Tramo 2 (motor de
+> sync): `electron/cloudKeys.ts` (sesión de claves), `electron/cloudSync.ts` +
+> `electron/cloudSyncLogic.ts` (motor, lógica pura testeada en `tests/electron/cloudSync.test.ts`),
+> interfaz `SyncProvider` (`electron/syncProvider.ts`) y los IPC `cloud:*` (sin UI). Pendientes:
+> tramo 3 (Realtime — de momento **polling interino** cada 60 s,
+> `CLOUD_AUTO_SYNC_INTERVAL_MS`) y tramo 4 (onboarding passphrase/recovery + Settings UI +
+> enforcement visual de la exclusión mutua con GitHub Sync). Sin UI, el motor solo es accionable
+> vía los handlers IPC.
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
@@ -226,16 +231,70 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   tombstone (`deleted = true` vía update) también queda gateado — sin suscripción, propagar
   borrados es vía `DELETE` físico.
 
-### Sync engine (`electron/cloudSync.ts`, futuro)
-- El GitHub Sync ya es un modelo "archivo por ruta relativa" (`schedulePush(relPath, content)`,
-  pull por carpeta, `scheduleDelete`/`scheduleDeleteDir`, `getSyncStatus`) → mapea 1:1 a la tabla
-  `files`. Extraer una interfaz **`SyncProvider`** común y que `main.ts` enchufe GitHub o Cloud
-  según settings. **Mutuamente excluyentes** (elegir uno en Settings → Sync).
-- **Sin cola de mutaciones:** Postgres soporta upserts concurrentes — desaparece el invariante de
-  serialización del GitHub Sync (la cola `enqueueMutation` es un workaround de la Contents API).
-  Upserts directos con reintento simple.
-- **Tiempo real:** suscripción Realtime a los cambios de `files` del usuario → aplicar en caliente
-  (equivale a un pull dirigido a esas carpetas). Adiós al autosync de 5 min.
+### Sesión de claves (`electron/cloudKeys.ts`, tramo 2 — implementada)
+- `setupCloudKeys(passphrase)`: genera DEK + recovery code, envuelve la DEK con ambas KEKs, sube
+  la fila `user_keys` (rechaza si ya existe una — rotación de claves será un flujo explícito
+  futuro) y **devuelve el recovery code UNA vez** (jamás se persiste ni se loguea).
+- `unlockCloudKeys(secret)`: baja `user_keys` e intenta desenvolver **como passphrase primero**;
+  si falla y el input tiene la forma exacta de un recovery code (30 chars normalizados,
+  `looksLikeRecoveryCode` en `cloudCrypto.ts` — validado ANTES de derivar, para dar error claro),
+  lo intenta como recovery. `lockCloudKeys()` descarta la DEK; estado
+  `unlocked | locked | no-keys` (`no-keys` = confirmado que la cuenta no tiene fila `user_keys`).
+- **La DEK vive SOLO en memoria del main** — nunca cruza al renderer ni toca disco en claro.
+  **Cache de conveniencia (decisión):** la DEK se persiste cifrada con `safeStorage` en
+  `settings.cloudSync.encryptedDek` para no pedir la passphrase en cada arranque
+  (`initCloudKeys()` la restaura en el boot) — **SOLO si `safeStorage.isEncryptionAvailable()`**;
+  jamás con el fallback base64 que se usa para tokens (una master key en base64 en disco anularía
+  el E2EE). `lockCloudKeys()` borra también la cache.
+- Helper `supabaseRest()` exportado (PostgREST con token fresco por request vía
+  `account.getAccessToken()`) — lo reutiliza `cloudSync.ts`.
+
+### Sync engine (`electron/cloudSync.ts` + lógica pura en `cloudSyncLogic.ts`, tramo 2 — implementado)
+- Mismo modelo "archivo por ruta relativa" y **misma regla de conflicto** que el GitHub Sync
+  (la carpeta de nota es la unidad; decide el `updated:` del `note.md`). `main.ts` enruta por la
+  interfaz **`SyncProvider`** (`electron/syncProvider.ts`, ver `sync.md`); **mutuamente
+  excluyentes**: si `cloudSync.enabled`, Cloud tiene prioridad y el loop de GitHub se salta
+  (enforcement en Settings UI = tramo 4).
+- **Sin cola de mutaciones:** Postgres soporta upserts concurrentes — el invariante de
+  serialización del GitHub Sync es un workaround de la Contents API que aquí no aplica. Upserts
+  directos (`POST /rest/v1/files?on_conflict=user_id,path_key` +
+  `Prefer: resolution=merge-duplicates`) con **un** reintento ante error de red/5xx.
+- **`updated_at` por fila (decisión):** `note.md` → su propio `updated:` del frontmatter; los
+  `.md` de sección → el `updated:` del **ancla de su carpeta** (leído de disco al pushear — así
+  una edición viaja como grupo coherente en la ventana incremental de otros dispositivos); los
+  json de metadatos de raíz → momento de escritura. Fallback: momento de escritura.
+- **Clave de nota por carpeta:** cache en memoria `dir → noteKey`, sembrada por los pulls y
+  poblada bajo demanda (GET del `key_ct` del ancla remota y unwrap; si la nota es nueva, clave
+  fresca). Los metadatos de raíz usan clave propia por fila.
+- **Deletes = tombstones (decisión):** `PATCH deleted=true, content_ct=''` (el `path_ct`/`key_ct`
+  se conservan) para que otros dispositivos se enteren en su pull incremental — **no hay borrado
+  por ausencia** (el pull incremental no ve filas "que faltan"). El borrado local aplica la regla
+  de seguridad de siempre (`updated <= lastSync`). Sin entitlement, RLS bloquea el UPDATE →
+  fallback a `DELETE` físico (la fila desaparece sin notificar a otros dispositivos — asumido:
+  sin suscripción tampoco pueden pushear).
+- **Pull incremental:** `GET files?updated_at=gt.<pullCursor>` (índice de la 0004), paginado
+  (PostgREST capa a 1000 filas). **Dos marcas (decisión):** `pullCursor` = watermark del máximo
+  `updated_at` remoto reconciliado (filtro incremental — los timestamps los ponen los clientes
+  desde el frontmatter, usar "ahora" saltaría filas de otros dispositivos con reloj/timestamps
+  más viejos) y `lastSync` = hora de pared del último pull (regla de borrado + UI). El primer
+  pull (sin cursor) filtra `deleted=eq.false`. Las rutas descifradas se sanean
+  (`isSafeCloudRelPath`) antes de tocar disco.
+- **Journal (decisión):** reutiliza las transiciones puras de `electron/syncState.ts` pero
+  persiste en su PROPIO `userData/cloud-sync-state.json` (los dos backends no deben reproducirse
+  ops mutuamente); el sha-cache no aplica (el pull incremental ya evita trabajo). Pushes con
+  claves bloqueadas o offline quedan journaled y drenan tras unlock/reconexión
+  (`retrySyncJournal`, mismo contrato que GitHub). Un 403 de RLS (suscripción caducada) se mapea
+  a `syncError` accionable y **pausa** el drain de escrituras mientras la entitlement local
+  también diga "no cloud" (sin bucle de reintentos).
+- Gate de push hasta el primer pull OK (`initialPullStatus`, como GitHub) +
+  `flushPendingLocalChanges`: en la PRIMERA sincronización (sin `lastSync` previo) esto sube el
+  corpus local entero, metadatos incluidos.
+- `disableCloudSync()` conserva `lastSync`/`pullCursor`/journal (re-habilitar retoma incremental
+  y los deletes pendientes no se pierden); las claves no se tocan (lock es acción aparte).
+- **Tiempo real (tramo 3, pendiente):** suscripción Realtime a los cambios de `files` del
+  usuario → aplicar en caliente. De momento, **polling interino** cada 60 s
+  (`CLOUD_AUTO_SYNC_INTERVAL_MS`, loop en `main.ts`: drena journal → pull, espejo del tick de
+  GitHub).
 
 ### Futuro (no-foco, solo dejar la puerta abierta)
 - **Historial de versiones:** tabla `file_versions` (insert del cliente en cada push; blobs
@@ -250,7 +309,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube E2EE** | 🔨 **En curso — tramo 1 hecho:** fundación criptográfica (`electron/cloudCrypto.ts` + tests) y esquema de servidor (migración 0004: `user_keys` + `files` + RLS con gating de escritura por entitlement). Pendiente: `cloudSync.ts` (interfaz `SyncProvider`) + Realtime + onboarding passphrase/recovery + coexistencia/migración desde GitHub Sync |
+| **4.2 Nube E2EE** | 🔨 **En curso — tramos 1 y 2 hechos:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migración 0004) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s). Pendiente: tramo 3 (Realtime) + tramo 4 (onboarding passphrase/recovery en UI + Settings + enforcement de exclusión con GitHub Sync) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)

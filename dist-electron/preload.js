@@ -117,6 +117,21 @@ const api = {
         electron_1.ipcRenderer.on('account:status-changed', wrapper);
         return () => electron_1.ipcRenderer.removeListener('account:status-changed', wrapper);
     },
+    // NoteFlow Cloud (E2EE sync) — public status only; key material NEVER
+    // crosses this bridge. The recovery code returned by cloudSetup is shown
+    // once and never persisted anywhere.
+    getCloudStatus: () => electron_1.ipcRenderer.invoke('cloud:get-status'),
+    cloudSetup: (passphrase) => electron_1.ipcRenderer.invoke('cloud:setup', passphrase),
+    cloudUnlock: (secret) => electron_1.ipcRenderer.invoke('cloud:unlock', secret),
+    cloudLock: () => electron_1.ipcRenderer.invoke('cloud:lock'),
+    cloudEnable: () => electron_1.ipcRenderer.invoke('cloud:enable'),
+    cloudDisable: () => electron_1.ipcRenderer.invoke('cloud:disable'),
+    cloudPull: () => electron_1.ipcRenderer.invoke('cloud:pull'),
+    onCloudStatusChanged: (cb) => {
+        const wrapper = (_event, status) => cb(status);
+        electron_1.ipcRenderer.on('cloud:status-changed', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('cloud:status-changed', wrapper);
+    },
     // Alarms
     scheduleAlarms: (alarms) => electron_1.ipcRenderer.send('alarms:schedule', alarms),
     // AI / Semantic index

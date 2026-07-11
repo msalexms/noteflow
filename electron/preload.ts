@@ -201,6 +201,49 @@ const api = {
     return () => ipcRenderer.removeListener('account:status-changed', wrapper)
   },
 
+  // NoteFlow Cloud (E2EE sync) — public status only; key material NEVER
+  // crosses this bridge. The recovery code returned by cloudSetup is shown
+  // once and never persisted anywhere.
+  getCloudStatus: (): Promise<{
+    configured: boolean
+    enabled: boolean
+    signedIn: boolean
+    keysState: 'unlocked' | 'locked' | 'no-keys'
+    lastSync?: string
+    error?: string
+    initialPullStatus: 'pending' | 'ok' | 'failed'
+  }> => ipcRenderer.invoke('cloud:get-status'),
+  cloudSetup: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
+    ipcRenderer.invoke('cloud:setup', passphrase),
+  cloudUnlock: (secret: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('cloud:unlock', secret),
+  cloudLock: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:lock'),
+  cloudEnable: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('cloud:enable'),
+  cloudDisable: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('cloud:disable'),
+  cloudPull: (): Promise<{
+    pulled: number
+    deleted: number
+    errors: string[]
+    updatedFiles: string[]
+    hadDeletions: boolean
+    hadMetadataChanges: boolean
+  }> => ipcRenderer.invoke('cloud:pull'),
+  onCloudStatusChanged: (
+    cb: (status: {
+      configured: boolean
+      enabled: boolean
+      signedIn: boolean
+      keysState: 'unlocked' | 'locked' | 'no-keys'
+      lastSync?: string
+      error?: string
+      initialPullStatus: 'pending' | 'ok' | 'failed'
+    }) => void
+  ) => {
+    const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)
+    ipcRenderer.on('cloud:status-changed', wrapper)
+    return () => ipcRenderer.removeListener('cloud:status-changed', wrapper)
+  },
+
   // Alarms
   scheduleAlarms: (alarms: Array<{ noteTitle: string; taskText: string; alarmAt: string }>) =>
     ipcRenderer.send('alarms:schedule', alarms),

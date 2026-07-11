@@ -20,6 +20,9 @@ import os from 'os'
 import { spawn } from 'child_process'
 import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
+import * as cloudSync from './cloudSync'
+import * as cloudKeys from './cloudKeys'
+import { getActiveSyncProvider, type SyncPullResult } from './syncProvider'
 import * as account from './account'
 import { LEMONSQUEEZY_CHECKOUT_URLS } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
@@ -126,7 +129,7 @@ function checkExpiredNotes(): void {
         } catch { /* ignore */ }
         fs.rmSync(dirPath, { recursive: true, force: true })
         BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
-        githubSync.scheduleDeleteDir(dir)
+        getActiveSyncProvider().scheduleDeleteDir(dir)
       } catch {
         // ignore per-note errors
       }
@@ -211,9 +214,7 @@ function handleAccountStatusChanged(): void {
   emitAccountStatusChanged()
 }
 
-type PullResult = Awaited<ReturnType<typeof githubSync.pullNotes>>
-
-function broadcastPullResult(result: PullResult): void {
+function broadcastPullResult(result: SyncPullResult): void {
   if (result.hadDeletions || result.hadMetadataChanges) {
     BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
   } else {
@@ -229,6 +230,10 @@ function broadcastPullResult(result: PullResult): void {
 function startAutoSync(): void {
   if (autoSyncTimer) return
   autoSyncTimer = setInterval(async () => {
+    // Mutual exclusion: while NoteFlow Cloud is enabled it owns the sync loop
+    // (see syncProvider.ts) — the GitHub timer stands down without being torn
+    // down, so disabling Cloud resumes GitHub on the next tick.
+    if (cloudSync.isCloudSyncEnabled()) return
     if (!githubSync.getSyncStatus().connected) return
     // Drain the journal of failed remote mutations BEFORE pulling: a pending
     // upsert/delete that never landed would otherwise make the pull delete the
@@ -260,6 +265,53 @@ function stopAutoSync(): void {
   if (autoSyncTimer) {
     clearInterval(autoSyncTimer)
     autoSyncTimer = null
+  }
+}
+
+// ── NoteFlow Cloud autosync (interim polling — stage 3 replaces it with Realtime)
+
+let cloudAutoSyncTimer: ReturnType<typeof setInterval> | null = null
+
+// Broadcasts the PUBLIC cloud status (never key material) to every window.
+function emitCloudStatusChanged(): void {
+  const status = cloudSync.getCloudSyncStatus()
+  BrowserWindow.getAllWindows().forEach((win) => {
+    win.webContents.send('cloud:status-changed', status)
+  })
+}
+
+function startCloudAutoSync(): void {
+  if (cloudAutoSyncTimer) return
+  cloudAutoSyncTimer = setInterval(async () => {
+    if (!cloudSync.isCloudSyncEnabled()) return
+    // Locked keys: nothing can be encrypted/decrypted — pending ops stay
+    // journaled and drain after the user unlocks.
+    if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') return
+    // Same ordering as the GitHub tick: drain the journal first, then stand
+    // down if writes are still in flight, then pull.
+    try {
+      await cloudSync.retrySyncJournal(NOTES_DIR)
+    } catch (err) {
+      console.error('[CloudAutoSync] journal retry failed:', String(err))
+    }
+    if (cloudSync.hasPendingRemoteMutations()) {
+      console.log('[CloudAutoSync] skipping pull — remote mutations pending')
+      return
+    }
+    try {
+      const result = await cloudSync.pullNotes(NOTES_DIR)
+      broadcastPullResult(result)
+    } catch (err) {
+      console.error('[CloudAutoSync] pull failed:', String(err))
+    }
+    emitCloudStatusChanged()
+  }, cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS)
+}
+
+function stopCloudAutoSync(): void {
+  if (cloudAutoSyncTimer) {
+    clearInterval(cloudAutoSyncTimer)
+    cloudAutoSyncTimer = null
   }
 }
 
@@ -886,8 +938,9 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
     win.webContents.send('notes-updated', dirPath, senderId)
   })
 
-  const connected = githubSync.getSyncStatus().connected
-  for (const f of deletes) githubSync.scheduleDelete(`${dir}/${f}`)
+  const sync = getActiveSyncProvider()
+  const connected = sync.isConnected()
+  for (const f of deletes) sync.scheduleDelete(`${dir}/${f}`)
 
   // Keep the semantic index up to date (debounced; no-op when AI is disabled).
   if (aiIndex.isEnabled()) aiIndex.scheduleIndex(dirPath)
@@ -904,7 +957,7 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
     const relPaths = writes.map(([f]) => `${dir}/${f}`)
     relPaths.forEach((p) => pendingPushFiles.add(p))
     notifyPushState()
-    return githubSync
+    return sync
       .pushPathsNow(NOTES_DIR, relPaths)
       .then(() => undefined)
       .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
@@ -917,12 +970,12 @@ function applyNoteWrite(payload: NoteWritePayload, senderId?: number, opts?: { d
   for (const [f, content] of writes) {
     const relPath = `${dir}/${f}`
     if (connected) {
-      githubSync.schedulePush(relPath, content,
+      sync.schedulePush(relPath, content,
         () => { pendingPushFiles.add(relPath); notifyPushState() },
         () => { pendingPushFiles.delete(relPath); notifyPushState() }
       )
     } else {
-      githubSync.schedulePush(relPath, content)
+      sync.schedulePush(relPath, content)
     }
   }
 }
@@ -939,7 +992,7 @@ function applyNoteDelete(dirOrPath: string): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send('notes-updated')
   })
-  githubSync.scheduleDeleteDir(dir)
+  getActiveSyncProvider().scheduleDeleteDir(dir)
   aiIndex.removeFromIndex(dirPath)
 }
 
@@ -1372,7 +1425,8 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: stri
   const written: string[] = []
   const errors: string[] = []
   const writtenPaths: string[] = []
-  const connected = githubSync.getSyncStatus().connected
+  const sync = getActiveSyncProvider()
+  const connected = sync.isConnected()
   for (const entry of entries) {
     try {
       const dir = ensureSafeDirname(entry.dir)
@@ -1404,7 +1458,7 @@ ipcMain.handle('notes:write-imported', async (_event, entries: Array<{ dir: stri
   // up front prevents that.
   if (connected && writtenPaths.length > 0) {
     try {
-      const res = await githubSync.pushPathsNow(NOTES_DIR, writtenPaths)
+      const res = await sync.pushPathsNow(NOTES_DIR, writtenPaths)
       if (res.errors.length > 0) errors.push(...res.errors.map((p) => `push failed: ${p}`))
     } catch (err) {
       errors.push(`push failed: ${String(err)}`)
@@ -1516,6 +1570,77 @@ ipcMain.handle('account:open-checkout', (_event, product: string) => {
     console.error('Failed to open checkout URL:', err)
   })
   return { ok: true }
+})
+
+// ── NoteFlow Cloud (E2EE sync — phase 4.2) ────────────────────────────────────
+// Key material lives in electron/cloudKeys.ts (main-process memory only); the
+// renderer exchanges exclusively the public CloudSyncStatus. No Settings UI
+// yet (stage 4) — these handlers are the complete main-side surface.
+
+ipcMain.handle('cloud:get-status', () => {
+  return cloudSync.getCloudSyncStatus()
+})
+
+// passphrase → generates DEK + recovery code, uploads user_keys, unlocks.
+// The recovery code is returned ONCE for display and never persisted.
+ipcMain.handle('cloud:setup', async (_event, passphrase: string) => {
+  const res = await cloudKeys.setupCloudKeys(passphrase)
+  emitCloudStatusChanged()
+  return res
+})
+
+// passphrase or recovery code → unlocks the key session. Pending journaled
+// pushes drain on the next autosync tick.
+ipcMain.handle('cloud:unlock', async (_event, secret: string) => {
+  const res = await cloudKeys.unlockCloudKeys(secret)
+  emitCloudStatusChanged()
+  return res
+})
+
+ipcMain.handle('cloud:lock', () => {
+  cloudKeys.lockCloudKeys()
+  emitCloudStatusChanged()
+  return { ok: true }
+})
+
+// Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
+// syncProvider.ts): the GitHub autosync stands down and the cloud polling
+// loop starts, kicking an initial pull (which flushes local changes after).
+ipcMain.handle('cloud:enable', () => {
+  const res = cloudSync.enableCloudSync()
+  if (res.ok) {
+    startCloudAutoSync()
+    cloudSync
+      .pullNotes(NOTES_DIR)
+      .then((result) => {
+        broadcastPullResult(result)
+        emitCloudStatusChanged()
+      })
+      .catch((err) => console.error('[Cloud] initial pull failed:', String(err)))
+  }
+  emitCloudStatusChanged()
+  return res
+})
+
+ipcMain.handle('cloud:disable', () => {
+  const res = cloudSync.disableCloudSync()
+  stopCloudAutoSync()
+  emitCloudStatusChanged()
+  return res
+})
+
+// Manual pull (same broadcast contract as sync:pull).
+ipcMain.handle('cloud:pull', async () => {
+  const result = await cloudSync.pullNotes(NOTES_DIR)
+  if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
+  } else {
+    for (const filePath of result.updatedFiles) {
+      BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated', filePath, null))
+    }
+  }
+  emitCloudStatusChanged()
+  return result
 })
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────
@@ -2465,14 +2590,15 @@ function applyGroupsSet(groups: unknown[], senderId?: number, opts?: { durablePu
   // Durable push for agentic chat tools (see applyNoteWrite): land groups.json on
   // the remote NOW so a racing pull doesn't overwrite the new group with the stale
   // remote copy before the debounced push fires.
+  const sync = getActiveSyncProvider()
   if (opts?.durablePush) {
-    if (!githubSync.getSyncStatus().connected) return Promise.resolve()
-    return githubSync
+    if (!sync.isConnected()) return Promise.resolve()
+    return sync
       .pushPathsNow(NOTES_DIR, ['groups.json'])
       .then(() => undefined)
       .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
   }
-  githubSync.schedulePush('groups.json', content)
+  sync.schedulePush('groups.json', content)
 }
 
 ipcMain.handle('groups:set', (event, groups: unknown[]) => {
@@ -2495,14 +2621,15 @@ function applyFoldersSet(folders: unknown[], senderId?: number, opts?: { durable
     }
   })
   // Durable push for agentic chat tools — see applyGroupsSet / applyNoteWrite.
+  const sync = getActiveSyncProvider()
   if (opts?.durablePush) {
-    if (!githubSync.getSyncStatus().connected) return Promise.resolve()
-    return githubSync
+    if (!sync.isConnected()) return Promise.resolve()
+    return sync
       .pushPathsNow(NOTES_DIR, ['folders.json'])
       .then(() => undefined)
       .catch((err) => { console.error('[chat] durable push failed:', String(err)) })
   }
-  githubSync.schedulePush('folders.json', content)
+  sync.schedulePush('folders.json', content)
 }
 
 ipcMain.handle('folders:set', (event, folders: unknown[]) => {
@@ -2527,7 +2654,7 @@ ipcMain.handle('section-colors:set', (event, colors: unknown) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush('section-colors.json', content)
+  getActiveSyncProvider().schedulePush('section-colors.json', content)
 })
 
 ipcMain.handle('note-order:get', () => {
@@ -2544,7 +2671,7 @@ ipcMain.handle('note-order:set', (event, order: unknown) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush('note-order.json', content)
+  getActiveSyncProvider().schedulePush('note-order.json', content)
 })
 
 ipcMain.handle('templates:get', () => {
@@ -2561,7 +2688,7 @@ ipcMain.handle('templates:set', (event, templates: unknown[]) => {
       win.webContents.send('notes-updated')
     }
   })
-  githubSync.schedulePush('templates.json', content)
+  getActiveSyncProvider().schedulePush('templates.json', content)
 })
 
 // Window controls
@@ -2660,6 +2787,14 @@ app.whenReady().then(async () => {
   githubSync.onStatusChanged(() => emitSyncStatusChanged())
   const connected = githubSync.getSyncStatus().connected
 
+  // NoteFlow Cloud: restore the cached DEK (safeStorage) and the engine
+  // settings. Mutually exclusive with GitHub Sync — when enabled, Cloud owns
+  // the sync loop and GitHub's is skipped (see syncProvider.ts).
+  cloudKeys.initCloudKeys()
+  cloudSync.initCloudSync(NOTES_DIR)
+  cloudSync.onStatusChanged(() => emitCloudStatusChanged())
+  const cloudEnabled = cloudSync.isCloudSyncEnabled()
+
   // NoteFlow account: load the persisted session and refresh entitlements in
   // the background (deferred inside initAccount — never blocks boot).
   account.onStatusChanged(() => handleAccountStatusChanged())
@@ -2668,12 +2803,41 @@ app.whenReady().then(async () => {
   const isStartupMode = process.argv.includes('--noteflow-startup')
   const startupStickies = (readSettings().startupStickies ?? []) as Array<{ noteId: string; sectionId: string }>
 
+  // Initial NoteFlow Cloud pull + interim polling loop. Same rationale as the
+  // GitHub block below: in startup mode block briefly so stickies open fresh;
+  // otherwise pull in the background (pushes are gated until it succeeds).
+  if (cloudEnabled) {
+    const runInitialCloudPull = () =>
+      cloudSync
+        .pullNotes(NOTES_DIR)
+        .then((result) => {
+          broadcastPullResult(result)
+          emitCloudStatusChanged()
+          cloudSync.retrySyncJournal(NOTES_DIR).catch((err) => {
+            console.error('[Startup] cloud journal retry failed:', String(err))
+          })
+        })
+        .catch((err) => {
+          console.error('[Startup] initial cloud pull failed:', String(err))
+        })
+    if (isStartupMode) {
+      await Promise.race([
+        runInitialCloudPull(),
+        new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+      ])
+    } else {
+      runInitialCloudPull()
+    }
+    startCloudAutoSync()
+  }
+
   // Initial GitHub pull. In startup mode we block for up to 10s so sticky
   // windows open with up-to-date content — otherwise an edit on stale data
   // would overwrite newer remote changes (data loss). In normal mode we keep
   // the fast-open UX and pull in the background; schedulePush is gated until
   // the first pull succeeds, so no unsafe pushes happen in the meantime.
-  if (connected) {
+  // Skipped while Cloud is enabled (mutual exclusion — Cloud takes priority).
+  if (connected && !cloudEnabled) {
     const runInitialPull = () =>
       githubSync
         .pullNotes(NOTES_DIR)

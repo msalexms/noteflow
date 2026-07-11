@@ -126,6 +126,17 @@ export function normalizeRecoveryCode(code: string): string {
   return out
 }
 
+/**
+ * Heuristic used by the unlock flow: a user-typed secret is treated as a
+ * possible recovery code only when its normalized form has EXACTLY the length
+ * of a generated code (30 chars). Deriving a recovery KEK from an arbitrary
+ * passphrase-looking string would silently succeed at the KDF and fail at
+ * unwrap — checking the length first lets the caller give a clear error.
+ */
+export function looksLikeRecoveryCode(input: string): boolean {
+  return normalizeRecoveryCode(input).length === RECOVERY_CODE_GROUPS * RECOVERY_CODE_GROUP_LEN
+}
+
 /** PBKDF2-SHA256 recovery code → 256-bit KEK (code normalized first). */
 export async function deriveRecoveryKek(
   code: string,
