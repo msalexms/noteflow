@@ -173,16 +173,15 @@ es **un preset más**, no una implementación nueva.
 **Decisión: E2EE total.** El servidor solo ve ciphertext; ni el operador puede leer las notas.
 Es el argumento de privacidad del plan y encaja con el ADN local-first de la app.
 
-> **Estado: tramos 1 y 2 implementados.** Tramo 1 (fundación): migración
+> **Estado: tramos 1, 2 y 4 implementados.** Tramo 1 (fundación): migración
 > `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y `electron/cloudCrypto.ts`
 > (capa criptográfica pura, testeada en `tests/electron/cloudCrypto.test.ts`). Tramo 2 (motor de
 > sync): `electron/cloudKeys.ts` (sesión de claves), `electron/cloudSync.ts` +
 > `electron/cloudSyncLogic.ts` (motor, lógica pura testeada en `tests/electron/cloudSync.test.ts`),
-> interfaz `SyncProvider` (`electron/syncProvider.ts`) y los IPC `cloud:*` (sin UI). Pendientes:
-> tramo 3 (Realtime — de momento **polling interino** cada 60 s,
-> `CLOUD_AUTO_SYNC_INTERVAL_MS`) y tramo 4 (onboarding passphrase/recovery + Settings UI +
-> enforcement visual de la exclusión mutua con GitHub Sync). Sin UI, el motor solo es accionable
-> vía los handlers IPC.
+> interfaz `SyncProvider` (`electron/syncProvider.ts`) y los IPC `cloud:*`. Tramo 4 (UI):
+> onboarding passphrase/recovery + panel en Settings → Sync + enforcement visual de la exclusión
+> mutua con GitHub Sync (ver "Settings UI" abajo). Pendiente: tramo 3 (Realtime — de momento
+> **polling interino** cada 60 s, `CLOUD_AUTO_SYNC_INTERVAL_MS`).
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
@@ -296,6 +295,33 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   (`CLOUD_AUTO_SYNC_INTERVAL_MS`, loop en `main.ts`: drena journal → pull, espejo del tick de
   GitHub).
 
+### Settings UI (tramo 4 — implementado)
+- **Ubicación:** la página **Settings → Sync** contiene DOS secciones —
+  `src/components/Settings/CloudPanel.tsx` (NoteFlow Cloud, arriba) y la sección GitHub debajo
+  (mismo `SyncPanel.tsx`, cuerpo extraído a un componente interno `GitHubSyncSection`). Textos
+  vía i18n `t.settings.cloud.*` (+ `t.settings.sync.githubTitle`/`pausedByCloud`).
+- **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Account";
+  `no-keys` → formulario de passphrase (input + confirmación, mínimo 8 chars) → `cloudSetup` →
+  el **recovery code se muestra UNA vez** en un bloque ámbar que oculta el resto del panel hasta
+  pulsar "I have saved my recovery code" (vive solo en estado local del componente, con botón
+  Copy y aviso rojo de irrecuperabilidad); `locked` → un único input acepta passphrase O recovery
+  (el backend distingue) → `cloudUnlock`; `unlocked` → badge enabled/disabled + Last sync +
+  `syncError` (rojo, accionable) + botones Enable/Disable, Sync now (`cloudPull`, resultado tipo
+  GitHub) y Lock.
+- **Gating (decisión):** solo **Enable sync** exige la entitlement `cloud` — sin ella, mensaje
+  "requires subscription" + botón "Subscribe to NoteFlow Cloud" si
+  `LEMONSQUEEZY_CHECKOUT_URLS.cloud` no está vacía (hoy LO ESTÁ — no existe el producto en LS;
+  el botón queda oculto y se muestra "Subscriptions are coming soon"). Setup/unlock/pull/disable
+  NO se gatean (RLS solo bloquea escrituras; un suscriptor caducado puede bajar sus datos). El
+  IPC `account:open-checkout` acepta ahora `'ai' | 'cloud'` y `AccountStatus` expone
+  `cloudCheckoutConfigured` junto a `aiCheckoutConfigured`.
+- **Exclusión mutua (visual):** con Cloud enabled, la sección GitHub muestra un aviso ámbar
+  "paused while NoteFlow Cloud is enabled" (la config de GitHub se conserva); a la inversa, con
+  GitHub conectado y Cloud desbloqueado pero no habilitado, aviso de que activar Cloud pausará
+  GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
+- **Reactividad:** `CloudPanel` se suscribe a `onCloudStatusChanged` + `onAccountStatusChanged`;
+  la sección GitHub a `onCloudStatusChanged` (para el aviso de pausa).
+
 ### Futuro (no-foco, solo dejar la puerta abierta)
 - **Historial de versiones:** tabla `file_versions` (insert del cliente en cada push; blobs
   cifrados, retención N días/versiones). Con E2EE no hay diffs server-side — versiones opacas.
@@ -309,7 +335,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube E2EE** | 🔨 **En curso — tramos 1 y 2 hechos:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migración 0004) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s). Pendiente: tramo 3 (Realtime) + tramo 4 (onboarding passphrase/recovery en UI + Settings + enforcement de exclusión con GitHub Sync) |
+| **4.2 Nube E2EE** | 🔨 **En curso — tramos 1, 2 y 4 hechos:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migración 0004) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s) + **Settings UI** (`CloudPanel.tsx`: onboarding passphrase/recovery, unlock, enable/disable/pull/lock, enforcement visual de la exclusión con GitHub Sync). Pendiente: tramo 3 (Realtime) + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)

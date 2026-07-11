@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Cloud, CloudOff, ExternalLink, Github, Loader, RefreshCw, Unlink } from 'lucide-react'
+import { Cloud, CloudOff, ExternalLink, Github, Loader, Pause, RefreshCw, Unlink } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { CloudPanel } from './CloudPanel'
 
 interface SyncStatus {
   enabled: boolean
@@ -15,7 +16,40 @@ interface SyncStatus {
 
 type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling'
 
+// The Sync page: NoteFlow Cloud (E2EE, paid) on top, GitHub Sync (free)
+// below. The two backends are mutually exclusive — Cloud takes priority in
+// electron/syncProvider.ts; here we only surface that visually.
 export function SyncPanel() {
+  const t = useT()
+  const [cloudEnabled, setCloudEnabled] = useState(false)
+
+  useEffect(() => {
+    window.noteflow.getCloudStatus().then((s) => setCloudEnabled(s.enabled))
+    return window.noteflow.onCloudStatusChanged((s) => setCloudEnabled(s.enabled))
+  }, [])
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <CloudPanel />
+      </section>
+
+      <section className="pt-5 border-t border-border space-y-4">
+        <p className="text-xs font-mono font-medium text-text">{t.settings.sync.githubTitle}</p>
+        {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}
+        {cloudEnabled && (
+          <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-[11px] font-mono text-yellow-400 leading-relaxed">
+            <Pause size={12} className="flex-shrink-0 mt-0.5" />
+            <span>{t.settings.sync.pausedByCloud}</span>
+          </div>
+        )}
+        <GitHubSyncSection />
+      </section>
+    </div>
+  )
+}
+
+function GitHubSyncSection() {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 

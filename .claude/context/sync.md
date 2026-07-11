@@ -5,8 +5,9 @@
 `main.ts` **no llama a `githubSync` en duro** en el flujo de escritura de notas: enruta por
 `getActiveSyncProvider()`, que devuelve el backend activo — **NoteFlow Cloud si
 `settings.cloudSync.enabled` (prioridad), GitHub en caso contrario**. Son **mutuamente
-excluyentes** (el enforcement en Settings UI llega en el tramo 4; mientras tanto esta función es
-la única fuente de verdad, y el tick del autosync de GitHub se salta si Cloud está habilitado).
+excluyentes**: esta función es la única fuente de verdad (el tick del autosync de GitHub se salta
+si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (aviso "paused"
+en la sección GitHub con Cloud activo — tramo 4, ver `monetization.md` § 4 "Settings UI").
 
 Superficie (extraída de lo que `main.ts` consumía de `githubSync.ts`; ambos adapters son finos y
 delegan 1:1 sin cambiar comportamiento): `isConnected()`, `schedulePush(relPath, content,

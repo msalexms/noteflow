@@ -21,10 +21,12 @@ exports.AI_PROXY_URL = `${exports.SUPABASE_URL}/functions/v1/ai-proxy`;
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
  * in the LS store (see supabase/README.md § 6). While a URL is empty, the
- * corresponding "Subscribe" button in Settings → Account stays hidden.
+ * corresponding "Subscribe" button in Settings stays hidden.
  */
 exports.LEMONSQUEEZY_CHECKOUT_URLS = {
     ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',
+    // No NoteFlow Cloud product in the LS store yet — empty hides the button.
+    cloud: '',
 };
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {

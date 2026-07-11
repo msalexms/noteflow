@@ -278,6 +278,7 @@ export interface AccountStatus {
   entitlements: AccountEntitlements
   entitlementsFetchedAt?: string  // ISO — last successful entitlements fetch
   aiCheckoutConfigured: boolean   // true when the build ships a NoteFlow AI checkout URL
+  cloudCheckoutConfigured: boolean  // same, for the NoteFlow Cloud product
 }
 
 // ── NoteFlow Cloud (E2EE sync) ───────────────────────────────────────────────
@@ -380,7 +381,7 @@ declare global {
       accountVerifyOtp: (email: string, code: string) => Promise<{ ok: boolean; error?: string }>
       accountSignOut: () => Promise<{ ok: boolean; error?: string }>
       accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
-      accountOpenCheckout: (product: 'ai') => Promise<{ ok: boolean; error?: string }>
+      accountOpenCheckout: (product: 'ai' | 'cloud') => Promise<{ ok: boolean; error?: string }>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       // NoteFlow Cloud (E2EE sync) — keys never cross this bridge
       getCloudStatus: () => Promise<CloudSyncStatus>

@@ -173,6 +173,7 @@ const api = {
     entitlements: { ai: boolean; cloud: boolean }
     entitlementsFetchedAt?: string
     aiCheckoutConfigured: boolean
+    cloudCheckoutConfigured: boolean
   }> => ipcRenderer.invoke('account:get-status'),
   accountRequestOtp: (email: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('account:request-otp', email),
@@ -184,7 +185,7 @@ const api = {
     ipcRenderer.invoke('account:refresh-entitlements'),
   // Opens the subscription checkout in the browser; the URL (with the user id)
   // is built in main so the id never crosses the bridge.
-  accountOpenCheckout: (product: 'ai'): Promise<{ ok: boolean; error?: string }> =>
+  accountOpenCheckout: (product: 'ai' | 'cloud'): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('account:open-checkout', product),
   onAccountStatusChanged: (
     cb: (status: {
@@ -194,6 +195,7 @@ const api = {
       entitlements: { ai: boolean; cloud: boolean }
       entitlementsFetchedAt?: string
       aiCheckoutConfigured: boolean
+      cloudCheckoutConfigured: boolean
     }) => void
   ) => {
     const wrapper = (_event: unknown, status: Parameters<typeof cb>[0]) => cb(status)

@@ -65,7 +65,7 @@ Iconos del TitleBar:
   + panel derecho. Secciones: **General** (idioma de la interfaz: System/English/Español),
   **Appearance** (tema/fuente/acento/headings/escala), **Editor**
   (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Startup** (autostart + stickies),
-  **Sync** (GitHub), **Data** (export/import + carpeta de notas), **AI**, **Account** (cuenta
+  **Sync** (NoteFlow Cloud + GitHub), **Data** (export/import + carpeta de notas), **AI**, **Account** (cuenta
   NoteFlow), **Keyboard shortcuts** y **About** (versión + updates + repo). Tamaño fijo
   proporcional a la ventana de la app.
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
@@ -763,9 +763,35 @@ Settings → Startup:
 
 ---
 
+## NoteFlow Cloud (Settings → Sync, sección superior)
+
+Nube de notas **E2EE** de pago (suscripción): las notas se cifran en el dispositivo antes de
+subir; el servidor solo ve ciphertext. Convive en la página **Sync** con GitHub Sync (debajo) —
+son **mutuamente excluyentes**: con Cloud activado, GitHub Sync queda en pausa (aviso ámbar en su
+sección; la config de GitHub se conserva).
+
+Flujo del panel según estado:
+- **Sin sesión:** mensaje "inicia sesión en Settings → Account".
+- **Sin claves (`no-keys`):** crear **passphrase** (input + confirmación, mínimo 8 caracteres) →
+  se muestra el **recovery code UNA sola vez** en un bloque ámbar destacado (copiable, con aviso
+  rojo: perder passphrase + recovery = notas irrecuperables, NoteFlow no puede resetearlas) →
+  botón "I have saved my recovery code" para continuar. El código no vuelve a mostrarse jamás.
+- **Bloqueado (`locked`):** un único input acepta **passphrase o recovery code** → "Unlock".
+- **Desbloqueado:** badge Sync enabled/disabled, "Last sync", botones **Enable/Disable sync**,
+  **Sync now** (pull manual con resultado tipo GitHub) y **Lock** (descarta las claves de memoria).
+- **Gating por suscripción:** solo el botón **Enable sync** exige la entitlement `cloud` (sin
+  ella: mensaje "requires subscription" + botón de checkout si la build trae URL). Crear claves,
+  unlock, pull y disable funcionan sin suscripción (un suscriptor caducado puede seguir bajando
+  sus datos).
+- Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa".
+
+Detalle técnico (jerarquía de claves, motor de sync): `.claude/context/monetization.md` § 4.
+
+---
+
 ## GitHub Sync
 
-Settings → Sync.
+Settings → Sync (sección inferior, bajo NoteFlow Cloud).
 
 ### Conectar
 1. Introduce el nombre del repositorio privado donde se guardarán las notas.
@@ -794,8 +820,9 @@ Settings → Sync.
 
 ## Cuenta NoteFlow (Settings → Account)
 
-Cuenta opcional para las suscripciones (**NoteFlow AI**, ya comprable; **NoteFlow Cloud**, Fase
-4.2 futura). Todo lo gratuito sigue funcionando sin cuenta.
+Cuenta opcional para las suscripciones (**NoteFlow AI**, ya comprable; **NoteFlow Cloud**, con
+panel en Settings → Sync — checkout pendiente de producto en la tienda). Todo lo gratuito sigue
+funcionando sin cuenta.
 
 - **Sign-in sin contraseña:** email → "Send code" → código de 6 dígitos por email → "Verify &
   sign in" (misma UX de código que el Device Flow de GitHub). "Use a different email" vuelve atrás.

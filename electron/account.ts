@@ -40,6 +40,8 @@ export interface AccountStatus {
   entitlementsFetchedAt?: string  // ISO — when entitlements were last fetched from the server
   /** True when this build ships a Lemon Squeezy checkout URL for NoteFlow AI (gates the Subscribe button). */
   aiCheckoutConfigured: boolean
+  /** Same, for the NoteFlow Cloud product (gates the Subscribe button in the Cloud panel). */
+  cloudCheckoutConfigured: boolean
 }
 
 export interface AccountOpResult {
@@ -176,6 +178,7 @@ export function getAccountStatus(): AccountStatus {
     entitlements: signedIn ? entitlements : NO_ENTITLEMENTS,
     entitlementsFetchedAt: signedIn ? entitlementsFetchedAt : undefined,
     aiCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
+    cloudCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
   }
 }
 

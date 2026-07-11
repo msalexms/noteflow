@@ -95,6 +95,11 @@ export const settings = {
   },
 
   sync: {
+    // Header of the GitHub subsection (the Sync page also hosts NoteFlow Cloud).
+    githubTitle: 'GitHub Sync',
+    // Shown in the GitHub subsection while NoteFlow Cloud is enabled — the
+    // sync router gives Cloud priority (see electron/syncProvider.ts).
+    pausedByCloud: 'GitHub Sync is paused while NoteFlow Cloud is enabled. Your GitHub configuration is kept — disable NoteFlow Cloud to resume syncing through GitHub.',
     connected: 'Connected',
     notConnected: 'Not connected',
     lastSync: 'Last sync: {time}',
@@ -117,6 +122,47 @@ export const settings = {
     repoName: 'Repository name',
     repoHint: "Will be created as private if it doesn't exist.",
     connectWithGitHub: 'Connect with GitHub',
+  },
+
+  // NoteFlow Cloud (E2EE sync) — lives on the Sync page above GitHub Sync.
+  cloud: {
+    title: 'NoteFlow Cloud',
+    desc: 'End-to-end encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
+    notAvailable: "NoteFlow Cloud isn't available in this build yet.",
+    signInFirst: 'Sign in to your NoteFlow account (Settings → Account) to use NoteFlow Cloud.',
+    // Entitlement gate (enable only — unlock/pull/disable stay available).
+    requiresSubscription: 'Enabling NoteFlow Cloud sync requires an active subscription.',
+    subscribe: 'Subscribe to NoteFlow Cloud',
+    subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh in Settings → Account if it does not show up.',
+    // Key setup (state: no-keys).
+    setupDesc: 'Create a passphrase to protect your encryption keys. It never leaves this device: NoteFlow cannot read your notes — and cannot reset the passphrase.',
+    passphrase: 'Passphrase',
+    confirmPassphrase: 'Confirm passphrase',
+    passphraseTooShort: 'Use at least {min} characters.',
+    passphraseMismatch: 'The passphrases do not match.',
+    createPassphrase: 'Create passphrase',
+    setupFailed: 'Could not set up the encryption keys.',
+    // Recovery code (shown ONCE right after setup, never again).
+    recoveryTitle: 'Your recovery code',
+    recoveryDesc: 'This code is shown only once. It is the only other way to unlock your notes if you forget your passphrase — store it somewhere safe (password manager or printed copy).',
+    recoveryWarning: 'If you lose both the passphrase and this code, your cloud notes are unrecoverable. NoteFlow cannot reset them for you.',
+    copyCode: 'Copy code',
+    copied: 'Copied',
+    recoverySaved: 'I have saved my recovery code',
+    // Unlock (state: locked).
+    lockedDesc: 'Your cloud encryption keys are locked on this device. Enter your passphrase — or your recovery code — to unlock.',
+    passphraseOrRecovery: 'Passphrase or recovery code',
+    unlock: 'Unlock',
+    unlockFailed: 'Could not unlock.',
+    // Unlocked controls.
+    syncEnabled: 'Sync enabled',
+    syncDisabled: 'Sync disabled',
+    enableSync: 'Enable sync',
+    disableSync: 'Disable sync',
+    enableFailed: 'Could not enable cloud sync.',
+    lock: 'Lock',
+    // Mutual exclusion warning shown BEFORE enabling, when GitHub Sync is connected.
+    willPauseGitHub: 'GitHub Sync is connected. While NoteFlow Cloud is enabled it takes over, and GitHub Sync stays paused (your GitHub configuration is kept).',
   },
 
   data: {
