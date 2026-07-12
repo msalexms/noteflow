@@ -239,6 +239,13 @@ export const settings = {
     code: 'Code',
     verifyAndSignIn: 'Verify & sign in',
     useDifferentEmail: 'Use a different email',
+    // "By continuing, you agree to the <Terms of Service> and acknowledge the
+    // <Privacy Policy>." — the two link labels sit between the fragments.
+    legalPrefix: 'By continuing, you agree to the ',
+    legalTerms: 'Terms of Service',
+    legalMiddle: ' and acknowledge the ',
+    legalPrivacy: 'Privacy Policy',
+    legalSuffix: '.',
   },
 
   shortcuts: {

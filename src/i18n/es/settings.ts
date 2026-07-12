@@ -213,6 +213,11 @@ export const settings = {
     code: 'Código',
     verifyAndSignIn: 'Verificar e iniciar sesión',
     useDifferentEmail: 'Usar otro correo',
+    legalPrefix: 'Al continuar, aceptas los ',
+    legalTerms: 'Términos del servicio',
+    legalMiddle: ' y confirmas haber leído la ',
+    legalPrivacy: 'Política de privacidad',
+    legalSuffix: '.',
   },
 
   shortcuts: {

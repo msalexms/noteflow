@@ -3,6 +3,10 @@ import { KeyRound, Loader, LogOut, Mail, RefreshCw, Sparkles, UserCircle } from 
 import type { AccountStatus } from '../../types'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { useLanguageStore } from '../../stores/languageStore'
+
+// Public legal pages on the website; Spanish UI links to the /es mirrors.
+const LEGAL_BASE = 'https://yagoid.github.io/noteflow'
 
 type Step = 'email' | 'code'
 
@@ -11,6 +15,9 @@ type Step = 'email' | 'code'
 // sees the public AccountStatus.
 export function AccountPanel() {
   const t = useT()
+  const lang = useLanguageStore((s) => s.lang)
+  const legalUrl = (page: 'terms' | 'privacy') =>
+    `${LEGAL_BASE}${lang === 'es' ? '/es' : ''}/${page}`
   const [status, setStatus] = useState<AccountStatus | null>(null)
   const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState('')
@@ -204,6 +211,25 @@ export function AccountPanel() {
             {busy ? <Loader size={11} className="animate-spin" /> : <Mail size={11} />}
             {t.settings.account.sendCode}
           </button>
+          {/* Legal acceptance line — links open in the default browser via the
+              existing openUrl bridge (shell.openExternal in main). */}
+          <p className="text-[10px] font-mono text-text-muted/60 leading-relaxed">
+            {t.settings.account.legalPrefix}
+            <button
+              onClick={() => window.noteflow.openUrl(legalUrl('terms'))}
+              className="underline underline-offset-2 hover:text-text transition-colors"
+            >
+              {t.settings.account.legalTerms}
+            </button>
+            {t.settings.account.legalMiddle}
+            <button
+              onClick={() => window.noteflow.openUrl(legalUrl('privacy'))}
+              className="underline underline-offset-2 hover:text-text transition-colors"
+            >
+              {t.settings.account.legalPrivacy}
+            </button>
+            {t.settings.account.legalSuffix}
+          </p>
         </div>
       )}
 
