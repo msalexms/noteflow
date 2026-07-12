@@ -192,8 +192,13 @@ diferencial de privacidad, no como peaje.
 > + panel en Settings → Sync + enforcement visual de la exclusión mutua con GitHub Sync (ver
 > "Settings UI" abajo). Modo dual: migración `0005_cloud_managed.sql` + Edge Function
 > `cloud-keys` + rama managed en `cloudKeys.ts` (ver "Modos de cifrado" abajo).
-> **Pendiente del operador:** aplicar la migración 0006 al proyecto real (sin ella el WS
-> conecta pero no llegan eventos — el fallback de 5 min sigue sincronizando).
+> **Migración 0006 aplicada al proyecto real (2026-07-12)** y smoke E2E verificado: edición
+> local → push → evento `postgres_changes` → pull reactivo en segundos (vs. tick de 5 min).
+> De paso se saneó el tracking remoto de migraciones (`supabase migration repair` de 0001-0005,
+> que se habían aplicado por SQL Editor): a partir de ahora `supabase db push` funciona directo.
+> ⚠️ Para probar Cloud sin producto en LS existe una **suscripción manual de pruebas** en
+> `subscriptions` (`provider='manual'`, product `cloud`, cuenta del operador) — **borrarla
+> cuando exista el producto Cloud real** (`delete from public.subscriptions where provider = 'manual'`).
 
 ### Modos de cifrado (managed | e2ee)
 
@@ -399,7 +404,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004 y 0005 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto y Edge Function `cloud-keys` ACTIVE (verify JWT, smoke OK). Pendiente del operador: aplicar la migración 0006 + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
+| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). Pendiente del operador: crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto; mientras tanto hay una suscripción manual de pruebas, ver § 4) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)
