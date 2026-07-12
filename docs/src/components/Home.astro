@@ -749,9 +749,13 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
 
     @media (max-width: 760px) {
       .nf-notes { flex-direction: column; max-width: none; }
-      .nf-note-list { width: 100%; flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; }
+      /* overscroll-behavior-x keeps the edge-of-scroller swipe from triggering the
+         browser's back gesture on Android. */
+      .nf-note-list { width: 100%; flex-direction: row; overflow-x: auto; gap: 8px; padding-bottom: 4px; overscroll-behavior-x: contain; }
       .nf-note { flex: 0 0 auto; width: 232px; }
-      .nf-card-stage { width: 100%; max-width: none; height: 400px; }
+      /* flex: 0 0 auto — the base `flex: 1 1 0` would make flex-basis:0 win over the
+         height in the column direction and collapse the stage to its borders. */
+      .nf-card-stage { width: 100%; max-width: none; height: 400px; flex: 0 0 auto; }
     }
     @media (prefers-reduced-motion: reduce) {
       .nf-card, .nf-card.is-active { transition: opacity 0.2s linear; transform: none; }
@@ -1107,11 +1111,15 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       clearTimeout(navClear);
       navClear = window.setTimeout(() => ambientBrains.forEach((b) => b.setHighlight?.(new Set())), 1100);
     };
-    document.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
-      const key = el.dataset.nav!;
-      el.addEventListener('mouseenter', () => navEnter(key, el));
-      el.addEventListener('mouseleave', navLeave);
-    });
+    // Hover-only: on touch devices a tap fires mouseenter without a matching
+    // mouseleave, leaving highlights/thinking stuck on the ambient brains.
+    if (window.matchMedia('(hover: hover)').matches) {
+      document.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
+        const key = el.dataset.nav!;
+        el.addEventListener('mouseenter', () => navEnter(key, el));
+        el.addEventListener('mouseleave', navLeave);
+      });
+    }
 
     // ── chat mock ──
     const log = document.querySelector('[data-chat-log]') as HTMLElement | null;

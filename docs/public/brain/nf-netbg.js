@@ -23,24 +23,42 @@
       this.appendChild(c);
       this._canvas = c;
       this._ctx = c.getContext('2d');
+      this._reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       this._readColors();
       this._resize();
       this._ro = new ResizeObserver(() => this._resize());
       this._ro.observe(this);
-      this._mo = new MutationObserver(() => this._readColors());
+      this._mo = new MutationObserver(() => { this._readColors(); if (this._reduced) this._drawStatic(); });
       this._mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
       // The document can grow taller after late images/fonts load — rebuild the field then
       // so the parallax covers the whole page.
       this._onLoad = () => this._resize();
       window.addEventListener('load', this._onLoad);
       this._loop = this._loop.bind(this);
-      this._raf = requestAnimationFrame(this._loop);
+      // Reduced motion: the mesh is drawn once per resize/theme change and the loop never
+      // starts (no sparks, no twinkle). Otherwise animate, but pause while the tab is
+      // hidden — shifting _t0 by the hidden span so the phases don't jump on resume.
+      if (!this._reduced) this._raf = requestAnimationFrame(this._loop);
+      this._onVis = () => {
+        if (this._reduced) return;
+        if (document.hidden) {
+          cancelAnimationFrame(this._raf);
+          this._raf = 0;
+          this._hiddenAt = performance.now();
+        } else {
+          if (this._hiddenAt && this._t0) this._t0 += performance.now() - this._hiddenAt;
+          this._hiddenAt = 0;
+          if (!this._raf) this._raf = requestAnimationFrame(this._loop);
+        }
+      };
+      document.addEventListener('visibilitychange', this._onVis);
     }
     disconnectedCallback() {
       cancelAnimationFrame(this._raf);
       if (this._ro) this._ro.disconnect();
       if (this._mo) this._mo.disconnect();
       if (this._onLoad) window.removeEventListener('load', this._onLoad);
+      if (this._onVis) document.removeEventListener('visibilitychange', this._onVis);
     }
 
     _readColors() {
@@ -55,7 +73,9 @@
     }
 
     _resize() {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Cap the backing store harder on touch devices: phones pair high dpr with weak fill rate.
+      const coarse = window.matchMedia('(pointer: coarse)').matches;
+      const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
       const w = this.clientWidth || window.innerWidth;
       const h = this.clientHeight || window.innerHeight;
       this._w = w; this._h = h;
@@ -63,6 +83,34 @@
       this._canvas.height = Math.max(1, Math.round(h * dpr));
       this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this._build();
+      if (this._reduced) this._drawStatic();
+    }
+
+    // One still frame of the mesh (nodes + edges at their base brightness, no sparks) for
+    // prefers-reduced-motion users. Re-run on resize and theme change.
+    _drawStatic() {
+      const ctx = this._ctx, w = this._w, h = this._h, edges = this._edges;
+      if (!edges || !ctx) return;
+      const wr = this._wire[0], wg = this._wire[1], wb = this._wire[2];
+      const wcol = (a) => 'rgba(' + wr + ',' + wg + ',' + wb + ',' + a.toFixed(3) + ')';
+      const off = -(window.scrollY || window.pageYOffset || 0) * this._parallax;
+      ctx.fillStyle = this._bg;
+      ctx.fillRect(0, 0, w, h);
+      ctx.lineWidth = 1;
+      const base = this._dark ? 0.065 : 0.085;
+      for (const e of edges) {
+        const ay = e.a.y + off, by = e.b.y + off;
+        if ((ay < -40 && by < -40) || (ay > h + 40 && by > h + 40)) continue;
+        ctx.strokeStyle = wcol(base);
+        ctx.beginPath(); ctx.moveTo(e.a.x, ay); ctx.lineTo(e.b.x, by); ctx.stroke();
+      }
+      const al = (this._dark ? 0.22 : 0.28) * 0.725; // mid-twinkle brightness, frozen
+      ctx.fillStyle = wcol(al);
+      for (const nd of this._allNodes) {
+        const y = nd.y + off;
+        if (y < -20 || y > h + 20) continue;
+        ctx.beginPath(); ctx.arc(nd.x, y, nd.r, 0, 6.2832); ctx.fill();
+      }
     }
 
     _build() {

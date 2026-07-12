@@ -42,9 +42,9 @@
     THREE_BASE + '/examples/js/postprocessing/RenderPass.js',
     THREE_BASE + '/examples/js/postprocessing/UnrealBloomPass.js',
     THREE_BASE + '/examples/js/controls/OrbitControls.js',
-    base + 'nf-mesh.js?v=4',
-    base + 'nf-graph.js?v=4',
-    base + 'nf-brain.js?v=4',
+    base + 'nf-mesh.js?v=5',
+    base + 'nf-graph.js?v=5',
+    base + 'nf-brain.js?v=5',
   ];
   (async function () {
     try {

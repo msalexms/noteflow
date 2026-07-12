@@ -61,7 +61,13 @@
       this._thinking = false;
 
       const container = document.createElement('div');
-      container.style.cssText = 'position:absolute;inset:0;touch-action:none;';
+      // Ambient brains (no controls) overlay scrollable content (hero/footer), so the whole
+      // container must be transparent to the hit-test or touch scrolling dies on top of them.
+      // Interactive ones keep `pan-y`: vertical swipes still scroll the page, horizontal
+      // drags rotate the brain.
+      container.style.cssText = opts.controls
+        ? 'position:absolute;inset:0;touch-action:pan-y;'
+        : 'position:absolute;inset:0;pointer-events:none;';
       this.appendChild(container);
       this._container = container;
 
@@ -93,8 +99,13 @@
         const wireOpacityFor = (b) => (isDark ? b * 1.9 : Math.max(b, 0.5));
         const dotOpacityFor = (b) => (isDark ? b * 1.6 : Math.max(b, 0.75));
 
-        const renderer = new T.WebGLRenderer({ antialias: true, alpha: opts.transparent, preserveDrawingBuffer: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        // lowPower tier (coarse pointer ≈ phones/tablets): lower pixel ratio and no bloom
+        // pass — the additive-blended wireframe still glows acceptably without it.
+        const lowPower = window.matchMedia('(pointer: coarse)').matches;
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2);
+        const renderer = new T.WebGLRenderer({ antialias: true, alpha: opts.transparent });
+        renderer.setPixelRatio(pixelRatio);
         if (opts.transparent) renderer.setClearColor(0x000000, 0); else renderer.setClearColor(bg, 1);
         let width = container.clientWidth || 1, height = container.clientHeight || 1;
         renderer.setSize(width, height);
@@ -116,7 +127,7 @@
         controls.minDistance = 1.6;
         controls.maxDistance = 7;
         controls.target.set(0, opts.targetY, 0);
-        controls.autoRotate = true;
+        controls.autoRotate = !reducedMotion;
         controls.autoRotateSpeed = opts.rotateSpeed;
         controls.enabled = opts.controls;
         if (!opts.controls) { controls.enableZoom = false; controls.enableRotate = false; }
@@ -314,18 +325,29 @@
         const ambientMat = sparkMat(); ambientMat.size = 0.03;
         fxGroup.add(new T.Points(ambientGeo, ambientMat));
 
-        // post
-        const composer = new T.EffectComposer(renderer);
-        composer.addPass(new T.RenderPass(scene, camera));
-        const bloom = new T.UnrealBloomPass(new T.Vector2(width, height), LOOK.bloomStrength, LOOK.bloomRadius, Math.max(LOOK.bloomThreshold, opts.transparent ? 0 : bgLum));
-        composer.addPass(bloom);
-        composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        composer.setSize(width, height);
+        // post — skipped on lowPower: UnrealBloomPass runs a full-res blur chain per frame,
+        // which is what tanks mobile GPUs when several brains are mounted.
+        let composer = null, bloom = null;
+        if (!lowPower) {
+          composer = new T.EffectComposer(renderer);
+          composer.addPass(new T.RenderPass(scene, camera));
+          bloom = new T.UnrealBloomPass(new T.Vector2(width, height), LOOK.bloomStrength, LOOK.bloomRadius, Math.max(LOOK.bloomThreshold, opts.transparent ? 0 : bgLum));
+          composer.addPass(bloom);
+          composer.setPixelRatio(pixelRatio);
+          composer.setSize(width, height);
+        }
+        const renderFrame = () => { if (composer) composer.render(); else renderer.render(scene, camera); };
 
         const ro = new ResizeObserver(() => {
-          width = container.clientWidth || 1; height = container.clientHeight || 1;
+          const w = container.clientWidth || 1, h = container.clientHeight || 1;
+          // Skip no-op resizes (initial observe fire, mobile URL-bar show/hide): re-setting
+          // canvas.width reallocates the drawing buffer and stalls the GPU on readback.
+          if (w === width && h === height) return;
+          width = w; height = h;
           camera.aspect = width / height; applyViewOffset();
-          renderer.setSize(width, height); composer.setSize(width, height); bloom.setSize(width, height);
+          renderer.setSize(width, height);
+          if (composer) { composer.setSize(width, height); bloom.setSize(width, height); }
+          if (motionDone) renderFrame(); // static (reduced-motion) frame must track resizes
         });
         ro.observe(container);
 
@@ -436,6 +458,9 @@
 
         const clock = new T.Clock();
         let raf = 0;
+        let inView = true;      // updated by the IntersectionObserver below
+        let motionDone = false; // reduced-motion: loop stopped for good after a few frames
+        let settleFrames = 0;
         const animate = () => {
           const t = clock.getElapsedTime();
           controls.update();
@@ -523,12 +548,26 @@
             posAttr.needsUpdate = true; colAttr.needsUpdate = true; ambientGeo.setDrawRange(0, w);
           }
 
-          bloom.strength = (LOOK.bloomStrength + 0.08 * Math.sin(t * 1.1)) * (1 + sp * 0.7);
+          if (bloom) bloom.strength = (LOOK.bloomStrength + 0.08 * Math.sin(t * 1.1)) * (1 + sp * 0.7);
           wireMat.opacity = (wireOpacityFor(LOOK.wireOpacity) + 0.015 * Math.sin(t * 1.1 + 1)) * (1 + sp * 0.5);
-          composer.render();
+          renderFrame();
+          raf = 0;
+          // Reduced motion: let a handful of frames settle the scene (data groups, labels),
+          // then hold a static frame — no auto-rotate, no continuous loop.
+          if (reducedMotion && ++settleFrames >= 5) { motionDone = true; return; }
           raf = requestAnimationFrame(animate);
         };
-        raf = requestAnimationFrame(animate);
+        // Only burn GPU while actually visible: the home page mounts up to three of these
+        // scenes, so the loop pauses when the host leaves the viewport or the tab hides.
+        // (The three.js clock keeps running while paused; the animation just skips ahead.)
+        const startLoop = () => { if (!raf && !motionDone) raf = requestAnimationFrame(animate); };
+        const stopLoop = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
+        const syncLoop = () => { if (inView && !document.hidden) startLoop(); else stopLoop(); };
+        const io = new IntersectionObserver((entries) => { inView = entries[entries.length - 1].isIntersecting; syncLoop(); });
+        io.observe(this);
+        const onVisibility = () => syncLoop();
+        document.addEventListener('visibilitychange', onVisibility);
+        startLoop();
 
         let downX = 0, downY = 0, moved = false, pointerActive = false;
         const onDown = (e) => { downX = e.clientX; downY = e.clientY; moved = false; pointerActive = true; controls.autoRotate = false; };
@@ -555,11 +594,13 @@
           renderer.domElement.addEventListener('pointerleave', onLeave);
         }
 
-        this._resetView = () => { camera.position.set(0, 0.18, opts.cam); controls.target.set(0, -0.05, 0); controls.autoRotate = true; };
+        this._resetView = () => { camera.position.set(0, 0.18, opts.cam); controls.target.set(0, -0.05, 0); controls.autoRotate = !reducedMotion; };
         this._dbg = { renderer, scene, camera, composer, bloom, brainGroup };
 
         return () => {
-          cancelAnimationFrame(raf); ro.disconnect();
+          cancelAnimationFrame(raf); raf = 0; ro.disconnect();
+          io.disconnect();
+          document.removeEventListener('visibilitychange', onVisibility);
           if (opts.controls) {
             renderer.domElement.removeEventListener('pointerdown', onDown);
             renderer.domElement.removeEventListener('pointermove', onMove);
@@ -574,7 +615,7 @@
           ringTex.dispose();
           disposeData(); clearGroup(hoverGroup); clearGroup(thinkGroup); clearGroup(idleGroup); clearGroup(litGroup);
           ambientGeo.dispose(); ambientMat.dispose();
-          if (typeof composer.dispose === 'function') composer.dispose(); renderer.dispose();
+          if (composer && typeof composer.dispose === 'function') composer.dispose(); renderer.dispose();
           if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
         };
       };
