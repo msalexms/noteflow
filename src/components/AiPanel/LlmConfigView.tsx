@@ -2,8 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Loader2, RefreshCw, X } from 'lucide-react'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
+import { tf } from '../../i18n/format'
 import type { AccountStatus } from '../../types'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
+
+// Compact token figure for the NoteFlow AI usage line: 1_234_567 → "1.2M",
+// 850_000 → "850k", 3_000_000 → "3M".
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return `${Number.isInteger(m) || m >= 100 ? Math.round(m) : m.toFixed(1)}M`
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
+  return String(n)
+}
 
 export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {}) {
   const t = useT()
@@ -33,6 +45,7 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
+  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null)
   const lastActive = useRef<string | null>(null)
 
   // The NoteFlow AI preset gates on the account session + 'ai' entitlement:
@@ -45,6 +58,16 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
       void loadConfig()
     })
   }, [loadConfig])
+
+  // Monthly consumption of the managed plan — refetched whenever the account
+  // status changes (the effect above updates `account`). Silent by design: a
+  // null answer (no session, offline, non-200) just hides the usage bar.
+  useEffect(() => {
+    if (!account?.entitlements.ai) return
+    let cancelled = false
+    void window.noteflow.aiLlmUsage().then((u) => { if (!cancelled) setUsage(u) })
+    return () => { cancelled = true }
+  }, [account])
 
   // Reset the editable fields whenever the active provider changes.
   useEffect(() => {
@@ -66,6 +89,14 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
   }
 
   const changeProvider = (id: string) => { if (id !== llmConfig.active) void setLlmConfig({ active: id }) }
+  // Picker label: show the model name only, dropping the "provider/" prefix
+  // (openai/gpt-4o-mini → gpt-4o-mini). The stored/sent id keeps the full form
+  // — this is cosmetic. Advanced NoteFlow AI models keep a "(6× quota)" suffix.
+  const modelLabel = (m: string) => {
+    const name = m.includes('/') ? m.slice(m.indexOf('/') + 1) : m
+    const mult = preset.modelMeta?.[m]?.quotaMultiplier ?? 1
+    return mult > 1 ? `${name} ${tf(t.aiPanel.provider.modelQuotaSuffix, { mult })}` : name
+  }
   const saveKey = async () => { if (keyInput.trim()) { await setLlmConfig({ apiKey: keyInput.trim() }); setKeyInput('') } }
   const clearKey = () => void setLlmConfig({ clearKey: true })
   const saveBaseUrl = () => { if (baseUrl !== llmConfig.baseUrl) void setLlmConfig({ baseUrl }) }
@@ -111,6 +142,20 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
               </button>
             )}
           </div>
+          {/* Monthly consumption (weighted quota tokens). Hidden while unknown or without entitlement. */}
+          {account?.entitlements.ai && usage && usage.limit > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="h-1.5 rounded-full bg-border/50 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${usage.used >= usage.limit ? 'bg-amber-400' : 'bg-accent'}`}
+                  style={{ width: `${Math.min(100, (usage.used / usage.limit) * 100)}%` }}
+                />
+              </div>
+              <span className={`text-[11px] normal-case ${usage.used >= usage.limit ? 'text-amber-300' : 'text-text-muted/70'}`}>
+                {tf(t.aiPanel.provider.noteflowCard.usage, { used: formatTokens(usage.used), limit: formatTokens(usage.limit) })}
+              </span>
+            </div>
+          )}
           {llmConfig.active === 'noteflow' && account && (!account.signedIn || !account.entitlements.ai) && (
             <div className="px-2.5 py-2 rounded-lg border border-solid border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-300 normal-case leading-relaxed">
               {!account.signedIn ? t.aiPanel.provider.noteflowSignIn : t.aiPanel.provider.noteflowNeedsSubscription}
@@ -207,7 +252,7 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
                     m === llmConfig.model ? 'border-accent/50 bg-accent/15 text-text' : 'border-border text-text-muted hover:text-text hover:border-text/30'
                   }`}
                 >
-                  {m}
+                  {modelLabel(m)}
                 </button>
               ))}
             </div>

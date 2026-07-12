@@ -1855,6 +1855,29 @@ electron_1.ipcMain.handle('ai:llm-test', async () => {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
 });
+// Monthly consumption of the managed NoteFlow AI plan (weighted quota tokens),
+// read from the proxy's GET /usage endpoint with a fresh access token. Returns
+// null on ANY failure (no session, offline, non-200) — the UI simply hides the
+// usage bar, it never surfaces an error for this.
+electron_1.ipcMain.handle('ai:llm-usage', async () => {
+    try {
+        const token = await account.getAccessToken();
+        if (!token)
+            return null;
+        const res = await fetch(`${cloudConfig_1.AI_PROXY_URL}/usage`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok)
+            return null;
+        const body = (await res.json().catch(() => null));
+        if (!body || typeof body.used !== 'number' || typeof body.limit !== 'number')
+            return null;
+        return { used: body.used, limit: body.limit };
+    }
+    catch {
+        return null;
+    }
+});
 // ── Chat (streaming over IPC events) ───────────────────────────────────────────
 const CHAT_SYSTEM_BASE = "You are NoteFlow's assistant — a second brain over the user's personal notes. " +
     "Answer directly and concisely, in the same language the user writes in. " +
@@ -2125,6 +2148,13 @@ electron_1.ipcMain.handle('ai:chat', async (event, req) => {
 // to a text-only model (e.g. DeepSeek answers HTTP 400 with `unknown variant image_url`); detect that
 // and explain it instead of dumping the raw JSON. Everything else passes through unchanged.
 function friendlyChatError(raw, sentImages) {
+    // NoteFlow AI monthly quota: the proxy answers 429 with the stable machine code
+    // `monthly_quota_exceeded` in its OpenAI-shaped body — match on that (not the HTTP
+    // status or the English message) and surface a clean, localized message instead of
+    // the raw `HTTP 429 — {json}` string.
+    if (raw.includes('monthly_quota_exceeded')) {
+        return mainMessages().chatErrors.quotaExceeded;
+    }
     if (sentImages) {
         const low = raw.toLowerCase();
         if (low.includes('image_url') || low.includes('unknown variant') ||

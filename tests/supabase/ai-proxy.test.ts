@@ -2,11 +2,14 @@ import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_ALLOWED_MODELS,
   DEFAULT_MONTHLY_TOKENS,
+  MODEL_QUOTA_MULTIPLIERS,
   parseAllowedModels,
   parseMonthlyTokens,
   isModelAllowed,
   hasAiEntitlement,
   computeQuota,
+  quotaMultiplierFor,
+  computeQuotaTokens,
   openAiErrorBody,
   modelsListBody,
   buildUpstreamBody,
@@ -109,6 +112,51 @@ describe('computeQuota', () => {
   it('treats negative/NaN usage as zero', () => {
     expect(computeQuota(-5, 100)).toEqual({ exceeded: false, remaining: 100 })
     expect(computeQuota(NaN, 100)).toEqual({ exceeded: false, remaining: 100 })
+  })
+})
+
+describe('quotaMultiplierFor', () => {
+  it('returns the map value for advanced (×6) models', () => {
+    expect(quotaMultiplierFor('anthropic/claude-sonnet-5')).toBe(6)
+    expect(quotaMultiplierFor('openai/gpt-5.2')).toBe(6)
+    expect(quotaMultiplierFor('google/gemini-3.5-flash')).toBe(6)
+  })
+
+  it('returns 1 for standard curated models (not in the map)', () => {
+    expect(quotaMultiplierFor('openai/gpt-4o-mini')).toBe(1)
+    expect(quotaMultiplierFor('deepseek/deepseek-v4-flash')).toBe(1)
+  })
+
+  it('returns 1 for unknown models', () => {
+    expect(quotaMultiplierFor('someone/some-model')).toBe(1)
+    expect(quotaMultiplierFor('')).toBe(1)
+  })
+
+  it('every multiplied model is part of the curated catalog', () => {
+    for (const model of Object.keys(MODEL_QUOTA_MULTIPLIERS)) {
+      expect(DEFAULT_ALLOWED_MODELS).toContain(model)
+    }
+  })
+})
+
+describe('computeQuotaTokens', () => {
+  it('sums in+out unweighted for standard models', () => {
+    expect(computeQuotaTokens({ tokensIn: 120, tokensOut: 45 }, 'openai/gpt-4o-mini')).toBe(165)
+  })
+
+  it('applies the ×6 multiplier for advanced models', () => {
+    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'anthropic/claude-sonnet-5')).toBe(900)
+  })
+
+  it('always yields an integer (round contract; current multipliers are integral)', () => {
+    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 7, tokensOut: 3 }, 'openai/gpt-5.2'))).toBe(true)
+    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 1, tokensOut: 2 }, 'minimax/minimax-m3'))).toBe(true)
+  })
+
+  it('treats zero and malformed usage sides as 0', () => {
+    expect(computeQuotaTokens({ tokensIn: 0, tokensOut: 0 }, 'openai/gpt-5.2')).toBe(0)
+    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'anthropic/claude-sonnet-5')).toBe(60)
+    expect(computeQuotaTokens({ tokensIn: -5, tokensOut: 10 }, 'openai/gpt-4o-mini')).toBe(10)
   })
 })
 

@@ -188,6 +188,9 @@ export interface LlmPreset {
   editableBaseUrl: boolean
   suggestedModels: string[]
   images?: boolean // per-preset default for native image (vision) support; see providerCapabilities
+  // Per-model metadata, only on the managed `noteflow` preset: quota multiplier
+  // (advanced models burn the monthly quota faster) + native vision support.
+  modelMeta?: Record<string, { quotaMultiplier: number; images: boolean }>
 }
 
 // What attachments the active provider can ingest natively (no local processing)
@@ -450,6 +453,8 @@ declare global {
       aiLlmSetConfig: (patch: { active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean }) => Promise<LlmConfigPublic>
       aiLlmListModels: () => Promise<{ ok: boolean; models: string[]; error?: string }>
       aiLlmTest: () => Promise<{ ok: boolean; error?: string }>
+      // NoteFlow AI managed plan: monthly consumption in weighted quota tokens (null on any failure)
+      aiLlmUsage: () => Promise<{ used: number; limit: number } | null>
       aiChatsLoad: () => Promise<ChatSession[]>
       aiChatsSave: (sessions: ChatSession[]) => Promise<{ ok: boolean; error?: string }>
       aiChat: (requestId: string, messages: ChatMessage[]) => Promise<void>

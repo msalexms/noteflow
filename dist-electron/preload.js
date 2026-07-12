@@ -168,6 +168,9 @@ const api = {
     aiLlmSetConfig: (patch) => electron_1.ipcRenderer.invoke('ai:llm-set-config', patch),
     aiLlmListModels: () => electron_1.ipcRenderer.invoke('ai:llm-list-models'),
     aiLlmTest: () => electron_1.ipcRenderer.invoke('ai:llm-test'),
+    // NoteFlow AI managed plan: monthly consumption (weighted quota tokens).
+    // Null on any failure — the UI just hides the usage bar.
+    aiLlmUsage: () => electron_1.ipcRenderer.invoke('ai:llm-usage'),
     aiChatsLoad: () => electron_1.ipcRenderer.invoke('ai:chats-load'),
     aiChatsSave: (sessions) => electron_1.ipcRenderer.invoke('ai:chats-save', sessions),
     aiChat: (requestId, messages) => electron_1.ipcRenderer.invoke('ai:chat', { requestId, messages }),

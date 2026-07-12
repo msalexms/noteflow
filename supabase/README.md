@@ -131,11 +131,15 @@ La Edge Function `supabase/functions/ai-proxy` expone un endpoint OpenAI-compati
 (`POST .../ai-proxy/chat/completions` + `GET .../ai-proxy/models`) que valida la sesión de Supabase
 del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens, y reenvía a
 **OpenRouter** con la única key del servidor. El consumo se registra en `usage_events` (migración
-0003) leyendo el bloque `usage` que OpenRouter añade al final del stream. Pasos del operador:
+0003) leyendo el bloque `usage` que OpenRouter añade al final del stream. La **migración 0007**
+añade la **cuota ponderada** (columna `quota_tokens`): los modelos avanzados descuentan de la
+cuota a razón de su multiplicador (×6 hoy) en vez de 1:1. Pasos del operador:
 
-1. **Correr la migración 0003** (`supabase/migrations/0003_ai_usage.sql`), igual que las
-   anteriores (SQL Editor o `supabase db push`). Crea `usage_events` + la RPC `get_month_usage`
-   (solo invocable por el service role).
+1. **Correr las migraciones 0003 y 0007** (`supabase/migrations/0003_ai_usage.sql` y
+   `0007_ai_usage_weighted.sql`), igual que las anteriores (SQL Editor o `supabase db push`). La
+   0003 crea `usage_events` + la RPC `get_month_usage`; la 0007 añade la columna `quota_tokens`
+   (con backfill de las filas históricas) y redefine `get_month_usage` para sumar los tokens
+   ponderados. **Si ya tenías la 0003 aplicada, basta con correr la 0007.**
 
 2. **Crear una API key en [OpenRouter](https://openrouter.ai)** (con crédito o auto-topup) y
    configurar los secretos de la función:
@@ -157,6 +161,11 @@ del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens
    ```bash
    supabase functions deploy ai-proxy
    ```
+
+   > El proxy expone además `GET .../ai-proxy/usage` (`{used, limit}` en tokens ponderados, sin
+   > gate de entitlement) que alimenta la barra de consumo de la card premium en la app. Un
+   > redeploy es obligatorio tras la 0007 para que el catálogo nuevo y los multiplicadores entren
+   > en vigor.
 
 4. **Checkout de Lemon Squeezy:** copiar la URL de compra de la variante del producto AI
    (dashboard de LS → producto → Share) y pegarla en `LEMONSQUEEZY_CHECKOUT_URLS.ai` de
@@ -182,9 +191,25 @@ managed lo sirve la Edge Function `cloud-keys`. Pasos del operador:
    envueltas con la clave anterior dejarían de poder desenvolverse (los unlock managed fallarían
    con `unwrap_failed` en los logs).
 
+   En **bash / macOS / Linux** (o Git Bash en Windows):
+
    ```bash
    supabase secrets set CLOUD_MANAGED_KEK=$(openssl rand -base64 32)
    ```
+
+   En **PowerShell** (Windows no trae `openssl`; genera los 32 bytes de forma
+   nativa y criptográficamente segura):
+
+   ```powershell
+   $bytes = New-Object byte[] 32
+   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+   $key = [Convert]::ToBase64String($bytes)
+   supabase secrets set "CLOUD_MANAGED_KEK=$key"
+   ```
+
+   Las comillas en `"CLOUD_MANAGED_KEK=$key"` son necesarias porque el base64
+   puede contener `+` `/` `=`. Verifica con `supabase secrets list` (muestra un
+   digest, no el valor).
 
 3. **Desplegar la función** — CON verificación de JWT (el default; el caller es la app con el
    access token del usuario, como el ai-proxy):

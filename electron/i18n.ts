@@ -37,10 +37,15 @@ export interface DialogMessages {
   attachFilesToChat: string
 }
 
+export interface ChatErrorMessages {
+  quotaExceeded: string
+}
+
 export interface Messages {
   tray: TrayMessages
   notifications: NotificationMessages
   dialogs: DialogMessages
+  chatErrors: ChatErrorMessages
 }
 
 const en: Messages = {
@@ -67,6 +72,9 @@ const en: Messages = {
     importGoogleKeep: 'Import Google Keep export',
     addFilesToProfile: 'Add files to your profile',
     attachFilesToChat: 'Attach files to the chat',
+  },
+  chatErrors: {
+    quotaExceeded: "You've reached your NoteFlow AI monthly quota. It resets on the 1st of next month.",
   },
 }
 
@@ -95,6 +103,9 @@ const es: Messages = {
     importGoogleKeep: 'Importar exportación de Google Keep',
     addFilesToProfile: 'Añadir archivos a tu perfil',
     attachFilesToChat: 'Adjuntar archivos al chat',
+  },
+  chatErrors: {
+    quotaExceeded: 'Has alcanzado tu cuota mensual de NoteFlow AI. Se renueva el día 1 del mes que viene.',
   },
 }
 

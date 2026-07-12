@@ -25,7 +25,7 @@ import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import * as account from './account'
-import { LEMONSQUEEZY_CHECKOUT_URLS } from './cloudConfig'
+import { LEMONSQUEEZY_CHECKOUT_URLS, AI_PROXY_URL } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
@@ -1905,6 +1905,26 @@ ipcMain.handle('ai:llm-test', async () => {
   }
 })
 
+// Monthly consumption of the managed NoteFlow AI plan (weighted quota tokens),
+// read from the proxy's GET /usage endpoint with a fresh access token. Returns
+// null on ANY failure (no session, offline, non-200) — the UI simply hides the
+// usage bar, it never surfaces an error for this.
+ipcMain.handle('ai:llm-usage', async (): Promise<{ used: number; limit: number } | null> => {
+  try {
+    const token = await account.getAccessToken()
+    if (!token) return null
+    const res = await fetch(`${AI_PROXY_URL}/usage`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return null
+    const body = (await res.json().catch(() => null)) as { used?: unknown; limit?: unknown } | null
+    if (!body || typeof body.used !== 'number' || typeof body.limit !== 'number') return null
+    return { used: body.used, limit: body.limit }
+  } catch {
+    return null
+  }
+})
+
 // ── Chat (streaming over IPC events) ───────────────────────────────────────────
 
 const CHAT_SYSTEM_BASE =
@@ -2164,6 +2184,13 @@ ipcMain.handle('ai:chat', async (event, req: { requestId: string; messages: Chat
 // to a text-only model (e.g. DeepSeek answers HTTP 400 with `unknown variant image_url`); detect that
 // and explain it instead of dumping the raw JSON. Everything else passes through unchanged.
 function friendlyChatError(raw: string, sentImages: boolean): string {
+  // NoteFlow AI monthly quota: the proxy answers 429 with the stable machine code
+  // `monthly_quota_exceeded` in its OpenAI-shaped body — match on that (not the HTTP
+  // status or the English message) and surface a clean, localized message instead of
+  // the raw `HTTP 429 — {json}` string.
+  if (raw.includes('monthly_quota_exceeded')) {
+    return mainMessages().chatErrors.quotaExceeded
+  }
   if (sentImages) {
     const low = raw.toLowerCase()
     if (

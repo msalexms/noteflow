@@ -4,9 +4,13 @@
 // the Deno glue: env, HTTP routing, Supabase REST calls and stream plumbing.
 //
 // OpenAI-compatible surface (the client's `noteflow` preset points its
-// baseUrl at .../functions/v1/ai-proxy and reuses OpenAiCompatibleProvider):
+// baseUrl at .../functions/v1/ai-proxy and reuses OpenAiCompatibleProvider),
+// plus one NoteFlow-specific endpoint:
 //   POST <fn>/chat/completions   → auth + entitlement + quota → OpenRouter
 //   GET  <fn>/models             → auth + entitlement → curated model list
+//   GET  <fn>/usage              → auth only → { used, limit } monthly quota
+//                                  (no entitlement gate: showing consumption is
+//                                  harmless and useful after expiration)
 //
 // Auth: `Authorization: Bearer <Supabase access token>` — the user JWT the
 // desktop app mints from its account session. Deploy WITH JWT verification
@@ -17,11 +21,15 @@
 // `usage: {include: true}`, so the final SSE chunk (or the JSON response)
 // includes the token usage block; the response stream is tee'd, scanned for
 // that block, and a usage_events row is inserted (best-effort) when it ends.
+// The row carries both the REAL tokens (operator cost accounting) and the
+// WEIGHTED quota_tokens (per-model multiplier — what the monthly quota counts;
+// see MODEL_QUOTA_MULTIPLIERS in logic.ts and migration 0007).
 //
 // Env (set via `supabase secrets set`, except the SUPABASE_* ones which the
 // platform injects automatically):
 //   OPENROUTER_API_KEY   upstream key (the only one; secret)
-//   AI_MONTHLY_TOKENS    optional per-user monthly budget (default 3,000,000)
+//   AI_MONTHLY_TOKENS    optional per-user monthly budget in weighted quota
+//                        tokens (default 3,000,000)
 //   AI_ALLOWED_MODELS    optional comma-separated model allowlist override
 //   SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY  injected
 
@@ -36,6 +44,7 @@ import {
   buildUpstreamBody,
   extractUsageFromJson,
   createSseUsageScanner,
+  computeQuotaTokens,
   type TokenUsage,
 } from './logic.ts'
 
@@ -83,6 +92,8 @@ async function recordUsage(
         model,
         tokens_in: usage.tokensIn,
         tokens_out: usage.tokensOut,
+        // Weighted tokens the monthly quota counts (per-model multiplier).
+        quota_tokens: computeQuotaTokens(usage, model),
       }),
     })
     if (!res.ok) {
@@ -94,11 +105,33 @@ async function recordUsage(
   }
 }
 
+/**
+ * Weighted quota tokens the user consumed this month (RPC get_month_usage,
+ * which sums usage_events.quota_tokens since migration 0007). Null on failure.
+ */
+async function fetchMonthUsage(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string
+): Promise<number | null> {
+  const res = await fetch(`${supabaseUrl}/rest/v1/rpc/get_month_usage`, {
+    method: 'POST',
+    headers: serviceHeaders(serviceRoleKey),
+    body: JSON.stringify({ p_user_id: userId }),
+  })
+  if (!res.ok) {
+    console.error(`ai-proxy: get_month_usage failed (${res.status})`)
+    return null
+  }
+  return Number(await res.json().catch(() => 0)) || 0
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   const pathname = new URL(req.url).pathname
   const isModels = req.method === 'GET' && pathname.endsWith('/models')
   const isChat = req.method === 'POST' && pathname.endsWith('/chat/completions')
-  if (!isModels && !isChat) {
+  const isUsage = req.method === 'GET' && pathname.endsWith('/usage')
+  if (!isModels && !isChat && !isUsage) {
     return json(404, openAiErrorBody('Not found.', 'invalid_request_error', 'not_found'))
   }
 
@@ -134,6 +167,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(401, openAiErrorBody('Could not resolve the NoteFlow session.', 'authentication_error', 'invalid_token'))
   }
 
+  // ── GET /usage: monthly consumption, auth only. Deliberately NOT gated on
+  //    the entitlement — showing usage is harmless and stays useful after the
+  //    subscription lapses (e.g. the Settings card explaining what happened). ──
+  if (isUsage) {
+    const used = await fetchMonthUsage(supabaseUrl, serviceRoleKey, userId)
+    if (used === null) {
+      return json(500, openAiErrorBody('Could not read your usage. Try again.', 'server_error', 'usage_check_failed'))
+    }
+    return json(200, { used, limit: parseMonthlyTokens(Deno.env.get('AI_MONTHLY_TOKENS')) })
+  }
+
   // ── Entitlement: 'ai' or 'bundle' active (service role query, RLS bypassed,
   //    hence the explicit user_id filter) ──────────────────────────────────────
   const subsRes = await fetch(
@@ -158,18 +202,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const allowedModels = parseAllowedModels(Deno.env.get('AI_ALLOWED_MODELS'))
   if (isModels) return json(200, modelsListBody(allowedModels))
 
-  // ── Monthly quota (checked BEFORE forwarding) ───────────────────────────────
+  // ── Monthly quota (checked BEFORE forwarding; weighted tokens) ──────────────
   const limit = parseMonthlyTokens(Deno.env.get('AI_MONTHLY_TOKENS'))
-  const usageRes = await fetch(`${supabaseUrl}/rest/v1/rpc/get_month_usage`, {
-    method: 'POST',
-    headers: serviceHeaders(serviceRoleKey),
-    body: JSON.stringify({ p_user_id: userId }),
-  })
-  if (!usageRes.ok) {
-    console.error(`ai-proxy: get_month_usage failed (${usageRes.status})`)
+  const used = await fetchMonthUsage(supabaseUrl, serviceRoleKey, userId)
+  if (used === null) {
     return json(500, openAiErrorBody('Could not check your usage quota. Try again.', 'server_error', 'quota_check_failed'))
   }
-  const used = Number(await usageRes.json().catch(() => 0)) || 0
   const quota = computeQuota(used, limit)
   const quotaHeaders = {
     'X-NoteFlow-Tokens-Used': String(used),

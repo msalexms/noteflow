@@ -6,20 +6,61 @@
 /**
  * Curated OpenRouter model ids the managed plan serves by default (overridable
  * with the AI_ALLOWED_MODELS env). All of them MUST support tool calling — the
- * NoteFlow chat is agentic — and all currently chosen ones support vision too.
+ * NoteFlow chat is agentic. NOT all of them support vision: the two DeepSeek
+ * models are text-only (every other curated model accepts image input).
  *
  * KEEP IN SYNC with NOTEFLOW_AI_MODELS in electron/ai/llm/presets.ts (the
- * `noteflow` preset shows this same list as suggested models in the client).
+ * `noteflow` preset shows this same list as suggested models in the client,
+ * and NOTEFLOW_AI_MODEL_META mirrors the multipliers/vision flags below).
  */
 export const DEFAULT_ALLOWED_MODELS: readonly string[] = [
+  // Standard models (×1 quota).
   'openai/gpt-4o-mini',
   'openai/gpt-4.1-mini',
   'anthropic/claude-haiku-4.5',
   'google/gemini-2.5-flash',
+  'deepseek/deepseek-v4-flash',
+  'deepseek/deepseek-v4-pro',
+  'minimax/minimax-m3',
+  // Advanced models (×6 quota — see MODEL_QUOTA_MULTIPLIERS).
+  'anthropic/claude-sonnet-5',
+  'openai/gpt-5.2',
+  'google/gemini-3.5-flash',
 ]
 
-/** Default monthly token budget (input + output) per user. */
+/** Default monthly QUOTA token budget (weighted input + output) per user. */
 export const DEFAULT_MONTHLY_TOKENS = 3_000_000
+
+/**
+ * Per-model quota multipliers: what a real token costs against the monthly
+ * quota. Only models more expensive than the baseline are listed — anything
+ * not in the map is ×1. Real tokens (tokens_in/tokens_out) are still recorded
+ * unweighted for the operator's cost accounting; the weighted value goes to
+ * the usage_events.quota_tokens column (migration 0007).
+ *
+ * KEEP IN SYNC with NOTEFLOW_AI_MODEL_META in electron/ai/llm/presets.ts.
+ */
+export const MODEL_QUOTA_MULTIPLIERS: Readonly<Record<string, number>> = {
+  'anthropic/claude-sonnet-5': 6,
+  'openai/gpt-5.2': 6,
+  'google/gemini-3.5-flash': 6,
+}
+
+/** Quota multiplier for a model — unknown/unlisted models cost the ×1 baseline. */
+export function quotaMultiplierFor(model: string): number {
+  const mult = MODEL_QUOTA_MULTIPLIERS[model]
+  return typeof mult === 'number' && Number.isFinite(mult) && mult > 0 ? mult : 1
+}
+
+/**
+ * Weighted quota tokens a usage event costs: round((in + out) * multiplier).
+ * Defensive: a malformed usage side counts as 0 rather than poisoning the sum.
+ */
+export function computeQuotaTokens(usage: TokenUsage, model: string): number {
+  const tokensIn = Number.isFinite(usage.tokensIn) && usage.tokensIn > 0 ? usage.tokensIn : 0
+  const tokensOut = Number.isFinite(usage.tokensOut) && usage.tokensOut > 0 ? usage.tokensOut : 0
+  return Math.round((tokensIn + tokensOut) * quotaMultiplierFor(model))
+}
 
 /**
  * Parses the AI_ALLOWED_MODELS env value ("a/b,c/d" → list). Empty/missing/

@@ -36,6 +36,9 @@ const en = {
         addFilesToProfile: 'Add files to your profile',
         attachFilesToChat: 'Attach files to the chat',
     },
+    chatErrors: {
+        quotaExceeded: "You've reached your NoteFlow AI monthly quota. It resets on the 1st of next month.",
+    },
 };
 // `: Messages` forces key parity with English at compile time.
 const es = {
@@ -62,6 +65,9 @@ const es = {
         importGoogleKeep: 'Importar exportación de Google Keep',
         addFilesToProfile: 'Añadir archivos a tu perfil',
         attachFilesToChat: 'Adjuntar archivos al chat',
+    },
+    chatErrors: {
+        quotaExceeded: 'Has alcanzado tu cuota mensual de NoteFlow AI. Se renueva el día 1 del mes que viene.',
     },
 };
 /**

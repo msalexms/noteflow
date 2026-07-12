@@ -240,7 +240,8 @@ export function ChatView({
           >
             {modelOptions.length === 0 && <option value="">{t.aiPanel.chat.noModel}</option>}
             {modelOptions.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              // Show the model name only (drop the "provider/" prefix); the value keeps the full id.
+              <option key={m} value={m}>{m.includes('/') ? m.slice(m.indexOf('/') + 1) : m}</option>
             ))}
           </select>
           <button

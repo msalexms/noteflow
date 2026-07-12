@@ -59,11 +59,17 @@ async function resolveConfigAsync(cfg) {
     return { ...resolved, apiKey: token };
 }
 /** Native attachment support per preset (the app never extracts text itself). */
-function providerCapabilities(preset) {
+function providerCapabilities(preset, activeModel) {
     // PDF is only reliable on Anthropic (native document blocks). Images (vision) are model-dependent,
     // so each preset declares a default via `images`: text-only providers (DeepSeek, MiniMax, Moonshot's
     // suggested models) set it to false; vision-capable/flexible ones default to true.
-    return { images: preset.images ?? true, pdf: preset.impl === 'anthropic' };
+    // The managed `noteflow` preset mixes vision and text-only models in one catalog, so its vision
+    // flag is PER MODEL (preset.modelMeta): the active model decides. Unknown/empty model → default true.
+    let images = preset.images ?? true;
+    if (preset.modelMeta && activeModel) {
+        images = preset.modelMeta[activeModel]?.images ?? images;
+    }
+    return { images, pdf: preset.impl === 'anthropic' };
 }
 /** Renderer-safe projection of the ACTIVE preset: no key, plus a `configured` flag the UI gates on. */
 function toPublic(cfg) {
@@ -84,7 +90,7 @@ function toPublic(cfg) {
         baseUrl: effectiveBaseUrl(cfg),
         hasKey,
         configured,
-        capabilities: providerCapabilities(preset),
+        capabilities: providerCapabilities(preset, model),
     };
 }
 /** User-facing reason why toPublic().configured is false — tailored for the managed preset. */

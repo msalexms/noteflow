@@ -108,7 +108,13 @@ export const aiPanel = {
       subtitle: 'Included with your subscription — no API key needed.',
       useButton: 'Use NoteFlow AI',
       active: 'Active',
+      // Monthly consumption line under the progress bar; {used}/{limit} come
+      // pre-abbreviated (e.g. "1.2M", "3M").
+      usage: '{used} / {limit} tokens this month',
     },
+    // Suffix appended to model options that burn the monthly quota faster
+    // (e.g. "anthropic/claude-sonnet-5 (6× quota)").
+    modelQuotaSuffix: '({mult}× quota)',
     baseUrl: 'Base URL',
     apiKey: 'API key',
     keySaved: 'Key saved',
