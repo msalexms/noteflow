@@ -22,6 +22,7 @@ import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
 import * as cloudKeys from './cloudKeys'
+import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import * as account from './account'
 import { LEMONSQUEEZY_CHECKOUT_URLS } from './cloudConfig'
@@ -220,6 +221,11 @@ function handleAccountStatusChanged(): void {
       .catch(() => { /* autoUnlockManaged never throws, but be safe */ })
   }
 
+  // Account transitions gate the cloud Realtime subscription too (it needs a
+  // session for its JWT): most notably sign-out must tear the socket down —
+  // no cloud:status event fires in that path.
+  syncCloudRealtimeState()
+
   emitAccountStatusChanged()
 }
 
@@ -277,52 +283,130 @@ function stopAutoSync(): void {
   }
 }
 
-// ── NoteFlow Cloud autosync (interim polling — stage 3 replaces it with Realtime)
+// ── NoteFlow Cloud autosync (Realtime signal + safety-net timer — stage 3) ────
 
 let cloudAutoSyncTimer: ReturnType<typeof setInterval> | null = null
 
 // Broadcasts the PUBLIC cloud status (never key material) to every window.
+// Every cloud state transition funnels through here, which makes it the one
+// choke point to also reconcile the Realtime subscription with the new state
+// (enable/disable, setup, unlock/lock, managed auto-unlock — all emit).
 function emitCloudStatusChanged(): void {
+  syncCloudRealtimeState()
   const status = cloudSync.getCloudSyncStatus()
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send('cloud:status-changed', status)
   })
 }
 
+// Single-flight guard: Realtime signals and the safety-net timer both funnel
+// into runCloudSyncCycle — a cycle requested while one is running marks it
+// dirty and re-runs ONCE at the end (coalesces bursts, never overlaps pulls).
+let cloudSyncCycleRunning = false
+let cloudSyncCycleDirty = false
+
+/**
+ * One cloud sync cycle: managed auto-unlock if needed → drain the journal →
+ * stand down if writes are in flight → incremental pull → broadcast. Same
+ * ordering rationale as the GitHub autosync tick above.
+ */
+async function runCloudSyncCycle(): Promise<void> {
+  if (cloudSyncCycleRunning) {
+    cloudSyncCycleDirty = true
+    return
+  }
+  cloudSyncCycleRunning = true
+  try {
+    do {
+      cloudSyncCycleDirty = false
+      await runCloudSyncCycleOnce()
+    } while (cloudSyncCycleDirty)
+  } finally {
+    cloudSyncCycleRunning = false
+  }
+}
+
+async function runCloudSyncCycleOnce(): Promise<void> {
+  if (!cloudSync.isCloudSyncEnabled()) return
+  // Locked keys: managed sessions re-unlock silently (e.g. the boot attempt
+  // ran offline); e2ee stays locked until the user types the passphrase.
+  // Pending ops stay journaled and drain after unlock either way.
+  if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') {
+    const changed = await cloudKeys.autoUnlockManaged().catch(() => false)
+    if (changed) emitCloudStatusChanged()
+    if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') return
+  }
+  // Same ordering as the GitHub tick: drain the journal first, then stand
+  // down if writes are still in flight, then pull.
+  try {
+    await cloudSync.retrySyncJournal(NOTES_DIR)
+  } catch (err) {
+    console.error('[CloudAutoSync] journal retry failed:', String(err))
+  }
+  if (cloudSync.hasPendingRemoteMutations()) {
+    console.log('[CloudAutoSync] skipping pull — remote mutations pending')
+    return
+  }
+  try {
+    const result = await cloudSync.pullNotes(NOTES_DIR)
+    broadcastPullResult(result)
+  } catch (err) {
+    console.error('[CloudAutoSync] pull failed:', String(err))
+  }
+  emitCloudStatusChanged()
+}
+
+// A push from another device lands as a BURST of Realtime events (one per row
+// of the note folder) — debounce them into a single sync cycle.
+const CLOUD_REALTIME_DEBOUNCE_MS = 1500
+let cloudRealtimeDebounce: ReturnType<typeof setTimeout> | null = null
+
+function onCloudRemoteChange(): void {
+  if (cloudRealtimeDebounce) clearTimeout(cloudRealtimeDebounce)
+  cloudRealtimeDebounce = setTimeout(() => {
+    cloudRealtimeDebounce = null
+    runCloudSyncCycle().catch((err) =>
+      console.error('[CloudRealtime] sync cycle failed:', String(err))
+    )
+  }, CLOUD_REALTIME_DEBOUNCE_MS)
+}
+
+// Reconciles the Realtime subscription with the current state: it runs only
+// while Cloud sync is enabled, there is a session AND the keys are unlocked
+// (events are useless while a pull can't decrypt anyway). Both start and stop
+// are idempotent, so calling this on every status transition is safe.
+function syncCloudRealtimeState(): void {
+  const status = cloudSync.getCloudSyncStatus()
+  if (status.enabled && status.signedIn && status.keysState === 'unlocked') {
+    cloudRealtime.startCloudRealtime(onCloudRemoteChange)
+  } else {
+    cloudRealtime.stopCloudRealtime()
+    if (cloudRealtimeDebounce) {
+      clearTimeout(cloudRealtimeDebounce)
+      cloudRealtimeDebounce = null
+    }
+  }
+}
+
+// Orchestrator: starts BOTH halves of the cloud autosync — the Realtime
+// subscription (instant signal) and the periodic safety-net loop (covers a
+// down WebSocket and drains the journal while offline).
 function startCloudAutoSync(): void {
+  syncCloudRealtimeState()
   if (cloudAutoSyncTimer) return
-  cloudAutoSyncTimer = setInterval(async () => {
-    if (!cloudSync.isCloudSyncEnabled()) return
-    // Locked keys: managed sessions re-unlock silently (e.g. the boot attempt
-    // ran offline); e2ee stays locked until the user types the passphrase.
-    // Pending ops stay journaled and drain after unlock either way.
-    if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') {
-      const changed = await cloudKeys.autoUnlockManaged().catch(() => false)
-      if (changed) emitCloudStatusChanged()
-      if (cloudSync.getCloudSyncStatus().keysState !== 'unlocked') return
-    }
-    // Same ordering as the GitHub tick: drain the journal first, then stand
-    // down if writes are still in flight, then pull.
-    try {
-      await cloudSync.retrySyncJournal(NOTES_DIR)
-    } catch (err) {
-      console.error('[CloudAutoSync] journal retry failed:', String(err))
-    }
-    if (cloudSync.hasPendingRemoteMutations()) {
-      console.log('[CloudAutoSync] skipping pull — remote mutations pending')
-      return
-    }
-    try {
-      const result = await cloudSync.pullNotes(NOTES_DIR)
-      broadcastPullResult(result)
-    } catch (err) {
-      console.error('[CloudAutoSync] pull failed:', String(err))
-    }
-    emitCloudStatusChanged()
+  cloudAutoSyncTimer = setInterval(() => {
+    runCloudSyncCycle().catch((err) =>
+      console.error('[CloudAutoSync] sync cycle failed:', String(err))
+    )
   }, cloudSync.CLOUD_AUTO_SYNC_INTERVAL_MS)
 }
 
 function stopCloudAutoSync(): void {
+  cloudRealtime.stopCloudRealtime()
+  if (cloudRealtimeDebounce) {
+    clearTimeout(cloudRealtimeDebounce)
+    cloudRealtimeDebounce = null
+  }
   if (cloudAutoSyncTimer) {
     clearInterval(cloudAutoSyncTimer)
     cloudAutoSyncTimer = null
@@ -1664,8 +1748,9 @@ ipcMain.handle('cloud:lock', () => {
 })
 
 // Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
-// syncProvider.ts): the GitHub autosync stands down and the cloud polling
-// loop starts, kicking an initial pull (which flushes local changes after).
+// syncProvider.ts): the GitHub autosync stands down and the cloud autosync
+// (Realtime + safety-net loop) starts, kicking an initial pull (which flushes
+// local changes after).
 ipcMain.handle('cloud:enable', () => {
   const res = cloudSync.enableCloudSync()
   if (res.ok) {
@@ -2866,9 +2951,10 @@ app.whenReady().then(async () => {
   const isStartupMode = process.argv.includes('--noteflow-startup')
   const startupStickies = (readSettings().startupStickies ?? []) as Array<{ noteId: string; sectionId: string }>
 
-  // Initial NoteFlow Cloud pull + interim polling loop. Same rationale as the
-  // GitHub block below: in startup mode block briefly so stickies open fresh;
-  // otherwise pull in the background (pushes are gated until it succeeds).
+  // Initial NoteFlow Cloud pull + autosync (Realtime subscription + safety-net
+  // loop). Same rationale as the GitHub block below: in startup mode block
+  // briefly so stickies open fresh; otherwise pull in the background (pushes
+  // are gated until it succeeds).
   if (cloudEnabled) {
     const runInitialCloudPull = () =>
       cloudSync

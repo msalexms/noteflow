@@ -180,17 +180,20 @@ el operador puede leer). La decisión original "E2EE total" se relajó porque ob
 usuario a custodiar una passphrase es hostil para el usuario medio; el E2EE queda como feature
 diferencial de privacidad, no como peaje.
 
-> **Estado: tramos 1, 2 y 4 implementados + modo dual managed/e2ee.** Tramo 1 (fundación):
+> **Estado: tramos 1, 2, 3 y 4 implementados + modo dual managed/e2ee.** Tramo 1 (fundación):
 > migración `supabase/migrations/0004_cloud.sql` (`user_keys` + `files` + RLS) y
 > `electron/cloudCrypto.ts` (capa criptográfica pura, testeada en
 > `tests/electron/cloudCrypto.test.ts`). Tramo 2 (motor de sync): `electron/cloudKeys.ts`
 > (sesión de claves), `electron/cloudSync.ts` + `electron/cloudSyncLogic.ts` (motor, lógica pura
 > testeada en `tests/electron/cloudSync.test.ts`), interfaz `SyncProvider`
-> (`electron/syncProvider.ts`) y los IPC `cloud:*`. Tramo 4 (UI): onboarding con elección de modo
+> (`electron/syncProvider.ts`) y los IPC `cloud:*`. Tramo 3 (Realtime): migración
+> `0006_cloud_realtime.sql` + `electron/cloudRealtime.ts`/`cloudRealtimeLogic.ts` (ver
+> "Tiempo real" abajo). Tramo 4 (UI): onboarding con elección de modo
 > + panel en Settings → Sync + enforcement visual de la exclusión mutua con GitHub Sync (ver
 > "Settings UI" abajo). Modo dual: migración `0005_cloud_managed.sql` + Edge Function
-> `cloud-keys` + rama managed en `cloudKeys.ts` (ver "Modos de cifrado" abajo). Pendiente:
-> tramo 3 (Realtime — de momento **polling interino** cada 60 s, `CLOUD_AUTO_SYNC_INTERVAL_MS`).
+> `cloud-keys` + rama managed en `cloudKeys.ts` (ver "Modos de cifrado" abajo).
+> **Pendiente del operador:** aplicar la migración 0006 al proyecto real (sin ella el WS
+> conecta pero no llegan eventos — el fallback de 5 min sigue sincronizando).
 
 ### Modos de cifrado (managed | e2ee)
 
@@ -337,10 +340,24 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   corpus local entero, metadatos incluidos.
 - `disableCloudSync()` conserva `lastSync`/`pullCursor`/journal (re-habilitar retoma incremental
   y los deletes pendientes no se pierden); las claves no se tocan (lock es acción aparte).
-- **Tiempo real (tramo 3, pendiente):** suscripción Realtime a los cambios de `files` del
-  usuario → aplicar en caliente. De momento, **polling interino** cada 60 s
-  (`CLOUD_AUTO_SYNC_INTERVAL_MS`, loop en `main.ts`: drena journal → pull, espejo del tick de
-  GitHub).
+- **Tiempo real (tramo 3, implementado):** `electron/cloudRealtime.ts` abre un **WebSocket puro**
+  (el `WebSocket` global de Node 22 — sin `@supabase/supabase-js` ni `ws`) contra Supabase
+  Realtime (protocolo Phoenix, vsn=1.0.0) y se une a un canal con `postgres_changes` sobre
+  `public.files` filtrado `user_id=eq.<uid>` (migración `0006_cloud_realtime.sql` añade la tabla
+  a la publicación `supabase_realtime`; sin `replica identity full` — `user_id` está en la PK).
+  **El payload del evento NO se aplica en caliente** (es ciphertext): es solo una **señal** que
+  `main.ts` debouncea (1,5 s — un push ajeno llega como ráfaga de filas) y convierte en un ciclo
+  de sync normal (`runCloudSyncCycle`, single-flight con marca dirty: auto-unlock managed →
+  `retrySyncJournal` → skip si hay mutaciones en vuelo → `pullNotes`). Detalles: heartbeat cada
+  25 s (ack perdido = reconectar), token JWT fresco en cada reconexión + push `access_token`
+  cada 45 min (expiran ~1 h), backoff exponencial con jitter (1 s → cap 60 s, reset al unirse),
+  silencioso offline. Lógica pura (frames/clasificación/backoff) en `cloudRealtimeLogic.ts`,
+  testeada en `tests/electron/cloudRealtime.test.ts`. **Ciclo de vida:** corre solo con Cloud
+  enabled + sesión + claves unlocked — `syncCloudRealtimeState()` en `main.ts` reconcilia en
+  cada transición (choke points: `emitCloudStatusChanged` y `handleAccountStatusChanged`; el
+  sign-out lo para). El loop periódico queda como **red de seguridad** cada 5 min
+  (`CLOUD_AUTO_SYNC_INTERVAL_MS`: cubre WS caído y drena el journal offline). El estado público
+  expone `realtimeConnected` (informativo, aún sin UI).
 
 ### Settings UI (tramo 4 — implementado)
 - **Ubicación:** la página **Settings → Sync** contiene DOS secciones —
@@ -382,7 +399,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
-| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004 y 0005) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`, polling interino 60 s) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). Pendiente: tramo 3 (Realtime) + desplegar `cloud-keys` + migración 0005 + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
+| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004 y 0005 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto y Edge Function `cloud-keys` ACTIVE (verify JWT, smoke OK). Pendiente del operador: aplicar la migración 0006 + crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)

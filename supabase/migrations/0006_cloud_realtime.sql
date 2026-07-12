@@ -1,0 +1,23 @@
+-- NoteFlow — Fase 4.2 (NoteFlow Cloud), tramo 3: Realtime.
+--
+-- Sustituye el polling interino del autosync por push: el cliente (proceso
+-- main de Electron, electron/cloudRealtime.ts) abre un WebSocket contra
+-- Supabase Realtime y se suscribe a postgres_changes sobre public.files con
+-- el filtro user_id=eq.<uid>. Para que Realtime emita los cambios de una
+-- tabla, esta tiene que estar en la publicación supabase_realtime — eso es lo
+-- ÚNICO que hace esta migración.
+--
+-- Notas de diseño:
+--   - NO hace falta `replica identity full`: user_id forma parte de la PK
+--     (user_id, path_key), así que el filtro por user_id funciona con la
+--     replica identity por defecto (la PK viaja siempre en el WAL). FULL solo
+--     engordaría el WAL duplicando los blobs cifrados en cada UPDATE.
+--   - El payload del evento son filas CIFRADAS (columnas *_ct) y el cliente
+--     NO lo aplica en caliente: lo usa solo como señal para disparar su ciclo
+--     de sync normal (drenar journal → pull incremental), donde ya vive toda
+--     la lógica de descifrado y conflictos.
+--   - Autorización: Realtime respeta la RLS de la 0004 (el canal se une con
+--     el JWT del usuario), y el filtro user_id la refuerza — nadie recibe
+--     eventos de filas ajenas.
+
+alter publication supabase_realtime add table public.files;

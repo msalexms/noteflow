@@ -18,8 +18,9 @@
 //     it reuses the pure transitions of syncState.ts, persisted in its own
 //     userData/cloud-sync-state.json (never shared with the GitHub journal:
 //     the two backends must not replay each other's ops).
-//   - Interim autosync is POLLING (CLOUD_AUTO_SYNC_INTERVAL_MS); stage 3
-//     replaces it with a Supabase Realtime subscription.
+//   - Autosync is PUSH-driven (stage 3): a Supabase Realtime subscription
+//     (cloudRealtime.ts) signals remote changes and main.ts runs the sync
+//     cycle; the CLOUD_AUTO_SYNC_INTERVAL_MS loop stays as a safety net.
 //
 // E2EE invariants: every row is encrypted with cloudCrypto.ts before leaving
 // the process; the DEK comes from cloudKeys.ts (main-process memory only) and
@@ -30,6 +31,7 @@ import fs from 'fs'
 import path from 'path'
 import * as account from './account'
 import * as cloudKeys from './cloudKeys'
+import * as cloudRealtime from './cloudRealtime'
 import { supabaseRest } from './cloudKeys'
 import { isCloudConfigured } from './cloudConfig'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
@@ -66,8 +68,13 @@ import {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** Interim polling cadence — stage 3 (Realtime) replaces this. */
-export const CLOUD_AUTO_SYNC_INTERVAL_MS = 60 * 1000
+/**
+ * Safety-net cadence of the periodic sync loop. Remote changes normally arrive
+ * via the Realtime subscription (cloudRealtime.ts) within seconds — this timer
+ * only covers a down/undelivered WebSocket and drains the journal of pending
+ * local mutations while offline.
+ */
+export const CLOUD_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000
 
 // Same debounce as the GitHub push: avoids spamming the API while typing.
 const PUSH_DEBOUNCE_MS = 5000
@@ -106,6 +113,8 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: InitialPullStatus
+  /** True while the Realtime channel is joined (informational — no UI consumes it yet). */
+  realtimeConnected: boolean
 }
 
 interface PullResult {
@@ -232,6 +241,7 @@ export function getCloudSyncStatus(): CloudSyncStatus {
     lastSync: s.lastSync,
     error: syncError,
     initialPullStatus,
+    realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
   }
 }
 

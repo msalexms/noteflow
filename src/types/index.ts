@@ -299,6 +299,8 @@ export interface CloudSyncStatus {
   lastSync?: string
   error?: string
   initialPullStatus: 'pending' | 'ok' | 'failed'
+  /** True while the main process holds a live Realtime subscription (informational — no UI yet). */
+  realtimeConnected: boolean
 }
 
 // Backend-tagged snapshot of the LIVE sync provider (see electron/syncProvider.ts):

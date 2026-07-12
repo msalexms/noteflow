@@ -19,8 +19,9 @@
 //     it reuses the pure transitions of syncState.ts, persisted in its own
 //     userData/cloud-sync-state.json (never shared with the GitHub journal:
 //     the two backends must not replay each other's ops).
-//   - Interim autosync is POLLING (CLOUD_AUTO_SYNC_INTERVAL_MS); stage 3
-//     replaces it with a Supabase Realtime subscription.
+//   - Autosync is PUSH-driven (stage 3): a Supabase Realtime subscription
+//     (cloudRealtime.ts) signals remote changes and main.ts runs the sync
+//     cycle; the CLOUD_AUTO_SYNC_INTERVAL_MS loop stays as a safety net.
 //
 // E2EE invariants: every row is encrypted with cloudCrypto.ts before leaving
 // the process; the DEK comes from cloudKeys.ts (main-process memory only) and
@@ -82,6 +83,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const account = __importStar(require("./account"));
 const cloudKeys = __importStar(require("./cloudKeys"));
+const cloudRealtime = __importStar(require("./cloudRealtime"));
 const cloudKeys_1 = require("./cloudKeys");
 const cloudConfig_1 = require("./cloudConfig");
 const noteFormat_1 = require("./noteFormat");
@@ -89,8 +91,13 @@ const cloudCrypto_1 = require("./cloudCrypto");
 const cloudSyncLogic_1 = require("./cloudSyncLogic");
 const syncState_1 = require("./syncState");
 // ── Constants ─────────────────────────────────────────────────────────────────
-/** Interim polling cadence — stage 3 (Realtime) replaces this. */
-exports.CLOUD_AUTO_SYNC_INTERVAL_MS = 60 * 1000;
+/**
+ * Safety-net cadence of the periodic sync loop. Remote changes normally arrive
+ * via the Realtime subscription (cloudRealtime.ts) within seconds — this timer
+ * only covers a down/undelivered WebSocket and drains the journal of pending
+ * local mutations while offline.
+ */
+exports.CLOUD_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 // Same debounce as the GitHub push: avoids spamming the API while typing.
 const PUSH_DEBOUNCE_MS = 5000;
 // PostgREST caps responses (Supabase default max-rows 1000) — page the pull.
@@ -196,6 +203,7 @@ function getCloudSyncStatus() {
         lastSync: s.lastSync,
         error: syncError,
         initialPullStatus,
+        realtimeConnected: cloudRealtime.isCloudRealtimeConnected(),
     };
 }
 function onStatusChanged(cb) {
