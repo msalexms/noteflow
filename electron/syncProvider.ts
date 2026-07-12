@@ -86,3 +86,48 @@ export const cloudProvider: SyncProvider = {
 export function getActiveSyncProvider(): SyncProvider {
   return cloudSync.isCloudSyncEnabled() ? cloudProvider : githubProvider
 }
+
+/**
+ * Renderer-safe, backend-tagged snapshot for the titlebar sync button: which
+ * backend is live and its status, normalized so the UI routes to ONE indicator.
+ * Mirrors getActiveSyncProvider() — Cloud (when enabled) wins over GitHub, and
+ * 'none' means no backend is set up (button hidden). Never carries key material.
+ */
+export interface ActiveSyncStatus {
+  backend: 'github' | 'cloud' | 'none'
+  /** True when a backend is live enough to show/allow a manual sync. */
+  active: boolean
+  lastSync?: string
+  error?: string
+  initialPullStatus: 'pending' | 'ok' | 'failed'
+  /** Present only when backend === 'github'. */
+  github?: { owner?: string; repo?: string }
+  /** Present only when backend === 'cloud'. */
+  cloud?: { keysState: cloudSync.CloudSyncStatus['keysState']; keysMode: cloudSync.CloudSyncStatus['keysMode'] }
+}
+
+export function getActiveSyncStatus(): ActiveSyncStatus {
+  if (cloudSync.isCloudSyncEnabled()) {
+    const c = cloudSync.getCloudSyncStatus()
+    return {
+      backend: 'cloud',
+      active: true,
+      lastSync: c.lastSync,
+      error: c.error,
+      initialPullStatus: c.initialPullStatus,
+      cloud: { keysState: c.keysState, keysMode: c.keysMode },
+    }
+  }
+  const g = githubSync.getSyncStatus()
+  if (g.connected) {
+    return {
+      backend: 'github',
+      active: true,
+      lastSync: g.lastSync,
+      error: g.error,
+      initialPullStatus: g.initialPullStatus,
+      github: { owner: g.owner, repo: g.repo },
+    }
+  }
+  return { backend: 'none', active: false, initialPullStatus: 'pending' }
+}

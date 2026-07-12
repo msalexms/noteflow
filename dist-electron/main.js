@@ -1479,6 +1479,11 @@ electron_1.ipcMain.handle('notes:write-imported', async (_event, entries) => {
 electron_1.ipcMain.handle('sync:get-status', () => {
     return githubSync.getSyncStatus();
 });
+// Backend-tagged status of whichever sync provider is live (Cloud when enabled,
+// else GitHub, else 'none') — drives the titlebar sync button. See syncProvider.ts.
+electron_1.ipcMain.handle('sync:get-active-status', () => {
+    return (0, syncProvider_1.getActiveSyncStatus)();
+});
 electron_1.ipcMain.handle('sync:initiate', async (_event, repo) => {
     return githubSync.initiateDeviceFlow(repo, NOTES_DIR, (result) => {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('sync-auth-complete', result));
@@ -1507,7 +1512,8 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
     githubSync.disconnectGitHub();
     return { ok: true };
 });
-electron_1.ipcMain.handle('sync:pull', async () => {
+// Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
+async function githubManualPull() {
     const result = await githubSync.pullNotes(NOTES_DIR);
     // Guarded no-op once the remote is already on format v2
     githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
@@ -1530,6 +1536,13 @@ electron_1.ipcMain.handle('sync:pull', async () => {
         }
     }
     return result;
+}
+electron_1.ipcMain.handle('sync:pull', async () => githubManualPull());
+// Routes the titlebar's manual pull to whichever backend is live: Cloud when
+// enabled (they are mutually exclusive), GitHub otherwise. Same broadcast
+// contract as sync:pull / cloud:pull so the store reloads either way.
+electron_1.ipcMain.handle('sync:pull-active', async () => {
+    return cloudSync.isCloudSyncEnabled() ? cloudManualPull() : githubManualPull();
 });
 // ── NoteFlow account (Supabase Auth + entitlements) ───────────────────────────
 // Session/tokens live in electron/account.ts (main-process only); the renderer
@@ -1647,8 +1660,8 @@ electron_1.ipcMain.handle('cloud:disable', () => {
     emitCloudStatusChanged();
     return res;
 });
-// Manual pull (same broadcast contract as sync:pull).
-electron_1.ipcMain.handle('cloud:pull', async () => {
+// Manual Cloud pull + its broadcast (shared by cloud:pull and sync:pull-active).
+async function cloudManualPull() {
     const result = await cloudSync.pullNotes(NOTES_DIR);
     if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
@@ -1660,7 +1673,9 @@ electron_1.ipcMain.handle('cloud:pull', async () => {
     }
     emitCloudStatusChanged();
     return result;
-});
+}
+// Manual pull (same broadcast contract as sync:pull).
+electron_1.ipcMain.handle('cloud:pull', async () => cloudManualPull());
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 function readSettings() {
     try {

@@ -1,5 +1,6 @@
 // Top window bar (TitleBar) + the crash fallback bar (ErrorBoundary): window
-// controls, brain toggle, update button, and the GitHub sync status tooltip.
+// controls, brain toggle, update button, and the sync status tooltip (routed to
+// whichever backend is live — GitHub Sync or NoteFlow Cloud).
 export const titleBar = {
   // Window controls (shared with the error fallback).
   settings: 'Settings',
@@ -24,6 +25,9 @@ export const titleBar = {
   clickToRetry: 'Click to retry',
   syncError: 'Sync error: {error}',
   syncIdle: '{owner}/{repo} · Last sync: {time}\nClick to sync',
+  // NoteFlow Cloud backend (the button routes to whichever provider is active).
+  cloudIdle: 'NoteFlow Cloud · Last sync: {time}\nClick to sync',
+  cloudLocked: 'NoteFlow Cloud · Keys locked — unlock in Settings',
   never: 'Never',
 
   // Crash fallback (ErrorBoundary).

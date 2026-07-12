@@ -17,6 +17,16 @@ onStart?, onComplete?)`, `pushPathsNow(notesDir, relPaths)`, `scheduleDelete(rel
 (Device Flow, migración remota v2, claves E2EE/unlock) queda FUERA de la interfaz — sus IPC
 propios llaman a los módulos directamente.
 
+**Botón de sync de la titlebar** (`TitleBar.tsx`): NO está cableado a GitHub. Consume
+`sync:get-active-status` (helper `getActiveSyncStatus()` en `syncProvider.ts`, espejo de
+`getActiveSyncProvider()`) → status normalizado y etiquetado con `backend` (`'github'|'cloud'|'none'`),
+y su pull manual va por `sync:pull-active` (Cloud si `enabled`, GitHub si no). El botón se muestra
+cuando CUALQUIER backend está `active` (antes solo con GitHub conectado → un usuario solo-Cloud se
+quedaba sin sync manual), se suscribe a `sync:status-changed` **y** `cloud:status-changed`, y ramifica
+el tooltip por backend (owner/repo en GitHub; "NoteFlow Cloud · última sync"/claves bloqueadas en Cloud).
+El indicador "pushing" (`sync:push-state`) sigue siendo solo de GitHub; Cloud refresca vía su
+status-changed. `sync:pull` (GitHub puro) se mantiene intacto para Settings → Sync.
+
 **Cloud Sync** (`electron/cloudSync.ts`, mismo modelo y regla de conflicto que GitHub pero
 contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de mutaciones y
 con pull incremental por `updated_at`): detalle completo en `monetization.md` § 4. Su journal

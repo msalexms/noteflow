@@ -18,6 +18,8 @@ export const titleBar = {
   clickToRetry: 'Haz clic para reintentar',
   syncError: 'Error de sincronización: {error}',
   syncIdle: '{owner}/{repo} · Última sincronización: {time}\nHaz clic para sincronizar',
+  cloudIdle: 'NoteFlow Cloud · Última sincronización: {time}\nHaz clic para sincronizar',
+  cloudLocked: 'NoteFlow Cloud · Claves bloqueadas — desbloquéalas en Ajustes',
   never: 'Nunca',
 
   errorTitle: 'Algo salió mal',

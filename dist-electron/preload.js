@@ -83,10 +83,15 @@ const api = {
     writeImportedNotes: (entries) => electron_1.ipcRenderer.invoke('notes:write-imported', entries),
     // GitHub Sync
     getSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-status'),
+    // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
+    // GitHub, else 'none') — drives the titlebar sync button.
+    getActiveSyncStatus: () => electron_1.ipcRenderer.invoke('sync:get-active-status'),
     initiateGitHubAuth: (repo) => electron_1.ipcRenderer.invoke('sync:initiate', repo),
     cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),
     disconnectGitHub: () => electron_1.ipcRenderer.invoke('sync:disconnect'),
     pullNotes: () => electron_1.ipcRenderer.invoke('sync:pull'),
+    // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
+    pullActiveNotes: () => electron_1.ipcRenderer.invoke('sync:pull-active'),
     onSyncAuthComplete: (cb) => {
         const wrapper = (_event, result) => cb(result);
         electron_1.ipcRenderer.on('sync-auth-complete', wrapper);

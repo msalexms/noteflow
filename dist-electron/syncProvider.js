@@ -49,6 +49,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cloudProvider = exports.githubProvider = void 0;
 exports.getActiveSyncProvider = getActiveSyncProvider;
+exports.getActiveSyncStatus = getActiveSyncStatus;
 const githubSync = __importStar(require("./githubSync"));
 const cloudSync = __importStar(require("./cloudSync"));
 exports.githubProvider = {
@@ -81,4 +82,29 @@ exports.cloudProvider = {
 /** The live backend: Cloud when enabled (priority), GitHub otherwise. */
 function getActiveSyncProvider() {
     return cloudSync.isCloudSyncEnabled() ? exports.cloudProvider : exports.githubProvider;
+}
+function getActiveSyncStatus() {
+    if (cloudSync.isCloudSyncEnabled()) {
+        const c = cloudSync.getCloudSyncStatus();
+        return {
+            backend: 'cloud',
+            active: true,
+            lastSync: c.lastSync,
+            error: c.error,
+            initialPullStatus: c.initialPullStatus,
+            cloud: { keysState: c.keysState, keysMode: c.keysMode },
+        };
+    }
+    const g = githubSync.getSyncStatus();
+    if (g.connected) {
+        return {
+            backend: 'github',
+            active: true,
+            lastSync: g.lastSync,
+            error: g.error,
+            initialPullStatus: g.initialPullStatus,
+            github: { owner: g.owner, repo: g.repo },
+        };
+    }
+    return { backend: 'none', active: false, initialPullStatus: 'pending' };
 }

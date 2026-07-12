@@ -301,6 +301,19 @@ export interface CloudSyncStatus {
   initialPullStatus: 'pending' | 'ok' | 'failed'
 }
 
+// Backend-tagged snapshot of the LIVE sync provider (see electron/syncProvider.ts):
+// Cloud wins when enabled, else GitHub, else 'none'. Drives the titlebar sync
+// button so it routes to whichever backend is active. Never carries key material.
+export interface ActiveSyncStatus {
+  backend: 'github' | 'cloud' | 'none'
+  active: boolean
+  lastSync?: string
+  error?: string
+  initialPullStatus: 'pending' | 'ok' | 'failed'
+  github?: { owner?: string; repo?: string }
+  cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode'] }
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -367,10 +380,21 @@ declare global {
       writeImportedNotes: (entries: NoteflowExportEntry[]) => Promise<{ written: string[]; errors: string[] }>
       // GitHub Sync
       getSyncStatus: () => Promise<{ enabled: boolean; connected: boolean; owner?: string; repo?: string; lastSync?: string; error?: string; initialPullStatus: 'pending' | 'ok' | 'failed' }>
+      // Backend-tagged status of the live sync provider — drives the titlebar sync button.
+      getActiveSyncStatus: () => Promise<ActiveSyncStatus>
       initiateGitHubAuth: (repo: string) => Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }>
       cancelGitHubAuth: () => Promise<{ ok: boolean }>
       disconnectGitHub: () => Promise<{ ok: boolean }>
       pullNotes: () => Promise<{
+        pulled: number
+        deleted: number
+        errors: string[]
+        updatedFiles: string[]
+        hadDeletions: boolean
+        hadMetadataChanges: boolean
+      }>
+      // Manual pull routed to the live backend (Cloud when enabled, else GitHub).
+      pullActiveNotes: () => Promise<{
         pulled: number
         deleted: number
         errors: string[]

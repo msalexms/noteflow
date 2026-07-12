@@ -229,11 +229,13 @@ Renderer (React)
 | `window:open-sticky` | on | Abre ventana sticky flotante |
 | `window:set-size` | on | Redimensiona la ventana (usado por sticky) |
 | `window:fold-to-corner` / `window:unfold` | on | Anima el plegado/desplegado de stickies |
-| `sync:get-status` | handle | Estado del sync (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |
+| `sync:get-status` | handle | Estado del sync **GitHub** (`enabled`, `connected`, owner, repo, lastSync, error, `initialPullStatus`) |
+| `sync:get-active-status` | handle | Estado NORMALIZADO del proveedor **activo** para el botón de la titlebar: `{backend: 'github'\|'cloud'\|'none', active, lastSync, error, initialPullStatus, github?: {owner, repo}, cloud?: {keysState, keysMode}}` (espeja `getActiveSyncProvider()` — ver `syncProvider.ts`/`sync.md`) |
 | `sync:initiate` | handle | Inicia Device Flow OAuth (recibe `repo`); al completar → `sync-auth-complete` + autosync |
 | `sync:cancel-auth` | handle | Cancela un Device Flow en curso |
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
-| `sync:pull` | handle | Pull manual desde el remoto |
+| `sync:pull` | handle | Pull manual desde el remoto **GitHub** (lo usa Settings → Sync) |
+| `sync:pull-active` | handle | Pull manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no) — lo usa el botón de la titlebar |
 | `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt, aiCheckoutConfigured}`) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |

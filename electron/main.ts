@@ -22,7 +22,7 @@ import { randomBytes } from 'crypto'
 import * as githubSync from './githubSync'
 import * as cloudSync from './cloudSync'
 import * as cloudKeys from './cloudKeys'
-import { getActiveSyncProvider, type SyncPullResult } from './syncProvider'
+import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import * as account from './account'
 import { LEMONSQUEEZY_CHECKOUT_URLS } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
@@ -1487,6 +1487,12 @@ ipcMain.handle('sync:get-status', () => {
   return githubSync.getSyncStatus()
 })
 
+// Backend-tagged status of whichever sync provider is live (Cloud when enabled,
+// else GitHub, else 'none') — drives the titlebar sync button. See syncProvider.ts.
+ipcMain.handle('sync:get-active-status', () => {
+  return getActiveSyncStatus()
+})
+
 ipcMain.handle('sync:initiate', async (_event, repo: string) => {
   return githubSync.initiateDeviceFlow(repo, NOTES_DIR, (result) => {
     BrowserWindow.getAllWindows().forEach((win) =>
@@ -1520,7 +1526,8 @@ ipcMain.handle('sync:disconnect', () => {
   return { ok: true }
 })
 
-ipcMain.handle('sync:pull', async () => {
+// Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
+async function githubManualPull(): Promise<SyncPullResult> {
   const result = await githubSync.pullNotes(NOTES_DIR)
   // Guarded no-op once the remote is already on format v2
   githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
@@ -1542,6 +1549,15 @@ ipcMain.handle('sync:pull', async () => {
     }
   }
   return result
+}
+
+ipcMain.handle('sync:pull', async () => githubManualPull())
+
+// Routes the titlebar's manual pull to whichever backend is live: Cloud when
+// enabled (they are mutually exclusive), GitHub otherwise. Same broadcast
+// contract as sync:pull / cloud:pull so the store reloads either way.
+ipcMain.handle('sync:pull-active', async () => {
+  return cloudSync.isCloudSyncEnabled() ? cloudManualPull() : githubManualPull()
 })
 
 // ── NoteFlow account (Supabase Auth + entitlements) ───────────────────────────
@@ -1673,8 +1689,8 @@ ipcMain.handle('cloud:disable', () => {
   return res
 })
 
-// Manual pull (same broadcast contract as sync:pull).
-ipcMain.handle('cloud:pull', async () => {
+// Manual Cloud pull + its broadcast (shared by cloud:pull and sync:pull-active).
+async function cloudManualPull(): Promise<SyncPullResult> {
   const result = await cloudSync.pullNotes(NOTES_DIR)
   if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
     BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'))
@@ -1685,7 +1701,10 @@ ipcMain.handle('cloud:pull', async () => {
   }
   emitCloudStatusChanged()
   return result
-})
+}
+
+// Manual pull (same broadcast contract as sync:pull).
+ipcMain.handle('cloud:pull', async () => cloudManualPull())
 
 // ── Settings (userData/settings.json) ────────────────────────────────────────
 

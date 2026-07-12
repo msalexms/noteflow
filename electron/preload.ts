@@ -132,6 +132,17 @@ const api = {
     error?: string
     initialPullStatus: 'pending' | 'ok' | 'failed'
   }> => ipcRenderer.invoke('sync:get-status'),
+  // Backend-tagged status of the LIVE sync provider (Cloud when enabled, else
+  // GitHub, else 'none') — drives the titlebar sync button.
+  getActiveSyncStatus: (): Promise<{
+    backend: 'github' | 'cloud' | 'none'
+    active: boolean
+    lastSync?: string
+    error?: string
+    initialPullStatus: 'pending' | 'ok' | 'failed'
+    github?: { owner?: string; repo?: string }
+    cloud?: { keysState: 'unlocked' | 'locked' | 'no-keys'; keysMode: 'managed' | 'e2ee' | null }
+  }> => ipcRenderer.invoke('sync:get-active-status'),
   initiateGitHubAuth: (
     repo: string
   ): Promise<{ ok: boolean; userCode?: string; verificationUri?: string; error?: string }> =>
@@ -146,6 +157,15 @@ const api = {
     hadDeletions: boolean
     hadMetadataChanges: boolean
   }> => ipcRenderer.invoke('sync:pull'),
+  // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
+  pullActiveNotes: (): Promise<{
+    pulled: number
+    deleted: number
+    errors: string[]
+    updatedFiles: string[]
+    hadDeletions: boolean
+    hadMetadataChanges: boolean
+  }> => ipcRenderer.invoke('sync:pull-active'),
   onSyncAuthComplete: (
     cb: (result: { ok: boolean; owner?: string; repo?: string; error?: string }) => void
   ) => {
