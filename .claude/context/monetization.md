@@ -109,14 +109,35 @@ es **un preset más**, no una implementación nueva.
   lista o comprar features extra con la key del operador; ver `buildUpstreamBody`). El stream se
   devuelve en **passthrough** mientras un `tee()` lo escanea (`createSseUsageScanner`) y al acabar
   inserta la fila en `usage_events` (migración 0003: tabla + RPC `get_month_usage`, solo service
-  role escribe/invoca) — registro **best-effort**, un fallo no rompe la respuesta. Se despliega
-  **con verify JWT** (default; a diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto),
-  `AI_MONTHLY_TOKENS` (default 3M) y `AI_ALLOWED_MODELS` (default: lista curada en `logic.ts`).
+  role escribe/invoca; **migración 0007** añade la columna `quota_tokens` — ver "Cuota ponderada")
+  — registro **best-effort**, un fallo no rompe la respuesta. Se despliega **con verify JWT**
+  (default; a diferencia del webhook). Env: `OPENROUTER_API_KEY` (secreto), `AI_MONTHLY_TOKENS`
+  (default 3M, ahora en **tokens ponderados**) y `AI_ALLOWED_MODELS` (default: lista curada en
+  `logic.ts`).
+- **Cuota ponderada por modelo (migración 0007):** el catálogo mezcla modelos baratos y
+  "avanzados" (más caros), así que la cuota mensual ya no cuenta tokens reales sino **tokens
+  ponderados**. Cada modelo tiene un multiplicador (`MODEL_QUOTA_MULTIPLIERS` en
+  `ai-proxy/logic.ts`: solo los ≠×1; lo que no esté es ×1) y lo que descuenta de la cuota es
+  `computeQuotaTokens = round((tokens_in+tokens_out) * multiplicador)`. Hoy: **estándar ×1**,
+  **avanzados ×6**. `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
+  operador); lo ponderado va a la columna nueva `usage_events.quota_tokens`, que es lo que
+  `get_month_usage` suma (0007 la redefine + backfill de filas históricas = tokens reales, todas
+  eran ×1). El multiplicador se refleja en el cliente (`NOTEFLOW_AI_MODEL_META` en `presets.ts`)
+  para etiquetar el coste en el selector de modelos — **mantener en sync** con el mapa del proxy.
+- **Endpoint `GET .../ai-proxy/usage`:** devuelve `{used, limit}` (tokens ponderados del mes +
+  cuota) tras resolver el token a `user_id`, **sin gate de entitlement** (ver el consumo es
+  inocuo y sigue siendo útil tras caducar la suscripción). Lo consume el IPC `ai:llm-usage`
+  (main pide un access token fresco; devuelve `null` ante cualquier fallo — la UI solo oculta la
+  barra) que alimenta la barra de consumo de la card premium en `LlmConfigView`.
 - **Upstream OpenRouter:** una key, cientos de modelos, cambiar el catálogo sin tocar infra
-  (sobrecoste ~5%, asumido). Lista curada actual (tool-calling + visión, baratos):
-  `openai/gpt-4o-mini`, `openai/gpt-4.1-mini`, `anthropic/claude-haiku-4.5`,
-  `google/gemini-2.5-flash` — **duplicada a propósito** en `DEFAULT_ALLOWED_MODELS`
-  (`ai-proxy/logic.ts`) y `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener en sync.
+  (sobrecoste ~5%, asumido). Lista curada actual (todos tool-calling; **visión en todos salvo los
+  dos DeepSeek**, text-only) — **estándar ×1:** `openai/gpt-4o-mini`, `openai/gpt-4.1-mini`,
+  `anthropic/claude-haiku-4.5`, `google/gemini-2.5-flash`, `deepseek/deepseek-v4-flash`,
+  `deepseek/deepseek-v4-pro`, `minimax/minimax-m3`; **avanzados ×6:** `anthropic/claude-sonnet-5`,
+  `openai/gpt-5.2`, `google/gemini-3.5-flash`. **Duplicada a propósito** en
+  `DEFAULT_ALLOWED_MODELS` (`ai-proxy/logic.ts`) y `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener
+  en sync. La visión por-modelo la refina `providerCapabilities(preset, activeModel)` para el
+  preset `noteflow` (los DeepSeek → `images:false`).
 - **Cliente:** preset `noteflow` **primero** en `presets.ts` (`impl: 'openai'`, `baseUrl` =
   `AI_PROXY_URL` de `cloudConfig.ts`, `needsKey: false`, `editableBaseUrl: false`).
   ⚠️ `presetOf()` con id desconocido cae **explícitamente en `anthropic`** (ya no en `PRESETS[0]`)
@@ -158,7 +179,12 @@ es **un preset más**, no una implementación nueva.
   cierre sesión) heredaría la baseline `false` de A y se auto-switchearía indebidamente al
   reflejar por primera vez su propia entitlement `true`. Nunca se auto-switchea al revés (perder
   la entitlement no cambia de proveedor).
-- **Pendiente del operador:** solo el **paso a live mode de Lemon Squeezy** (la store está en
+- **Pendiente del operador (cuota ponderada):** correr la **migración 0007** (`supabase db push`)
+  y **redesplegar `ai-proxy`** (`supabase functions deploy ai-proxy`) para que el nuevo catálogo,
+  los multiplicadores y el endpoint `/usage` entren en vigor. Sin redeploy, el proxy sigue
+  sirviendo el catálogo viejo y `get_month_usage` (si 0007 no se corrió) sumaría una columna
+  inexistente.
+- **Pendiente del operador (billing):** el **paso a live mode de Lemon Squeezy** (la store está en
   verificación; el circuito actual corre sobre el producto de **test mode**). Al aprobarse:
   recrear producto + variantes en live (los variant IDs **cambian**) → actualizar el secret
   `LEMONSQUEEZY_VARIANT_MAP` → dar de alta el webhook en live (mismo endpoint y signing secret) →
@@ -403,7 +429,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. Futuro opcional: mostrar el consumo en la UI (las cabeceras `X-NoteFlow-Tokens-*` ya llegan) |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×6), endpoint `/usage` + **barra de consumo en la UI** (la card premium ya la muestra vía IPC `ai:llm-usage`) |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). Pendiente del operador: crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto; mientras tanto hay una suscripción manual de pruebas, ver § 4) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
