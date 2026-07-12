@@ -1,0 +1,16 @@
+---
+// The /terms legal page (both locales render through this component — see
+// src/pages/terms.astro and src/pages/es/terms.astro). Rendering lives in
+// LegalPage.astro (shared with /privacy); prose in src/i18n/docs/terms.{en,es}.ts.
+import LegalPage from './LegalPage.astro';
+import { getTermsContent } from '../../i18n/docs/terms';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+---
+
+<LegalPage lang={lang} page="terms" t={getTermsContent(lang)} />

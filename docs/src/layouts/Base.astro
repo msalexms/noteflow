@@ -1,7 +1,8 @@
 ---
 import '../styles/brain-site.css';
 import { asset } from '../lib/url';
-import { getAbsoluteLocaleUrl } from 'astro:i18n';
+import { getAbsoluteLocaleUrl, getRelativeLocaleUrl } from 'astro:i18n';
+import { getConsent } from '../i18n/consent';
 import type { Lang } from '../i18n';
 
 interface Props {
@@ -19,7 +20,7 @@ const {
   lang = 'en',
   path = '/',
   title = 'NoteFlow — Notes with a brain',
-  description = 'A dark-first desktop notebook for developers. Plain markdown on your disk, a 3D neural graph of your notes, agentic AI chat, a headless CLI, and private GitHub sync. Free, open-source, for Windows & Linux.',
+  description = 'A dark-first desktop notebook for technical people. Plain markdown on your disk, a 3D neural graph of your notes, agentic AI chat, a headless CLI, and sync your way — a private GitHub repo or managed cloud. Free and open-source, for Windows & Linux.',
   image = asset('/screenshots/noteflow-mosaico.png'),
   noindex = false,
   jsonLd,
@@ -33,6 +34,10 @@ const esUrl = getAbsoluteLocaleUrl('es', path);
 const GA_ID = 'G-VFXVHWSQGD';
 // Base path the brain modules are served from (e.g. /noteflow/). The loader reads window.__nfBase.
 const baseUrl = import.meta.env.BASE_URL;
+// Cookie-consent banner (GDPR/AEPD opt-in): copy for this locale + the localized
+// privacy page it links to. GA is gated behind explicit consent (see below).
+const consent = getConsent(lang);
+const privacyHref = getRelativeLocaleUrl(lang, '/privacy');
 ---
 
 <!doctype html>
@@ -91,17 +96,153 @@ const baseUrl = import.meta.env.BASE_URL;
     <script is:inline src={asset('/brain/nf-load.js')}></script>
     <script is:inline src={asset('/brain/nf-netbg.js')}></script>
 
-    <!-- Analytics -->
-    <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}></script>
+    <!-- Analytics — gated behind cookie consent (GDPR/AEPD opt-in). Google Analytics is
+         NOT loaded until the visitor explicitly accepts. `nfLoadGA` injects the gtag
+         script on demand; the boot logic runs it only when consent is already 'granted'
+         and otherwise flags the document so the banner (in <body>) reveals with no FOUC. -->
     <script is:inline define:vars={{ GA_ID }}>
-      window.dataLayer = window.dataLayer || [];
-      function gtag() { dataLayer.push(arguments); }
-      gtag('js', new Date());
-      gtag('config', GA_ID);
+      (function () {
+        // Injects Google Analytics on demand. Called on boot when consent is 'granted',
+        // or live when the visitor clicks Accept. Idempotent.
+        window.nfLoadGA = function () {
+          if (window.__nfGaLoaded) return;
+          window.__nfGaLoaded = true;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA_ID;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          function gtag() { dataLayer.push(arguments); }
+          window.gtag = gtag;
+          gtag('js', new Date());
+          gtag('config', GA_ID);
+        };
+        try {
+          var c = localStorage.getItem('noteflow:cookie-consent');
+          if (c === 'granted') {
+            window.nfLoadGA();
+          } else if (c !== 'denied') {
+            // Undecided → reveal the banner via CSS (decided in <head>, no flicker).
+            document.documentElement.setAttribute('data-cookie-consent', 'pending');
+          }
+        } catch (e) { /* private mode: no analytics, no banner */ }
+      })();
     </script>
   </head>
 
   <body>
     <slot />
+
+    <!-- Cookie consent banner. Hidden by default; the <head> script reveals it (via the
+         data-cookie-consent="pending" attribute on <html>) only when no choice is stored.
+         Accept and Reject are equally prominent (AEPD): same size/weight, both first-layer. -->
+    <div class="nf-cookie" role="dialog" aria-label={consent.aria} aria-live="polite">
+      <div class="nf-cookie-inner">
+        <div class="nf-cookie-copy">
+          <p class="nf-cookie-title">{consent.title}</p>
+          <p class="nf-cookie-text">
+            {consent.message}{' '}
+            <a href={privacyHref} class="nf-cookie-link">{consent.policy}</a>
+          </p>
+        </div>
+        <div class="nf-cookie-actions">
+          <button type="button" class="nf-cookie-btn nf-cookie-ghost" data-consent-reject>{consent.reject}</button>
+          <button type="button" class="nf-cookie-btn nf-cookie-solid" data-consent-accept>{consent.accept}</button>
+        </div>
+      </div>
+    </div>
+
+    <script is:inline>
+      (function () {
+        var KEY = 'noteflow:cookie-consent';
+        var root = document.documentElement;
+        var accept = document.querySelector('[data-consent-accept]');
+        var reject = document.querySelector('[data-consent-reject]');
+        if (accept) accept.addEventListener('click', function () {
+          try { localStorage.setItem(KEY, 'granted'); } catch (e) { /* private mode */ }
+          if (window.nfLoadGA) window.nfLoadGA();
+          root.removeAttribute('data-cookie-consent');
+        });
+        if (reject) reject.addEventListener('click', function () {
+          try { localStorage.setItem(KEY, 'denied'); } catch (e) { /* private mode */ }
+          root.removeAttribute('data-cookie-consent');
+        });
+        // "Cookies" footer links (present on every page) reopen the banner so visitors can
+        // change their mind — AEPD: withdrawing consent must be as easy as granting it.
+        document.querySelectorAll('[data-cookie-settings]').forEach(function (el) {
+          el.addEventListener('click', function (e) {
+            e.preventDefault();
+            try { localStorage.removeItem(KEY); } catch (e2) { /* private mode */ }
+            root.setAttribute('data-cookie-consent', 'pending');
+          });
+        });
+      })();
+    </script>
+
+    <style is:global>
+      /* Cookie consent banner — theme-driven (brain-site.css vars only). Hidden until the
+         <head> script marks <html> as pending, so it never flickers for a decided visitor. */
+      .nf-cookie {
+        display: none;
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 300;
+        padding: clamp(13px, 2vw, 18px) clamp(16px, 4vw, 30px);
+        background: var(--card);
+        border-top: 1px solid var(--line-2);
+        box-shadow: 0 -14px 44px -26px rgba(0, 0, 0, .55);
+      }
+      html[data-cookie-consent='pending'] .nf-cookie {
+        display: block;
+        animation: nfCookieIn .42s cubic-bezier(.2, .7, .2, 1) both;
+      }
+      .nf-cookie-inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 28px;
+      }
+      .nf-cookie-copy { flex: 1 1 320px; min-width: 0; }
+      .nf-cookie-title {
+        margin: 0 0 3px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .nf-cookie-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-dim); }
+      .nf-cookie-link { color: rgb(var(--accent)); text-decoration: underline; text-underline-offset: 2px; }
+      .nf-cookie-link:hover { color: var(--ink-strong); }
+      .nf-cookie-actions { display: flex; gap: 10px; flex-shrink: 0; }
+      .nf-cookie-btn {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: .02em;
+        padding: 10px 24px;
+        border-radius: 5px;
+        cursor: pointer;
+        border: 1px solid var(--line-2);
+        transition: border-color .2s ease, background .2s ease, transform .2s ease, filter .2s ease;
+      }
+      .nf-cookie-ghost { color: var(--ink); background: transparent; }
+      .nf-cookie-ghost:hover { border-color: var(--detail); background: rgb(var(--accent) / .06); }
+      .nf-cookie-solid { color: var(--bg); background: rgb(var(--accent)); border-color: rgb(var(--accent)); }
+      .nf-cookie-solid:hover { transform: translateY(-1px); filter: brightness(1.06); }
+      .nf-cookie-btn:focus-visible { outline: 2px solid rgb(var(--accent) / .6); outline-offset: 2px; }
+      @media (max-width: 560px) {
+        .nf-cookie-actions { width: 100%; }
+        .nf-cookie-btn { flex: 1 1 0; padding: 11px 16px; }
+      }
+      @keyframes nfCookieIn { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) {
+        html[data-cookie-consent='pending'] .nf-cookie { animation: none; }
+      }
+    </style>
   </body>
 </html>

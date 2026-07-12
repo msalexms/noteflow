@@ -19,8 +19,11 @@ export const commonEs: DocsCommon = {
     ai: 'La IA por dentro',
     features: 'Funciones',
     pricing: 'Precios',
+    privacy: 'Privacidad',
+    terms: 'Términos',
+    cookies: 'Cookies',
     source: 'GitHub',
-    copyright: '© 2026 · Hecho para desarrolladores',
+    copyright: '© 2026 · Hecho para gente con buen gusto',
   },
   copy: { idle: 'copiar', done: 'copiado', aria: 'Copiar al portapapeles' },
 };

@@ -183,7 +183,9 @@ export const es: Content = {
       pricingDocs: 'Precios',
       source: 'Código',
       privacy: 'Privacidad',
-      copyright: '© 2026 · Hecho para desarrolladores',
+      terms: 'Términos',
+      cookies: 'Cookies',
+      copyright: '© 2026 · Hecho para gente con buen gusto',
     },
   },
 

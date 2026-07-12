@@ -1,0 +1,16 @@
+---
+// The /privacy legal page (both locales render through this component — see
+// src/pages/privacy.astro and src/pages/es/privacy.astro). Rendering lives in
+// LegalPage.astro (shared with /terms); prose in src/i18n/docs/privacy.{en,es}.ts.
+import LegalPage from './LegalPage.astro';
+import { getPrivacyContent } from '../../i18n/docs/privacy';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+---
+
+<LegalPage lang={lang} page="privacy" t={getPrivacyContent(lang)} />

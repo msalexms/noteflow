@@ -1,15 +1,18 @@
 ---
-// Shared shell for the long-form docs pages (/cli, /ai, /features, /pricing): wraps Base with
-// the neural background, a docs variant of the vertical rail, the page header
-// (kicker + h1 + tagline), the content+TOC grid and a slim footer. Page-specific
-// markup goes in the default slot as <section id="…"> blocks matching `toc`.
+// Shared shell for the long-form docs pages (/cli, /ai, /features, /pricing) and the
+// legal pages (/privacy, /terms): wraps Base with the neural background, a docs
+// variant of the vertical rail, the page header (kicker + h1 + tagline), the
+// content+TOC grid and a slim footer. Page-specific markup goes in the default
+// slot as <section id="…"> blocks matching `toc`.
+// The legal pages are "off-rail": the rail keeps its four fixed neurons (none is
+// active on them) and they are only linked from the footers.
 import '../styles/docs.css';
 import Base from './Base.astro';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getDocsCommon } from '../i18n/docs/common';
 import type { Lang } from '../i18n';
 
-type DocsPage = 'cli' | 'ai' | 'features' | 'pricing';
+type DocsPage = 'cli' | 'ai' | 'features' | 'pricing' | 'privacy' | 'terms';
 
 interface TocItem {
   id: string;
@@ -43,13 +46,23 @@ const railPages = [
 ];
 const homeHref = getRelativeLocaleUrl(lang, '/');
 const switchHref = getRelativeLocaleUrl(otherLang, `/${page}`);
+// "Cookies" link (reopens the consent banner). Falls back to /privacy without JS.
+const cookieHref = getRelativeLocaleUrl(lang, '/privacy');
 const GITHUB = 'https://github.com/yagoid/noteflow';
 
+// The legal pages: footer-only links (no rail neuron).
+const legalPages = [
+  { key: 'privacy' as const, label: c.footer.privacy },
+  { key: 'terms' as const, label: c.footer.terms },
+];
 const footerLinks = [
   { href: homeHref, label: c.footer.home },
   ...railPages
     .filter((p) => p.key !== page)
     .map((p) => ({ href: getRelativeLocaleUrl(lang, `/${p.key}`), label: c.footer[p.key] })),
+  ...legalPages
+    .filter((p) => p.key !== page)
+    .map((p) => ({ href: getRelativeLocaleUrl(lang, `/${p.key}`), label: p.label })),
 ];
 
 // Mono label style shared with the landing (Home.astro).
@@ -131,6 +144,7 @@ const railLabel =
         <div style="display:flex;align-items:center;gap:10px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--page-accent);"></span>{c.footer.brand}</div>
         <div style="display:flex;gap:22px;flex-wrap:wrap;">
           {footerLinks.map((l) => <a href={l.href}>{l.label}</a>)}
+          <a href={cookieHref} data-cookie-settings>{c.footer.cookies}</a>
           <a href={GITHUB} target="_blank" rel="noopener">{c.footer.source}</a>
           <a href={switchHref} aria-label={c.langSwitch.aria}>{c.langSwitch.label}</a>
         </div>

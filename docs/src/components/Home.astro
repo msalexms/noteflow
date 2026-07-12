@@ -18,6 +18,9 @@ const cliHref = getRelativeLocaleUrl(lang, '/cli');
 const aiHref = getRelativeLocaleUrl(lang, '/ai');
 const featuresHref = getRelativeLocaleUrl(lang, '/features');
 const pricingHref = getRelativeLocaleUrl(lang, '/pricing');
+// Legal pages (footer-only links, no data-nav — the synapse script doesn't know them).
+const privacyHref = getRelativeLocaleUrl(lang, '/privacy');
+const termsHref = getRelativeLocaleUrl(lang, '/terms');
 // Discreet ghost CTA style shared by the three docs links (echoes the hero CTA).
 const docsCta =
   "display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:13px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:11px 18px;border-radius:5px;";
@@ -489,7 +492,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
         </div>
         <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-top:clamp(60px,9vw,110px);padding-top:28px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);">
           <div style="display:flex;align-items:center;gap:10px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--detail);"></span>{t.download.footer.brand}</div>
-          <div style="display:flex;gap:22px;flex-wrap:wrap;"><a href="#brain" data-nav="brain">{t.download.footer.theBrain}</a><a href="#notes" data-nav="notes">{t.download.footer.notes}</a><a href={cliHref}>{t.download.footer.cliDocs}</a><a href={aiHref}>{t.download.footer.aiDocs}</a><a href={featuresHref}>{t.download.footer.featuresDocs}</a><a href={pricingHref}>{t.download.footer.pricingDocs}</a><a href={GITHUB} target="_blank" rel="noopener">{t.download.footer.source}</a><a href={asset('/mobile-privacy-policy.html')}>{t.download.footer.privacy}</a><a href={switchHref} aria-label={t.langSwitch.aria}>{t.langSwitch.label}</a></div>
+          <div style="display:flex;gap:22px;flex-wrap:wrap;"><a href="#brain" data-nav="brain">{t.download.footer.theBrain}</a><a href="#notes" data-nav="notes">{t.download.footer.notes}</a><a href={cliHref}>{t.download.footer.cliDocs}</a><a href={aiHref}>{t.download.footer.aiDocs}</a><a href={featuresHref}>{t.download.footer.featuresDocs}</a><a href={pricingHref}>{t.download.footer.pricingDocs}</a><a href={GITHUB} target="_blank" rel="noopener">{t.download.footer.source}</a><a href={privacyHref}>{t.download.footer.privacy}</a><a href={termsHref}>{t.download.footer.terms}</a><a href={privacyHref} data-cookie-settings>{t.download.footer.cookies}</a><a href={switchHref} aria-label={t.langSwitch.aria}>{t.langSwitch.label}</a></div>
           <div>{t.download.footer.copyright}</div>
         </div>
       </div>

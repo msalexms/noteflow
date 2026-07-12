@@ -192,8 +192,12 @@ export const en = {
       featuresDocs: 'Features',
       pricingDocs: 'Pricing',
       source: 'Source',
+      // Legal pages (/privacy, /terms).
       privacy: 'Privacy',
-      copyright: '© 2026 · Made for developers',
+      terms: 'Terms',
+      // Reopens the cookie consent banner (data-cookie-settings, handled in Base.astro).
+      cookies: 'Cookies',
+      copyright: '© 2026 · Made for people with taste',
     },
   },
 

@@ -1,0 +1,115 @@
+---
+// Shared renderer for the legal pages (/privacy and /terms) — both have the same
+// structure (summary callout + numbered prose sections), so PrivacyPage.astro and
+// TermsPage.astro are thin wrappers over this component. Legal pages live OUTSIDE
+// the DocsShell neuron rail (they are only linked from footers), so no rail neuron
+// is active here; the accent is the discreet cyan.
+import DocsShell from '../../layouts/DocsShell.astro';
+import { asset } from '../../lib/url';
+import type { LegalContent } from '../../i18n/docs/legal';
+import type { Lang } from '../../i18n';
+
+interface Props {
+  lang: Lang;
+  page: 'privacy' | 'terms';
+  t: LegalContent;
+}
+
+const { lang, page, t } = Astro.props;
+
+// %MOBILE_PRIVACY_URL% → base-aware link to the mobile policy (Play Store target,
+// served from public/; locale-independent).
+const mobilePrivacyUrl = asset('/mobile-privacy-policy.html');
+const fill = (s: string) => s.replace(/%MOBILE_PRIVACY_URL%/g, mobilePrivacyUrl);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebPage',
+  name: t.meta.title,
+  description: t.meta.description,
+  inLanguage: lang,
+  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+};
+---
+
+<DocsShell
+  lang={lang}
+  page={page}
+  accent="cyan"
+  title={t.meta.title}
+  description={t.meta.description}
+  kicker={t.hero.kicker}
+  h1={t.hero.h1}
+  tagline={t.hero.tagline}
+  toc={t.toc}
+  jsonLd={jsonLd}
+>
+  <div class="nf-legal">
+    <!-- Summary callout -->
+    <aside class="nf-legal-summary" data-reveal>
+      <h3>{t.summary.title}</h3>
+      <p set:html={t.summary.html} />
+    </aside>
+
+    <!-- Numbered sections -->
+    {t.sections.map((s) => (
+      <section id={s.id}>
+        <h2>{s.title}</h2>
+        {s.blocks.map((b) =>
+          b.t === 'p' ? (
+            <p class="nf-docs-p" set:html={fill(b.html)} />
+          ) : b.t === 'ul' ? (
+            <ul class="nf-docs-ul">
+              {b.items.map((li) => <li set:html={fill(li)} />)}
+            </ul>
+          ) : (
+            <table class="nf-ref-table">
+              <thead>
+                <tr>{b.head.map((h) => <th>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {b.rows.map((r) => (
+                  <tr>{r.map((cell) => <td>{cell}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          ),
+        )}
+      </section>
+    ))}
+  </div>
+</DocsShell>
+
+<style is:global>
+  /* ── Legal pages (/privacy, /terms) — long numbered prose, so the shared docs
+     section furniture is toned down: tighter spacing, smaller h2s. ── */
+  .nf-legal section[id] {
+    padding: clamp(26px, 4vw, 38px) 0 clamp(6px, 1.5vw, 12px);
+  }
+  .nf-legal section[id]:first-of-type { padding-top: clamp(18px, 3vw, 28px); }
+  .nf-legal section > h2 {
+    font-size: clamp(20px, 2.3vw, 25px);
+    letter-spacing: -.01em;
+  }
+
+  /* Summary callout (mirrors the pricing callout, on the page accent) */
+  .nf-legal-summary {
+    margin: clamp(10px, 2vw, 18px) 0 clamp(14px, 2.5vw, 22px);
+    padding: 18px 20px;
+    border: 1px solid var(--line-2);
+    border-left: 2px solid var(--page-accent);
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: 0 0 24px rgb(var(--cyan) / .07);
+  }
+  .nf-legal-summary h3 { margin: 0 0 8px; font-size: 16px; }
+  .nf-legal-summary p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-dim); }
+
+  /* Prose links underline with the page accent (pattern of the other docs pages) */
+  .nf-legal a, .nf-legal-summary a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--page-accent);
+    text-underline-offset: 3px;
+  }
+</style>

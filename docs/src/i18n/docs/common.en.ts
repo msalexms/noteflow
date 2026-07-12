@@ -22,8 +22,11 @@ export const commonEn = {
     ai: 'AI internals',
     features: 'Features',
     pricing: 'Pricing',
+    privacy: 'Privacy',
+    terms: 'Terms',
+    cookies: 'Cookies',
     source: 'GitHub',
-    copyright: '© 2026 · Made for developers',
+    copyright: '© 2026 · Made for people with taste',
   },
   copy: { idle: 'copy', done: 'copied', aria: 'Copy to clipboard' },
 };
