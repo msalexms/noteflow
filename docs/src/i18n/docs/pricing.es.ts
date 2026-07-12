@@ -7,7 +7,7 @@ export const pricingEs: PricingContent = {
   meta: {
     title: 'Precios de NoteFlow — gratis para siempre, con planes gestionados opcionales',
     description:
-      'NoteFlow es gratis y todo lo esencial lo seguirá siendo. Solo existen dos suscripciones opcionales, por pura comodidad — NoteFlow AI (LLM gestionado, ya disponible) y NoteFlow Cloud (nube E2EE, próximamente) — y ambas capacidades se consiguen gratis autogestionándolas.',
+      'NoteFlow es gratis y todo lo esencial lo seguirá siendo. Solo existen dos suscripciones opcionales, por pura comodidad — NoteFlow AI (LLM gestionado) y NoteFlow Cloud (nube cifrada gestionada), ambas ya disponibles — y ambas capacidades se consiguen gratis autogestionándolas.',
   },
 
   hero: {
@@ -80,9 +80,18 @@ export const pricingEs: PricingContent = {
       'openai/gpt-4.1-mini',
       'anthropic/claude-haiku-4.5',
       'google/gemini-2.5-flash',
+      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-pro',
+      'minimax/minimax-m3',
+    ],
+    modelsAdvancedTitle: 'Modelos avanzados — 6× de cuota',
+    modelsAdvanced: [
+      'anthropic/claude-sonnet-5',
+      'openai/gpt-5.2',
+      'google/gemini-3.5-flash',
     ],
     modelsNote:
-      'Todos los modelos curados soportan tool-calling (el agente) y visión (adjuntar imágenes).',
+      'Todos los modelos curados soportan tool-calling (el agente), y todos soportan visión (adjuntar imágenes) excepto los dos modelos DeepSeek, que son solo texto. Los modelos avanzados consumen la cuota mensual a <strong>razón de 6×</strong> — cada token cuenta como seis.',
     alt: {
       title: 'La vía gratuita a la misma capacidad',
       html: 'Ejecuta un modelo local con <strong>Ollama</strong> — nada sale nunca de tu máquina — o trae tu propia API key de cualquier proveedor soportado. Mismo chat, mismo agente, mismas funciones; solo que el modelo lo gestionas tú.',
@@ -90,15 +99,15 @@ export const pricingEs: PricingContent = {
   },
 
   cloud: {
-    badge: 'Próximamente',
-    title: 'NoteFlow Cloud — nube de notas E2EE',
+    badge: 'Ya disponible',
+    title: 'NoteFlow Cloud — nube de notas cifrada',
     intro: [
-      '<strong>NoteFlow Cloud</strong> es la sincronización gestionada que viene: sync en tiempo real entre dispositivos, sin la fricción de push/pull de un flujo basado en git.',
-      'Está <strong>cifrada de extremo a extremo por diseño</strong>: las notas se cifran en tu dispositivo y el servidor solo almacena ciphertext — ni siquiera el operador puede leerlas.',
+      '<strong>NoteFlow Cloud</strong> es la sincronización gestionada: sync automática y sin manos entre dispositivos, sin la fricción de push/pull de un flujo basado en git.',
+      'Tus notas van <strong>cifradas en tránsito y en reposo</strong>, y tú eliges el modelo de confianza: modo <strong>gestionado</strong> (el de por defecto — nada que recordar, inicias sesión y sincroniza solo) o <strong>cifrado de extremo a extremo privado</strong> (opt-in, se desbloquea con una passphrase más un código de recuperación, donde ni siquiera el operador puede leer tus notas).',
     ],
     bullets: [
-      'Tiempo real: los cambios se propagan mientras escribes — sin pulls periódicos ni pushes manuales.',
-      'E2EE total: las claves viven en tus dispositivos; el servidor nunca ve una nota legible.',
+      'Sync automática entre dispositivos — sin pushes manuales, sin esperar a un flujo de git.',
+      'Dos modos de cifrado: gestionado por defecto (cero secretos que guardar) u opt-in a E2EE estricto donde las claves nunca salen de tus dispositivos.',
       'Para quien no quiere crear y mantener un repo de GitHub solo para sincronizar notas.',
     ],
     alt: {
@@ -130,7 +139,7 @@ export const pricingEs: PricingContent = {
       },
       {
         capability: 'Sincronización de notas',
-        managed: '<strong>NoteFlow Cloud</strong> (próximamente) — tiempo real, cifrado de extremo a extremo',
+        managed: '<strong>NoteFlow Cloud</strong> — sync automática y cifrada (gestionada por defecto, o E2EE opt-in)',
         self: '<strong>GitHub Sync</strong> con tu propio repo privado',
       },
       {

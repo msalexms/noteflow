@@ -10,7 +10,7 @@ export const pricingEn = {
   meta: {
     title: 'NoteFlow pricing — free forever, plus optional managed plans',
     description:
-      'NoteFlow is free and everything essential stays free. Two optional subscriptions exist for convenience only — NoteFlow AI (managed LLM, available now) and NoteFlow Cloud (E2EE sync, coming soon) — and both capabilities can be had for free by self-managing.',
+      'NoteFlow is free and everything essential stays free. Two optional subscriptions exist for convenience only — NoteFlow AI (managed LLM) and NoteFlow Cloud (encrypted managed sync), both available now — and both capabilities can be had for free by self-managing.',
   },
 
   hero: {
@@ -83,9 +83,18 @@ export const pricingEn = {
       'openai/gpt-4.1-mini',
       'anthropic/claude-haiku-4.5',
       'google/gemini-2.5-flash',
+      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-pro',
+      'minimax/minimax-m3',
+    ],
+    modelsAdvancedTitle: 'Advanced models — 6× quota',
+    modelsAdvanced: [
+      'anthropic/claude-sonnet-5',
+      'openai/gpt-5.2',
+      'google/gemini-3.5-flash',
     ],
     modelsNote:
-      'All curated models support tool-calling (the agent) and vision (image attachments).',
+      'All curated models support tool-calling (the agent), and all support vision (image attachments) except the two DeepSeek models, which are text-only. Advanced models draw from the monthly quota at <strong>6× the rate</strong> — every token counts as six.',
     alt: {
       title: 'The free way to the same capability',
       html: 'Run a local model with <strong>Ollama</strong> — nothing ever leaves your machine — or bring your own API key from any supported provider. Same chat, same agent, same features; you just manage the model yourself.',
@@ -93,15 +102,15 @@ export const pricingEn = {
   },
 
   cloud: {
-    badge: 'Coming soon',
-    title: 'NoteFlow Cloud — E2EE note sync',
+    badge: 'Available now',
+    title: 'NoteFlow Cloud — encrypted note sync',
     intro: [
-      '<strong>NoteFlow Cloud</strong> is the upcoming managed sync: real-time sync between devices, with none of the push/pull friction of a git-based flow.',
-      'It is <strong>end-to-end encrypted by design</strong>: notes are encrypted on your device and the server only ever stores ciphertext — not even the operator can read them.',
+      '<strong>NoteFlow Cloud</strong> is managed sync: hands-off, automatic sync between devices, with none of the push/pull friction of a git-based flow.',
+      'Your notes are <strong>encrypted in transit and at rest</strong>, and you choose the trust model: <strong>managed</strong> mode (the default — nothing to remember, sign in and it just syncs) or <strong>private end-to-end encryption</strong> (opt-in, unlocked with a passphrase plus recovery code, where not even the operator can read your notes).',
     ],
     bullets: [
-      'Real-time: changes propagate as you write — no periodic pulls, no manual pushes.',
-      'Full E2EE: keys live on your devices; the server never sees a readable note.',
+      'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
+      'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
     ],
     alt: {
@@ -133,7 +142,7 @@ export const pricingEn = {
       },
       {
         capability: 'Note sync',
-        managed: '<strong>NoteFlow Cloud</strong> (coming soon) — real-time, end-to-end encrypted',
+        managed: '<strong>NoteFlow Cloud</strong> — automatic, encrypted sync (managed by default, or opt-in E2EE)',
         self: '<strong>GitHub Sync</strong> with your own private repo',
       },
       {

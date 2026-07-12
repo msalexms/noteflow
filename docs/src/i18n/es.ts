@@ -8,10 +8,10 @@ export const es: Content = {
   meta: {
     title: 'NoteFlow — Notas con cerebro',
     description:
-      'Un cuaderno de escritorio dark-first para desarrolladores. Markdown plano en tu disco, un grafo neuronal 3D de tus notas, chat con IA agéntica, una CLI headless y sync privado con GitHub. Gratis, open-source, para Windows y Linux.',
+      'Un cuaderno de escritorio dark-first para personas técnicas. Markdown plano en tu disco, un grafo neuronal 3D de tus notas, chat con IA agéntica, una CLI headless y sincroniza a tu manera — un repo privado de GitHub o la nube gestionada. Gratis y open-source, para Windows y Linux.',
   },
   jsonLdDescription:
-    'Un segundo cerebro local-first para desarrolladores: notas en markdown, un grafo neuronal 3D, chat con IA agéntica, una CLI headless y sync privado con GitHub.',
+    'Un segundo cerebro local-first para personas técnicas: notas en markdown, un grafo neuronal 3D, chat con IA agéntica, una CLI headless y sincroniza a tu manera — un repo privado de GitHub o la nube gestionada.',
 
   rail: {
     home: 'inicio',
@@ -27,7 +27,7 @@ export const es: Content = {
 
   hero: {
     kicker: 'NoteFlow · El Cerebro',
-    title: `Notas con<br />un <em style="font-style:italic;font-weight:500;">cerebro.</em>`,
+    title: `Notas con<br /><em style="font-style:italic;font-weight:500;">cerebro.</em>`,
     tagline: 'Nuestro nicho es la gente con buen gusto.',
     download: 'Descárgala gratis',
     cta: 'Explora el cerebro ↓',
@@ -37,7 +37,7 @@ export const es: Content = {
   notesSection: {
     kicker: 'Qué es NoteFlow',
     h2: 'Notas rápidas. Cero fricción.',
-    p: 'Un cuaderno de escritorio dark-first para desarrolladores. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y se mantiene fuera del camino hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
+    p: 'Un cuaderno de escritorio dark-first para personas técnicas. Vive en la bandeja del sistema, escribe Markdown plano en tu propio disco y se mantiene fuera del camino hasta que lo necesitas. El cerebro es opcional — la velocidad no.',
     modeRaw: 'Sección de markdown en crudo',
     modeRich: 'Sección de texto enriquecido',
     listAria: 'Funcionalidades de NoteFlow',

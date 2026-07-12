@@ -10,10 +10,10 @@ export const en = {
   meta: {
     title: 'NoteFlow — Notes with a brain',
     description:
-      'A dark-first desktop notebook for developers. Plain markdown on your disk, a 3D neural graph of your notes, agentic AI chat, a headless CLI, and private GitHub sync. Free, open-source, for Windows & Linux.',
+      'A dark-first desktop notebook for technical people. Plain markdown on your disk, a 3D neural graph of your notes, agentic AI chat, a headless CLI, and sync your way — a private GitHub repo or managed cloud. Free and open-source, for Windows & Linux.',
   },
   jsonLdDescription:
-    'A local-first second brain for developers: markdown notes, a 3D neural graph, agentic AI chat, a headless CLI, and private GitHub sync.',
+    'A local-first second brain for technical people: markdown notes, a 3D neural graph, agentic AI chat, a headless CLI, and sync your way — a private GitHub repo or managed cloud.',
 
   // Vertical neuron rail (left navigation).
   rail: {
@@ -41,7 +41,7 @@ export const en = {
   notesSection: {
     kicker: 'What is NoteFlow',
     h2: 'Quick notes. Zero friction.',
-    p: `A dark-first desktop notebook for developers. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.`,
+    p: `A dark-first desktop notebook for technical people. It lives in your system tray, writes plain Markdown to your own disk, and stays out of the way until you need it. The brain is optional — the speed isn't.`,
     modeRaw: 'Raw markdown section',
     modeRich: 'Rich text section',
     listAria: 'NoteFlow features',

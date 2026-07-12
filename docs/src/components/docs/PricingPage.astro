@@ -81,6 +81,10 @@ const kickerFor = (id: string) => {
     <div class="nf-model-chips">
       {t.ai.models.map((m) => <span class="nf-model-chip">{m}</span>)}
     </div>
+    <h3>{t.ai.modelsAdvancedTitle}</h3>
+    <div class="nf-model-chips">
+      {t.ai.modelsAdvanced.map((m) => <span class="nf-model-chip">{m}</span>)}
+    </div>
     <p class="nf-docs-p" set:html={t.ai.modelsNote} />
     <aside class="nf-pr-callout">
       <h3>{t.ai.alt.title}</h3>
@@ -91,7 +95,7 @@ const kickerFor = (id: string) => {
   <!-- ── NoteFlow Cloud ── -->
   <section id="cloud" data-reveal>
     <div class="nf-sec-head">{kickerFor('cloud')}</div>
-    <h2>{t.cloud.title} <span class="nf-plan-badge nf-plan-badge--soon">{t.cloud.badge}</span></h2>
+    <h2>{t.cloud.title} <span class="nf-plan-badge">{t.cloud.badge}</span></h2>
     {t.cloud.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
     <ul class="nf-docs-ul">
       {t.cloud.bullets.map((b) => <li set:html={b} />)}
@@ -182,12 +186,6 @@ const kickerFor = (id: string) => {
     box-shadow: 0 0 10px rgb(var(--pink) / .18);
     white-space: nowrap;
   }
-  .nf-plan-badge--soon {
-    border-color: var(--line-2);
-    color: var(--ink-faint);
-    box-shadow: none;
-  }
-
   /* Curated model chips */
   .nf-model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 14px; }
   .nf-model-chip {
