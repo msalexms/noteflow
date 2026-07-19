@@ -10,8 +10,10 @@
 //     technically read managed notes.
 //   - 'e2ee' (private, opt-in): setup generates DEK + recovery code and uploads
 //     the two passphrase/recovery-wrapped copies; unlock downloads them and
-//     unwraps locally; the server never sees the DEK. One-way upgrade
-//     managed → e2ee (upgradeCloudKeysToE2ee); no downgrade.
+//     unwraps locally; the server never sees the DEK. Switching modes is
+//     explicit and user-confirmed in both directions: managed → e2ee
+//     (upgradeCloudKeysToE2ee) and e2ee → managed
+//     (downgradeCloudKeysToManaged, which invalidates passphrase + recovery).
 // Crypto primitives live in cloudCrypto.ts (pure); REST follows the account.ts
 // pattern (plain fetch, a fresh access token per request via
 // account.getAccessToken()).
@@ -241,7 +243,7 @@ interface CloudKeysFnResponse {
 }
 
 /** POST to the cloud-keys Edge Function with a fresh access token (ai-proxy caller pattern). */
-async function callCloudKeysFn(route: 'setup' | 'unlock', body?: unknown): Promise<CloudKeysFnResponse> {
+async function callCloudKeysFn(route: 'setup' | 'unlock' | 'downgrade', body?: unknown): Promise<CloudKeysFnResponse> {
   const token = await account.getAccessToken()
   if (!token) throw new Error('not-signed-in')
   const res = await fetch(`${CLOUD_KEYS_URL}/${route}`, {
@@ -373,14 +375,15 @@ async function doAutoUnlockManaged(): Promise<boolean> {
 }
 
 /**
- * One-way upgrade managed → e2ee (private mode): wraps the CURRENT DEK with a
- * new passphrase KEK + a new recovery KEK and rewrites the user_keys row via
+ * Upgrade managed → e2ee (private mode): wraps the CURRENT DEK with a new
+ * passphrase KEK + a new recovery KEK and rewrites the user_keys row via
  * PostgREST (ownership RLS allows it), clearing dek_managed_ct. The DEK does
  * NOT change, so no file blob is re-encrypted — which also means notes synced
  * while in managed mode were potentially readable by the operator until now
  * (documented trade-off; DEK rotation would mean a full re-upload keyed by the
  * HMAC path_key and is out of scope). Returns the recovery code ONCE.
- * There is no downgrade back to managed.
+ * The reverse switch exists too (downgradeCloudKeysToManaged) — both are
+ * explicit, user-confirmed operations.
  */
 export async function upgradeCloudKeysToE2ee(
   passphrase: string
@@ -426,6 +429,39 @@ export async function upgradeCloudKeysToE2ee(
   } catch (err: unknown) {
     if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
     console.error('[CloudKeys] upgrade to e2ee failed:', String(err))
+    return { ok: false, error: NETWORK_ERROR }
+  }
+}
+
+/**
+ * Downgrade e2ee → managed (standard mode) — explicit and user-confirmed in
+ * the UI, never silent: deposits the CURRENT in-memory DEK in the cloud-keys
+ * Edge Function (same trust as the managed setup), which wraps it with the
+ * operator key and rewrites the row (mode 'managed', every passphrase/recovery
+ * column nulled — the old passphrase and recovery code STOP working; unlocking
+ * becomes session-automatic). The DEK does NOT change, so no file blob is
+ * re-encrypted; from now on the operator could technically read the notes
+ * (the honest managed trade-off, warned about before confirming).
+ * Requires the keys to be unlocked.
+ */
+export async function downgradeCloudKeysToManaged(): Promise<CloudKeysOpResult> {
+  if (!isCloudConfigured()) return { ok: false, error: 'NoteFlow Cloud is not available in this build.' }
+  if (!dek) return { ok: false, error: 'Cloud keys are locked. Try again in a moment.' }
+  if (keysMode !== 'e2ee') {
+    return { ok: false, error: 'This account already uses standard encryption.' }
+  }
+
+  try {
+    const res = await callCloudKeysFn('downgrade', { dek: toB64Url(dek) })
+    if (res.status >= 400) {
+      return { ok: false, error: fnErrorMessage(res.json, `Could not switch to standard mode (HTTP ${res.status}).`) }
+    }
+    setKeysMode('managed')
+    cacheDek() // the DEK is unchanged; refresh the cache in case it was missing
+    return { ok: true }
+  } catch (err: unknown) {
+    if (String(err).includes('not-signed-in')) return { ok: false, error: NOT_SIGNED_IN_ERROR }
+    console.error('[CloudKeys] downgrade to managed failed:', String(err))
     return { ok: false, error: NETWORK_ERROR }
   }
 }
@@ -569,4 +605,24 @@ export async function unlockCloudKeys(secret: string): Promise<CloudKeysOpResult
 export function lockCloudKeys(): void {
   dek = null
   patchCloudSection({ encryptedDek: undefined })
+}
+
+/**
+ * Sign-out teardown (main.ts / accountTransition.ts): everything this module
+ * knows is scoped to ONE account, so it all goes — the DEK and its cache (this
+ * machine must no longer be able to decrypt the notes), plus the two pieces of
+ * learned session state, `remoteKeysKnown` and `keysMode`, INCLUDING the
+ * persisted keysMode. Keeping them would poison the next account signing in on
+ * this machine, and a restart would NOT heal it (keysMode lives in
+ * settings.cloudSync): an account whose keys are managed, landing on a device
+ * left in 'e2ee', would be stuck forever on a passphrase form that
+ * autoUnlockManaged refuses to bypass and unlockCloudKeys refuses to accept;
+ * a stale `remoteKeysKnown === false` would push it into a setup form that ends
+ * in a 409. Both are re-learned in one round-trip by the next auto-unlock.
+ */
+export function resetCloudKeysSession(): void {
+  dek = null
+  remoteKeysKnown = null
+  keysMode = null
+  patchCloudSection({ encryptedDek: undefined, keysMode: undefined })
 }

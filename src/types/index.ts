@@ -319,6 +319,20 @@ export interface ActiveSyncStatus {
   cloud?: { keysState: CloudSyncStatus['keysState']; keysMode: CloudSyncStatus['keysMode'] }
 }
 
+// Synced appearance + editor settings — ui-settings.json at the root of the
+// notes dir (pushed/pulled by both sync backends like section-colors.json).
+// Mirror of UiSettings in electron/uiSettings.ts. Tri-state override keys
+// (appFont / accent / editorColors.*): ABSENT = never written (readers fall
+// back to legacy local sources), null = explicitly cleared ("follow theme"),
+// string = the override. `ui-settings:set` takes a PARTIAL patch merged in main.
+export interface UiSettings {
+  theme?: string
+  appFont?: string | null
+  accent?: string | null
+  editorColors?: Partial<Record<'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent', string | null>>
+  editor?: { fontSize?: number; fontFamily?: 'inter' | 'mono'; readableWidth?: boolean }
+}
+
 // Extend window with our electron bridge
 declare global {
   interface Window {
@@ -352,6 +366,8 @@ declare global {
       windowId: () => number
       getTheme: () => string | null
       setTheme: (id: string) => void
+      getUiSettings: () => UiSettings
+      setUiSettings: (patch: UiSettings) => Promise<void>
       getLanguage: () => 'en' | 'es' | 'system'
       setLanguage: (setting: 'en' | 'es' | 'system') => void
       onLanguageChanged: (cb: (setting: 'en' | 'es' | 'system') => void) => () => void
@@ -423,6 +439,7 @@ declare global {
       cloudSetup: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
       cloudSetupManaged: () => Promise<{ ok: boolean; error?: string }>
       cloudUpgradeE2ee: (passphrase: string) => Promise<{ ok: boolean; recoveryCode?: string; error?: string }>
+      cloudDowngradeManaged: () => Promise<{ ok: boolean; error?: string }>
       cloudUnlock: (secret: string) => Promise<{ ok: boolean; error?: string }>
       cloudAutoUnlock: () => Promise<{ ok: boolean }>
       cloudLock: () => Promise<{ ok: boolean }>

@@ -18,6 +18,12 @@ export interface LlmPresetState {
 export interface LlmConfigStored {
   active: string                                  // selected preset id
   byPreset: Record<string, LlmPresetState>
+  /**
+   * Last NON-managed preset that was active before switching to `noteflow`
+   * (see withActiveProvider). Lets a sign-out revert the assistant to the
+   * provider the user actually had, instead of the generic default.
+   */
+  lastByoProvider?: string
 }
 
 /** What kinds of attachments the active provider can ingest natively (no local processing). */

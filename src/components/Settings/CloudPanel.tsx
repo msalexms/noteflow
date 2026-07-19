@@ -4,12 +4,13 @@ import type { AccountStatus, CloudSyncStatus } from '../../types'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { settingsButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
 // the DEK so any reasonable floor works.
 const MIN_PASSPHRASE_LENGTH = 8
 
-type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade'
+type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade' | 'downgrade'
 
 // Settings → Sync → NoteFlow Cloud (encrypted sync, phase 4.2). Key material
 // never reaches this panel: it only exchanges the public CloudSyncStatus plus
@@ -17,8 +18,11 @@ type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade'
 //
 // Two encryption modes (keysMode): 'managed' (standard — the default; the key
 // is held server-side and unlocking is silent, so this panel NEVER asks a
-// managed user for a secret) and 'e2ee' (private — passphrase + recovery code,
-// with a one-way "switch to private mode" upgrade from managed).
+// managed user for a secret) and 'e2ee' (private — passphrase + recovery code).
+// Both switches live here and are explicit, confirmed operations: "switch to
+// private mode" (managed → e2ee) and "switch to standard mode" (e2ee →
+// managed, which invalidates the passphrase and recovery code — warned before
+// confirming, never silent).
 export function CloudPanel() {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
@@ -38,6 +42,8 @@ export function CloudPanel() {
   const [confirmPassphrase, setConfirmPassphrase] = useState('')
   // Managed → private upgrade form visibility (state: unlocked + managed).
   const [showUpgrade, setShowUpgrade] = useState(false)
+  // Private → standard downgrade confirmation visibility (state: unlocked + e2ee).
+  const [showDowngrade, setShowDowngrade] = useState(false)
   // Unlock form (state: locked + e2ee)
   const [secret, setSecret] = useState('')
   // Recovery code: local component state ONLY — never persisted anywhere. It is
@@ -128,6 +134,20 @@ export function CloudPanel() {
     }
   }
 
+  // e2ee → managed downgrade — no secrets involved (requires being unlocked);
+  // the amber notice above the confirm button carries the two warnings.
+  async function handleDowngrade() {
+    setBusy('downgrade')
+    setError(null)
+    const result = await window.noteflow.cloudDowngradeManaged()
+    setBusy('idle')
+    if (result.ok) {
+      setShowDowngrade(false)
+    } else {
+      setError(result.error ?? t.settings.cloud.downgradeFailed)
+    }
+  }
+
   async function handleUnlock() {
     const trimmed = secret.trim()
     if (!trimmed) return
@@ -185,13 +205,12 @@ export function CloudPanel() {
     })
   }
 
+  // No title here: the backend selector card in SyncPanel already names the
+  // panel (t.settings.cloud.title), so this is just the one-paragraph intro.
   const header = (
-    <div>
-      <p className="text-xs font-mono font-medium text-text">{t.settings.cloud.title}</p>
-      <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
-        {t.settings.cloud.desc}
-      </p>
-    </div>
+    <p className="text-[11px] font-mono text-text-muted max-w-md leading-relaxed">
+      {t.settings.cloud.desc}
+    </p>
   )
 
   // ── Initial status fetch ──
@@ -224,7 +243,7 @@ export function CloudPanel() {
     return (
       <div className="space-y-4">
         {header}
-        <div className="px-4 py-3 bg-yellow-500/10 border border-yellow-500/40 rounded space-y-3">
+        <div className="px-4 py-3 bg-yellow-500/10 border border-yellow-500/40 rounded-xl space-y-3">
           <div className="flex items-center gap-2">
             <ShieldAlert size={13} className="text-yellow-400 flex-shrink-0" />
             <span className="text-xs font-mono font-semibold text-yellow-400">
@@ -245,14 +264,14 @@ export function CloudPanel() {
           <div className="flex gap-2">
             <button
               onClick={handleCopyRecovery}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
             >
               {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
               {copied ? t.settings.cloud.copied : t.settings.cloud.copyCode}
             </button>
             <button
               onClick={() => setRecoveryCode(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
             >
               {t.settings.cloud.recoverySaved}
             </button>
@@ -282,7 +301,7 @@ export function CloudPanel() {
 
       {/* Error (local or engine syncError — e.g. an expired subscription) */}
       {(error || status.error) && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs font-mono text-red-400">
+        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-mono text-red-400">
           {error ?? status.error}
         </div>
       )}
@@ -299,7 +318,7 @@ export function CloudPanel() {
               type="button"
               onClick={() => setSetupMode('standard')}
               aria-pressed={setupMode === 'standard'}
-              className={`text-left p-3 rounded border transition-colors ${
+              className={`text-left p-3 rounded-xl border transition-colors ${
                 setupMode === 'standard' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
               }`}
             >
@@ -308,7 +327,7 @@ export function CloudPanel() {
                 <span className="text-xs font-mono font-semibold text-text">
                   {t.settings.cloud.modeStandardTitle}
                 </span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent/15 text-accent">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
                   {t.settings.cloud.modeStandardBadge}
                 </span>
               </div>
@@ -320,7 +339,7 @@ export function CloudPanel() {
               type="button"
               onClick={() => setSetupMode('private')}
               aria-pressed={setupMode === 'private'}
-              className={`text-left p-3 rounded border transition-colors ${
+              className={`text-left p-3 rounded-xl border transition-colors ${
                 setupMode === 'private' ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
               }`}
             >
@@ -340,7 +359,7 @@ export function CloudPanel() {
             <button
               onClick={handleSetupManaged}
               disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
               {t.settings.cloud.modeStandardEnable}
@@ -359,7 +378,7 @@ export function CloudPanel() {
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
                   disabled={isLoading}
-                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
                 />
               </div>
               <div>
@@ -372,13 +391,13 @@ export function CloudPanel() {
                   onChange={(e) => setConfirmPassphrase(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSetup() }}
                   disabled={isLoading}
-                  className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
                 />
               </div>
               <button
                 onClick={handleSetup}
                 disabled={isLoading || !passphrase || !confirmPassphrase}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {busy === 'setup' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
                 {t.settings.cloud.createPassphrase}
@@ -414,13 +433,13 @@ export function CloudPanel() {
               onChange={(e) => setSecret(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock() }}
               disabled={isLoading}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+              className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
             />
           </div>
           <button
             onClick={handleUnlock}
             disabled={isLoading || !secret.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy === 'unlock' ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
             {t.settings.cloud.unlock}
@@ -446,7 +465,7 @@ export function CloudPanel() {
             {/* Active encryption-mode badge (null on pre-dual-mode devices until
                 the next unlock backfills it — no badge is better than a wrong one) */}
             {status.keysMode !== null && (
-              <span className="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-text-muted">
+              <span className="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-md border border-border text-text-muted">
                 {status.keysMode === 'e2ee' ? <ShieldCheck size={10} /> : <Cloud size={10} />}
                 {status.keysMode === 'e2ee' ? t.settings.cloud.badgePrivate : t.settings.cloud.badgeStandard}
               </span>
@@ -461,7 +480,7 @@ export function CloudPanel() {
 
           {/* Pull result */}
           {pullResult && (
-            <div className={`px-3 py-2 rounded text-xs font-mono ${
+            <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
               pullResult.errors.length > 0
                 ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
                 : 'bg-green-500/10 border border-green-500/30 text-green-400'
@@ -477,7 +496,7 @@ export function CloudPanel() {
 
           {/* Mutual-exclusion heads-up shown BEFORE enabling Cloud over GitHub */}
           {!status.enabled && githubConnected && (
-            <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-[11px] font-mono text-yellow-400 leading-relaxed">
+            <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
               {t.settings.cloud.willPauseGitHub}
             </div>
           )}
@@ -494,7 +513,7 @@ export function CloudPanel() {
                   <button
                     onClick={handleSubscribe}
                     disabled={isLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
                   >
                     <Sparkles size={11} />
                     {t.settings.cloud.subscribe}
@@ -517,7 +536,7 @@ export function CloudPanel() {
                 <button
                   onClick={handlePull}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
                 >
                   {busy === 'pull' ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                   {t.settings.sync.syncNow}
@@ -525,7 +544,7 @@ export function CloudPanel() {
                 <button
                   onClick={handleDisable}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
                 >
                   <CloudOff size={11} />
                   {t.settings.cloud.disableSync}
@@ -536,7 +555,7 @@ export function CloudPanel() {
                 <button
                   onClick={handleEnable}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
                 >
                   {busy === 'toggle' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
                   {t.settings.cloud.enableSync}
@@ -550,7 +569,7 @@ export function CloudPanel() {
               <button
                 onClick={handleLock}
                 disabled={isLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
               >
                 <Lock size={11} />
                 {t.settings.cloud.lock}
@@ -558,14 +577,14 @@ export function CloudPanel() {
             )}
           </div>
 
-          {/* ── One-way Standard → Private upgrade (managed only) ── */}
+          {/* ── Standard → Private upgrade (managed only) ── */}
           {status.keysMode === 'managed' && (
             <div className="space-y-3 pt-3 border-t border-border">
               {!showUpgrade ? (
                 <button
                   onClick={() => { setShowUpgrade(true); setError(null) }}
                   disabled={isLoading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
                 >
                   <ShieldCheck size={11} />
                   {t.settings.cloud.switchToPrivate}
@@ -575,7 +594,7 @@ export function CloudPanel() {
                   <p className="text-[11px] font-mono text-text-muted leading-relaxed">
                     {t.settings.cloud.upgradeDesc}
                   </p>
-                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-[11px] font-mono text-yellow-400 leading-relaxed">
+                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
                     {t.settings.cloud.upgradeNotice}
                   </div>
                   <div>
@@ -587,7 +606,7 @@ export function CloudPanel() {
                       value={passphrase}
                       onChange={(e) => setPassphrase(e.target.value)}
                       disabled={isLoading}
-                      className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                      className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
                     />
                   </div>
                   <div>
@@ -600,14 +619,14 @@ export function CloudPanel() {
                       onChange={(e) => setConfirmPassphrase(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleUpgrade() }}
                       disabled={isLoading}
-                      className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+                      className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
                     />
                   </div>
                   <div className="flex gap-2">
                     <button
                       onClick={handleUpgrade}
                       disabled={isLoading || !passphrase || !confirmPassphrase}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {busy === 'upgrade' ? <Loader size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
                       {t.settings.cloud.upgradeSubmit}
@@ -620,7 +639,51 @@ export function CloudPanel() {
                         setError(null)
                       }}
                       disabled={isLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+                    >
+                      {t.common.cancel}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Private → Standard downgrade (e2ee only) — explicit confirmation,
+                 never silent: standard mode weakens the privacy guarantee and
+                 invalidates the passphrase + recovery code ── */}
+          {status.keysMode === 'e2ee' && (
+            <div className="space-y-3 pt-3 border-t border-border">
+              {!showDowngrade ? (
+                <button
+                  onClick={() => { setShowDowngrade(true); setError(null) }}
+                  disabled={isLoading}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+                >
+                  <Cloud size={11} />
+                  {t.settings.cloud.switchToStandard}
+                </button>
+              ) : (
+                <>
+                  <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+                    {t.settings.cloud.downgradeDesc}
+                  </p>
+                  <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+                    {t.settings.cloud.downgradeNotice}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleDowngrade}
+                      disabled={isLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {busy === 'downgrade' ? <Loader size={11} className="animate-spin" /> : <Cloud size={11} />}
+                      {t.settings.cloud.downgradeSubmit}
+                    </button>
+                    <button
+                      onClick={() => { setShowDowngrade(false); setError(null) }}
+                      disabled={isLoading}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
                     >
                       {t.common.cancel}
                     </button>

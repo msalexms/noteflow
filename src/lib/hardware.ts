@@ -11,22 +11,34 @@ export interface HardwareInfo {
 }
 
 // Decide whether real hardware looks low-powered enough to default the Brain view
-// to 2D. We flag low-end if ANY of these hold:
+// to 2D.
+//
+// HARD signals — any of these alone flags low-end:
 //   • RAM ≤ 4.5 GiB — genuinely memory-constrained.
 //   • ≤ 4 logical cores — few threads to spare for a 3D scene.
-//   • Parsed base clock < 2.0 GHz — low-power/ULV silicon even if it has many
-//     threads. We parse the base clock from the model string ("... @ 1.60GHz")
-//     because cpuSpeedMHz (os.cpus().speed) reports a fluctuating *current*
-//     frequency on Linux, not the nominal base clock, so it's unreliable here.
+//
+// WEAK signals — only count on an otherwise MODEST machine (see the gate below),
+// because on their own they misfire on modern laptops:
+//   • Parsed base clock < 2.0 GHz. We parse it from the model string
+//     ("... @ 1.60GHz") because cpuSpeedMHz (os.cpus().speed) reports a
+//     fluctuating *current* frequency on Linux, not the nominal base clock. A low
+//     advertised base clock says little by itself: recent parts (e.g. i7-1355U
+//     "@ 1.70GHz") boost way past it.
 //   • The model looks like a low-power laptop part (Intel U/Y suffix e.g. 8250U,
-//     AMD U-series e.g. 4700U). These throttle hard and pair with weak iGPUs even
-//     when core/thread counts look fine (e.g. 4C/8T).
-// The clock/ULV signals are what catch machines the coarse RAM/core checks miss
-// (e.g. an i5-8250U: 8 logical threads, ~8 GB) without falsely flagging a
-// high-clock desktop chip with plenty of RAM.
+//     AMD U-series e.g. 4700U). Older ULV chips throttle hard and pair with weak
+//     iGPUs, but a current ULV (e.g. Ryzen 7 7840U, 16 threads / 16 GiB) renders
+//     the 3D brain fine.
+//
+// MODEST gate: ≤ 8 logical cores AND ≤ 8.5 GiB RAM. Inside it a low base clock or
+// a ULV model tips the machine to 2D — that's what catches the i5-8250U class
+// (4C/8T, ~7.7 GiB) that the coarse RAM/core checks miss — while a well-specced
+// laptop or desktop keeps 3D regardless of its clock string or U suffix.
 export function isLowEndHardware(hw: HardwareInfo): boolean {
   if (hw.totalMemGiB <= 4.5) return true
   if (hw.logicalCores > 0 && hw.logicalCores <= 4) return true
+
+  const isModestMachine = hw.logicalCores <= 8 && hw.totalMemGiB <= 8.5
+  if (!isModestMachine) return false
 
   const baseClockGHz = parseBaseClockGHz(hw.cpuModel)
   if (baseClockGHz !== null && baseClockGHz < 2.0) return true

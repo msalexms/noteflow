@@ -66,14 +66,37 @@ describe('isLowEndHardware', () => {
     expect(isLowEndHardware(hw)).toBe(true)
   })
 
-  it('flags a low base clock even with many threads and RAM', () => {
+  it('flags a low base clock on a modest machine (8 threads, 8 GiB)', () => {
     const hw: HardwareInfo = {
       logicalCores: 8,
       cpuModel: 'Generic CPU @ 1.80GHz',
       cpuSpeedMHz: 1800,
-      totalMemGiB: 16,
+      totalMemGiB: 8,
     }
     expect(isLowEndHardware(hw)).toBe(true)
+  })
+
+  it('does NOT flag a low base clock once the machine is well specced', () => {
+    // A modern i7-1355U advertises "@ 1.70GHz" but boosts far past it: with 12
+    // threads and 16 GiB it runs the 3D brain fine.
+    const hw: HardwareInfo = {
+      logicalCores: 12,
+      cpuModel: '13th Gen Intel(R) Core(TM) i7-1355U @ 1.70GHz',
+      cpuSpeedMHz: 1700,
+      totalMemGiB: 16,
+    }
+    expect(isLowEndHardware(hw)).toBe(false)
+  })
+
+  it('does NOT flag a modern ULV laptop chip with many threads and RAM', () => {
+    // Ryzen 7 7840U: ULV suffix, but 16 threads / 16 GiB is plenty for 3D.
+    const hw: HardwareInfo = {
+      logicalCores: 16,
+      cpuModel: 'AMD Ryzen 7 7840U w/ Radeon 780M Graphics',
+      cpuSpeedMHz: 3300,
+      totalMemGiB: 16,
+    }
+    expect(isLowEndHardware(hw)).toBe(false)
   })
 
   it('does NOT flag a high-clock desktop chip with plenty of RAM', () => {
@@ -96,5 +119,23 @@ describe('isLowEndHardware', () => {
       totalMemGiB: 8,
     }
     expect(isLowEndHardware(hw)).toBe(false)
+  })
+
+  it('still flags tiny RAM or few cores regardless of the CPU model', () => {
+    const tinyRam: HardwareInfo = {
+      logicalCores: 16,
+      cpuModel: 'AMD Ryzen 7 7840U w/ Radeon 780M Graphics',
+      cpuSpeedMHz: 3300,
+      totalMemGiB: 4,
+    }
+    expect(isLowEndHardware(tinyRam)).toBe(true)
+
+    const fewCores: HardwareInfo = {
+      logicalCores: 4,
+      cpuModel: 'Intel(R) Core(TM) i7-12700K @ 3.60GHz',
+      cpuSpeedMHz: 3600,
+      totalMemGiB: 32,
+    }
+    expect(isLowEndHardware(fewCores)).toBe(true)
   })
 })

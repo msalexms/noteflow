@@ -15,6 +15,16 @@ export type NoteWritePayload = {
 
 export type FsResult = { ok: boolean; error?: string }
 
+// Synced appearance + editor settings (ui-settings.json at the root of the notes
+// dir). Mirror of UiSettings in electron/uiSettings.ts and src/types/index.ts.
+export type UiSettingsPayload = {
+  theme?: string
+  appFont?: string | null
+  accent?: string | null
+  editorColors?: Partial<Record<'h1' | 'h2' | 'h3' | 'italic' | 'inlineCode' | 'codeAccent', string | null>>
+  editor?: { fontSize?: number; fontFamily?: 'inter' | 'mono'; readableWidth?: boolean }
+}
+
 const api = {
   // Identification
   windowId: (): number => ipcRenderer.sendSync('window:get-id'),
@@ -45,6 +55,11 @@ const api = {
   // Settings
   getTheme: (): string | null => ipcRenderer.sendSync('settings:get-theme'),
   setTheme: (id: string)      => ipcRenderer.send('settings:set-theme', id),
+  // Synced UI settings (ui-settings.json). Sync read on purpose: initTheme()
+  // needs it before the first paint to avoid a theme flash.
+  getUiSettings: (): UiSettingsPayload => ipcRenderer.sendSync('ui-settings:get'),
+  // Partial patch — main merges it over what is on disk (see ui-settings:set).
+  setUiSettings: (patch: UiSettingsPayload): Promise<void> => ipcRenderer.invoke('ui-settings:set', patch),
   getLanguage: (): 'en' | 'es' | 'system' => ipcRenderer.sendSync('settings:get-language'),
   setLanguage: (setting: 'en' | 'es' | 'system') => ipcRenderer.send('settings:set-language', setting),
   onLanguageChanged: (callback: (setting: 'en' | 'es' | 'system') => void) => {
@@ -241,9 +256,13 @@ const api = {
   // Managed (standard) mode setup — no passphrase, no recovery code.
   cloudSetupManaged: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('cloud:setup-managed'),
-  // One-way managed → e2ee upgrade; returns the new recovery code ONCE.
+  // Managed → e2ee upgrade; returns the new recovery code ONCE.
   cloudUpgradeE2ee: (passphrase: string): Promise<{ ok: boolean; recoveryCode?: string; error?: string }> =>
     ipcRenderer.invoke('cloud:upgrade-e2ee', passphrase),
+  // e2ee → managed downgrade (explicit, UI-confirmed; passphrase + recovery
+  // code stop working). Requires the keys to be unlocked.
+  cloudDowngradeManaged: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('cloud:downgrade-managed'),
   cloudUnlock: (secret: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('cloud:unlock', secret),
   // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).

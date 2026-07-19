@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Cloud, CloudOff, ExternalLink, Github, Loader, Pause, RefreshCw, Unlink } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { CloudPanel } from './CloudPanel'
+import { settingsButtonClass } from './ui'
 
 interface SyncStatus {
   enabled: boolean
@@ -16,40 +17,153 @@ interface SyncStatus {
 
 type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling'
 
-// The Sync page: NoteFlow Cloud (E2EE, paid) on top, GitHub Sync (free)
-// below. The two backends are mutually exclusive — Cloud takes priority in
-// electron/syncProvider.ts; here we only surface that visually.
+type Backend = 'cloud' | 'github'
+
+// The Sync page: pick ONE backend — NoteFlow Cloud (encrypted, paid) or GitHub
+// Sync (free) — and configure it below. The two are mutually exclusive: Cloud
+// takes priority in electron/syncProvider.ts and pauses GitHub while enabled;
+// here we surface that choice as a two-card selector.
 export function SyncPanel() {
   const t = useT()
   const [cloudEnabled, setCloudEnabled] = useState(false)
+  const [cloudSignedIn, setCloudSignedIn] = useState(false)
+  const [githubConnected, setGithubConnected] = useState(false)
+  // null until both statuses land: the selector preselects the backend that is
+  // actually in use, and only then. It is resolved once — a later status change
+  // (enabling Cloud, disconnecting GitHub) must never move the user off the
+  // panel they are on.
+  const [backend, setBackend] = useState<Backend | null>(null)
 
   useEffect(() => {
-    window.noteflow.getCloudStatus().then((s) => setCloudEnabled(s.enabled))
-    return window.noteflow.onCloudStatusChanged((s) => setCloudEnabled(s.enabled))
+    Promise.all([window.noteflow.getCloudStatus(), window.noteflow.getSyncStatus()]).then(
+      ([cloud, github]) => {
+        setCloudEnabled(cloud.enabled)
+        setCloudSignedIn(cloud.signedIn)
+        setGithubConnected(github.connected)
+        setBackend(cloud.enabled || !github.connected ? 'cloud' : 'github')
+      },
+    )
+    const offCloud = window.noteflow.onCloudStatusChanged((s) => {
+      setCloudEnabled(s.enabled)
+      setCloudSignedIn(s.signedIn)
+    })
+    // Signing out turns Cloud sync off in main (electron/accountTransition.ts),
+    // so both statuses move together — but listen to the account too, so the
+    // badge can never claim "Active" while the session is gone.
+    const offAccount = window.noteflow.onAccountStatusChanged((s) => setCloudSignedIn(s.signedIn))
+    return () => {
+      offCloud()
+      offAccount()
+    }
   }, [])
+
+  if (backend === null) {
+    return (
+      <div className="flex items-center gap-2 text-text-muted">
+        <Loader size={12} className="animate-spin" />
+        <span className="text-xs font-mono">{t.common.loading}</span>
+      </div>
+    )
+  }
+
+  // GitHub keeps its config while Cloud owns the sync loop — that is "paused",
+  // not "disconnected".
+  const githubBadge = !githubConnected
+    ? { label: t.settings.sync.notConnected, className: 'border border-border text-text-muted' }
+    : cloudEnabled
+      ? { label: t.settings.sync.badgePaused, className: 'bg-yellow-500/15 text-yellow-400' }
+      : { label: t.settings.sync.badgeActive, className: 'bg-green-500/15 text-green-400' }
+
+  // Cloud is only really syncing with a session behind it (the engine needs the
+  // account's JWT for every request), so the badge derives from both flags — it
+  // must not be able to lie even if the two ever drift apart.
+  const cloudBadge = cloudEnabled && cloudSignedIn
+    ? { label: t.settings.sync.badgeActive, className: 'bg-green-500/15 text-green-400' }
+    : { label: t.settings.sync.badgeInactive, className: 'border border-border text-text-muted' }
 
   return (
     <div className="space-y-6">
-      <section>
-        <CloudPanel />
-      </section>
+      <div className="space-y-3">
+        <p className="text-[11px] font-mono text-text-muted max-w-md leading-relaxed">
+          {t.settings.sync.chooseBackendDesc}
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <BackendCard
+            icon={<Cloud size={12} className={backend === 'cloud' ? 'text-accent' : 'text-text-muted'} />}
+            title={t.settings.cloud.title}
+            desc={t.settings.sync.cloudCardDesc}
+            badge={cloudBadge}
+            selected={backend === 'cloud'}
+            onSelect={() => setBackend('cloud')}
+          />
+          <BackendCard
+            icon={<Github size={12} className={backend === 'github' ? 'text-accent' : 'text-text-muted'} />}
+            title={t.settings.sync.githubTitle}
+            desc={t.settings.sync.githubCardDesc}
+            badge={githubBadge}
+            selected={backend === 'github'}
+            onSelect={() => setBackend('github')}
+          />
+        </div>
+      </div>
 
-      <section className="pt-5 border-t border-border space-y-4">
-        <p className="text-xs font-mono font-medium text-text">{t.settings.sync.githubTitle}</p>
-        {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}
-        {cloudEnabled && (
-          <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-[11px] font-mono text-yellow-400 leading-relaxed">
-            <Pause size={12} className="flex-shrink-0 mt-0.5" />
-            <span>{t.settings.sync.pausedByCloud}</span>
+      <section>
+        {backend === 'cloud' ? (
+          <CloudPanel />
+        ) : (
+          <div className="space-y-4">
+            {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}
+            {cloudEnabled && (
+              <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
+                <Pause size={12} className="flex-shrink-0 mt-0.5" />
+                <span>{t.settings.sync.pausedByCloud}</span>
+              </div>
+            )}
+            <GitHubSyncSection onConnectedChange={setGithubConnected} />
           </div>
         )}
-        <GitHubSyncSection />
       </section>
     </div>
   )
 }
 
-function GitHubSyncSection() {
+function BackendCard({
+  icon,
+  title,
+  desc,
+  badge,
+  selected,
+  onSelect,
+}: {
+  icon: ReactNode
+  title: string
+  desc: string
+  badge: { label: string; className: string }
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`text-left p-3 rounded-xl border transition-colors ${
+        selected ? 'border-accent bg-accent/[0.08]' : 'border-border hover:bg-surface-2'
+      }`}
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        {icon}
+        <span className="text-xs font-mono font-semibold text-text">{title}</span>
+        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${badge.className}`}>
+          {badge.label}
+        </span>
+      </div>
+      <p className="text-[11px] font-mono text-text-muted mt-1.5 leading-relaxed">{desc}</p>
+    </button>
+  )
+}
+
+function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connected: boolean) => void }) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
@@ -64,6 +178,12 @@ function GitHubSyncSection() {
   useEffect(() => {
     window.noteflow.getSyncStatus().then(setStatus)
   }, [])
+
+  // Keep the selector badge in sync: main only broadcasts sync:status-changed
+  // for the initial pull, so connect/disconnect is reported from here.
+  useEffect(() => {
+    if (status) onConnectedChange(status.connected)
+  }, [status, onConnectedChange])
 
   // Listen for auth completion from main process
   useEffect(() => {
@@ -172,14 +292,14 @@ function GitHubSyncSection() {
 
       {/* Error */}
       {(error || status?.error) && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs font-mono text-red-400">
+        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-mono text-red-400">
           {error ?? status?.error}
         </div>
       )}
 
       {/* Pull result */}
       {pullResult && (
-        <div className={`px-3 py-2 rounded text-xs font-mono ${
+        <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
           pullResult.errors.length > 0
             ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
             : 'bg-green-500/10 border border-green-500/30 text-green-400'
@@ -224,14 +344,14 @@ function GitHubSyncSection() {
           <div className="flex gap-2">
             <button
               onClick={() => window.noteflow.openUrl(verificationUri ?? 'https://github.com/login/device')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors"
             >
               <ExternalLink size={11} />
               {t.settings.sync.openBrowser}
             </button>
             <button
               onClick={handleCancel}
-              className="px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors"
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
             >
               {t.common.cancel}
             </button>
@@ -253,7 +373,7 @@ function GitHubSyncSection() {
           <button
             onClick={handlePull}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
           >
             {step === 'pulling' ? (
               <Loader size={11} className="animate-spin" />
@@ -265,7 +385,7 @@ function GitHubSyncSection() {
           <button
             onClick={handleDisconnect}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
           >
             <Unlink size={11} />
             {t.settings.sync.disconnect}
@@ -289,7 +409,7 @@ function GitHubSyncSection() {
               onChange={(e) => setRepo(e.target.value)}
               placeholder="noteflow-notes"
               disabled={isLoading}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+              className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
             />
             <p className="text-[11px] font-mono text-text-muted/60 mt-1">
               {t.settings.sync.repoHint}
@@ -298,7 +418,7 @@ function GitHubSyncSection() {
           <button
             onClick={handleInitiate}
             disabled={isLoading || !repo.trim()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {step === 'waiting-auth' && !userCode ? (
               <Loader size={11} className="animate-spin" />

@@ -25,11 +25,20 @@ import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
 import { getActiveSyncProvider, getActiveSyncStatus, type SyncPullResult } from './syncProvider'
 import * as account from './account'
+import {
+  planAccountTransition,
+  parseAccountRestore,
+  clearRestoreSurface,
+  type AccountRestoreRecord,
+  type AccountTransitionPlan,
+  type RestoreSurface,
+} from './accountTransition'
 import { LEMONSQUEEZY_CHECKOUT_URLS, AI_PROXY_URL } from './cloudConfig'
 import * as aiIndex from './ai/aiIndex'
 import * as llm from './ai/llm'
 import * as agentTools from './ai/llm/tools'
 import * as noteFormat from './noteFormat'
+import { sanitizeUiSettings, mergeUiSettings, type UiSettings } from './uiSettings'
 import * as importers from './importers'
 import { migrateNotesDirToV2 } from './migration'
 import { resolveLang, getTrayMessages, getMessages, type LanguageSetting } from './i18n'
@@ -187,6 +196,85 @@ function emitAccountStatusChanged(): void {
 let aiEntitlementBaseline: boolean | null = null
 let aiEntitlementIdentity: string | null = null
 
+// Last observed account snapshot — the "previous" side of the sign-in/sign-out
+// edge that planAccountTransition() reasons about. Seeded at boot from the
+// persisted session (app.whenReady), so a session restored from disk is NOT
+// seen as a sign-in transition.
+let lastAccountSnapshot: { signedIn: boolean; identity: string | null } = { signedIn: false, identity: null }
+
+function accountIdentityOf(status: account.AccountStatus): string | null {
+  return status.signedIn ? (status.email ?? null) : null
+}
+
+// Small non-secret record of what the signing-out session had enabled, so that
+// signing back in with the SAME identity puts it back (see accountTransition.ts).
+function readAccountRestore(): AccountRestoreRecord | null {
+  return parseAccountRestore(readSettings().accountRestore)
+}
+
+function writeAccountRestore(record: AccountRestoreRecord | null): void {
+  const settings = readSettings()
+  if (record) settings.accountRestore = record
+  else delete settings.accountRestore
+  writeSettings(settings)
+}
+
+/**
+ * An explicit user action on a paid surface (Cloud enable/disable, switching the
+ * LLM provider) overrules the pending restore record for that surface — the app
+ * must never flip a live decision back behind the user's back when the deferred
+ * entitlements finally land. See clearRestoreSurface.
+ */
+function dropRestoreSurface(surface: RestoreSurface): void {
+  const next = clearRestoreSurface(readAccountRestore(), account.getAccountStatus().signedIn, surface)
+  if (next !== undefined) writeAccountRestore(next)
+}
+
+// Applies the plan of accountTransition.ts: tear the paid subsystems down on
+// sign-out (Cloud off, DEK dropped, assistant back to a BYO/local provider) and
+// put them back on a matching sign-in. Every branch is a no-op unless the plan
+// asked for it, so this runs on every account status change.
+function applyAccountTransition(plan: AccountTransitionPlan): void {
+  let cloudChanged = false
+
+  if (plan.disableCloud) {
+    // Keeps lastSync/pullCursor/journal — re-enabling resumes incrementally.
+    // Releases the mutual exclusion too: GitHub Sync resumes on its next tick.
+    cloudSync.disableCloudSync()
+    stopCloudAutoSync()
+    cloudChanged = true
+  }
+  if (plan.resetKeys) {
+    // Not just lockCloudKeys(): the LEARNED key state (remoteKeysKnown, keysMode)
+    // belongs to the session that is leaving — see cloudKeys.resetCloudKeysSession.
+    cloudKeys.resetCloudKeysSession()
+    cloudChanged = true
+  }
+  if (plan.enableCloud) {
+    // No initial pull from here: the DEK is null by construction on this path
+    // (the sign-out dropped it and its cache), so pulling now would only set
+    // syncError = "Cloud keys are locked". runCloudSyncCycle does it in the
+    // right order — managed auto-unlock → drain journal → pull.
+    const res = cloudSync.enableCloudSync()
+    if (res.ok) {
+      startCloudAutoSync()
+      runCloudSyncCycle().catch((err) => console.error('[Cloud] restore sync cycle failed:', String(err)))
+    }
+    cloudChanged = true
+  }
+  if (plan.setAiProvider) {
+    const cfg = readLlmSettings()
+    if (cfg.active !== plan.setAiProvider) {
+      writeLlmSettings(llm.withActiveProvider(cfg, plan.setAiProvider))
+    }
+  }
+  if (plan.restore !== undefined) writeAccountRestore(plan.restore)
+
+  // lockCloudKeys()/enable+disable don't all emit by themselves — one broadcast
+  // covers the lot (and reconciles the Realtime subscription).
+  if (cloudChanged) emitCloudStatusChanged()
+}
+
 function handleAccountStatusChanged(): void {
   const status = account.getAccountStatus()
   const identity = status.signedIn ? (status.email ?? '') : null
@@ -203,14 +291,37 @@ function handleAccountStatusChanged(): void {
     // Written BEFORE the broadcast below so the renderer's config reload (LlmConfigView reacts
     // to onAccountStatusChanged) already sees the new active provider.
     const cfg = readLlmSettings()
-    if (cfg.active !== 'noteflow') {
-      cfg.active = 'noteflow'
-      writeLlmSettings(cfg)
-    }
+    if (cfg.active !== 'noteflow') writeLlmSettings(llm.withActiveProvider(cfg, 'noteflow'))
     aiEntitlementBaseline = aiActive
   } else {
     aiEntitlementBaseline = identity === null ? null : aiActive
   }
+
+  // Sign-out teardown / sign-in restore of the paid subsystems. Read AFTER the
+  // auto-switch above so the plan sees the current provider; both paths write
+  // BEFORE the broadcast below, so the renderer reloads with the final state.
+  // (The two never collide: the auto-switch only fires for the SAME identity,
+  // the restore only for a matching record on a fresh sign-in.)
+  const previous = lastAccountSnapshot
+  lastAccountSnapshot = { signedIn: status.signedIn, identity: accountIdentityOf(status) }
+  const llmCfg = readLlmSettings()
+  applyAccountTransition(
+    planAccountTransition(
+      previous,
+      {
+        signedIn: status.signedIn,
+        identity: accountIdentityOf(status),
+        entitlements: status.entitlements,
+        entitlementsKnown: !!status.entitlementsFetchedAt,
+      },
+      {
+        cloudEnabled: cloudSync.isCloudSyncEnabled(),
+        aiManaged: llmCfg.active === 'noteflow',
+        aiFallbackProvider: llm.byoFallbackProvider(llmCfg),
+        restore: readAccountRestore(),
+      }
+    )
+  )
 
   // Managed cloud keys unlock silently as soon as a session exists (fresh
   // sign-in, or account events on a restored one). No-op for e2ee / no-keys /
@@ -449,6 +560,7 @@ const FOLDERS_FILE = path.join(NOTES_DIR, 'folders.json')
 const SECTION_COLORS_FILE = path.join(NOTES_DIR, 'section-colors.json')
 const NOTE_ORDER_FILE = path.join(NOTES_DIR, 'note-order.json')
 const TEMPLATES_FILE = path.join(NOTES_DIR, 'templates.json')
+const UI_SETTINGS_FILE = path.join(NOTES_DIR, 'ui-settings.json')
 const SECTION_COLOR_VALUES = new Set([
   '--accent',
   '--accent-2',
@@ -492,6 +604,7 @@ const RESERVED_ROOT_NAMES = new Set([
   'section-colors.json',
   'note-order.json',
   'templates.json',
+  'ui-settings.json',
   'README.md',
   noteFormat.FORMAT_MARKER_FILE,
 ])
@@ -1717,9 +1830,17 @@ ipcMain.handle('cloud:setup-managed', async () => {
   return res
 })
 
-// One-way upgrade managed → e2ee. Returns the new recovery code ONCE.
+// Upgrade managed → e2ee. Returns the new recovery code ONCE.
 ipcMain.handle('cloud:upgrade-e2ee', async (_event, passphrase: string) => {
   const res = await cloudKeys.upgradeCloudKeysToE2ee(passphrase)
+  emitCloudStatusChanged()
+  return res
+})
+
+// Downgrade e2ee → managed (explicit, confirmed in the UI — never silent).
+// The old passphrase and recovery code stop working after this.
+ipcMain.handle('cloud:downgrade-managed', async () => {
+  const res = await cloudKeys.downgradeCloudKeysToManaged()
   emitCloudStatusChanged()
   return res
 })
@@ -1750,8 +1871,9 @@ ipcMain.handle('cloud:lock', () => {
 // Enabling Cloud takes over from GitHub Sync (mutually exclusive — see
 // syncProvider.ts): the GitHub autosync stands down and the cloud autosync
 // (Realtime + safety-net loop) starts, kicking an initial pull (which flushes
-// local changes after).
-ipcMain.handle('cloud:enable', () => {
+// local changes after). Shared by the IPC below and the sign-in restore path
+// (applyAccountTransition).
+function enableCloudSyncWithInitialPull(): { ok: boolean; error?: string } {
   const res = cloudSync.enableCloudSync()
   if (res.ok) {
     startCloudAutoSync()
@@ -1763,6 +1885,12 @@ ipcMain.handle('cloud:enable', () => {
       })
       .catch((err) => console.error('[Cloud] initial pull failed:', String(err)))
   }
+  return res
+}
+
+ipcMain.handle('cloud:enable', () => {
+  const res = enableCloudSyncWithInitialPull()
+  dropRestoreSurface('cloud')
   emitCloudStatusChanged()
   return res
 })
@@ -1770,6 +1898,7 @@ ipcMain.handle('cloud:enable', () => {
 ipcMain.handle('cloud:disable', () => {
   const res = cloudSync.disableCloudSync()
   stopCloudAutoSync()
+  dropRestoreSurface('cloud')
   emitCloudStatusChanged()
   return res
 })
@@ -1871,9 +2000,15 @@ ipcMain.handle('ai:llm-presets', () => llm.PRESETS)
 ipcMain.handle('ai:llm-set-config', (_event, patch: {
   active?: string; model?: string; baseUrl?: string; apiKey?: string; clearKey?: boolean
 }) => {
-  const cfg = readLlmSettings()
+  let cfg = readLlmSettings()
   cfg.byPreset = { ...cfg.byPreset }
-  if (patch.active !== undefined) cfg.active = patch.active
+  // withActiveProvider remembers the BYO provider being left behind when the
+  // managed plan takes over — a later sign-out reverts to it. Picking a provider
+  // by hand is also an explicit decision that overrules a pending restore.
+  if (patch.active !== undefined) {
+    cfg = llm.withActiveProvider(cfg, patch.active)
+    dropRestoreSurface('ai')
+  }
   // All field edits apply to the ACTIVE preset, so each provider keeps its own key/model/baseUrl.
   const id = cfg.active
   const ps = { ...(cfg.byPreset[id] ?? {}) }
@@ -2593,9 +2728,10 @@ ipcMain.on('settings:set-theme', (_event, themeId: string) => {
   writeSettings(settings)
 })
 
-// Language is a local (non-synced) setting, like the theme. Setting it persists,
-// refreshes the tray in the new language, and broadcasts to every window (incl.
-// the sender and any open stickies) so the UI switches live without a reload.
+// Language is a local (non-synced, per-device) setting — unlike the theme, which
+// now travels in ui-settings.json. Setting it persists, refreshes the tray in the
+// new language, and broadcasts to every window (incl. the sender and any open
+// stickies) so the UI switches live without a reload.
 ipcMain.on('settings:get-language', (event) => {
   event.returnValue = readSettings().language ?? 'system'
 })
@@ -2832,6 +2968,39 @@ ipcMain.handle('section-colors:set', (event, colors: unknown) => {
   getActiveSyncProvider().schedulePush('section-colors.json', content)
 })
 
+// ── UI settings (ui-settings.json) ─────────────────────────────────────────────
+// Synced appearance + editor settings (see electron/uiSettings.ts for the format
+// and the tri-state override semantics). Same pattern as section-colors: the file
+// lives at the root of the notes dir so both sync backends push/pull it.
+
+function readUiSettingsFile(): UiSettings {
+  try {
+    return sanitizeUiSettings(JSON.parse(fs.readFileSync(UI_SETTINGS_FILE, 'utf-8')))
+  } catch {
+    return {}
+  }
+}
+
+// Synchronous on purpose: themeStore.initTheme() needs it before the first paint
+// (same reason settings:get-theme is a sendSync channel).
+ipcMain.on('ui-settings:get', (event) => {
+  event.returnValue = readUiSettingsFile()
+})
+
+// Receives a PARTIAL patch and merges it over what is on disk, so themeStore
+// (appearance) and editorSettingsStore (editor) never clobber each other's slice.
+ipcMain.handle('ui-settings:set', (event, patch: unknown) => {
+  const merged = mergeUiSettings(readUiSettingsFile(), patch)
+  const content = JSON.stringify(merged, null, 2)
+  fs.writeFileSync(UI_SETTINGS_FILE, content, 'utf-8')
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('notes-updated')
+    }
+  })
+  getActiveSyncProvider().schedulePush('ui-settings.json', content)
+})
+
 ipcMain.handle('note-order:get', () => {
   try {
     return JSON.parse(fs.readFileSync(NOTE_ORDER_FILE, 'utf-8'))
@@ -2974,6 +3143,14 @@ app.whenReady().then(async () => {
   // the background (deferred inside initAccount — never blocks boot).
   account.onStatusChanged(() => handleAccountStatusChanged())
   account.initAccount()
+  // Seed the sign-in/sign-out edge detector with the session as restored from
+  // disk: a persisted session is NOT a sign-in transition (a pending restore
+  // record still gets evaluated on the first status change — see
+  // planAccountTransition).
+  lastAccountSnapshot = (() => {
+    const status = account.getAccountStatus()
+    return { signedIn: status.signedIn, identity: accountIdentityOf(status) }
+  })()
 
   const isStartupMode = process.argv.includes('--noteflow-startup')
   const startupStickies = (readSettings().startupStickies ?? []) as Array<{ noteId: string; sectionId: string }>

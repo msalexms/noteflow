@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNotesStore } from '../stores/notesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
+import { useThemeStore } from '../stores/themeStore'
+import { useEditorSettingsStore } from '../stores/editorSettingsStore'
 import { resolveColorVar } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
@@ -193,6 +195,10 @@ export function StickyApp() {
         useNotesStore.getState().syncNote(filePath)
       } else {
         loadNotes()
+        // Synced appearance/editor settings — keep stickies visually in step
+        // with the main window / other devices. Read-only, so no loop.
+        useThemeStore.getState().reloadUiSettings()
+        useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
 

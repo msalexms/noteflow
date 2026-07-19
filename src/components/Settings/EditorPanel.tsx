@@ -2,6 +2,7 @@ import { modKey } from '../../lib/platform'
 import { useEditorSettingsStore } from '../../stores/editorSettingsStore'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { settingsButtonClass } from './ui'
 
 export function EditorPanel() {
   const { fontSize, changeFontSize, resetFontSize, fontFamily, setFontFamily, readableWidth, setReadableWidth } =
@@ -9,27 +10,27 @@ export function EditorPanel() {
   const t = useT()
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Font size */}
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.editor.fontSize}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">{t.settings.editor.fontSizeHint}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.fontSizeHint}</p>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={() => changeFontSize(-1)}
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+            className={`w-7 h-7 flex items-center justify-center rounded-md ${settingsButtonClass}`}
             title={tf(t.settings.editor.decrease, { keys: `${modKey}+-` })}
           >−</button>
           <button
             onClick={resetFontSize}
-            className="w-12 h-7 text-center rounded-md border border-border text-text hover:bg-surface-2 transition-colors text-xs font-mono"
+            className={`w-12 h-7 text-center rounded-md text-xs font-mono ${settingsButtonClass}`}
             title={tf(t.settings.editor.reset, { keys: `${modKey}+0` })}
           >{fontSize}px</button>
           <button
             onClick={() => changeFontSize(1)}
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors"
+            className={`w-7 h-7 flex items-center justify-center rounded-md ${settingsButtonClass}`}
             title={tf(t.settings.editor.increase, { keys: `${modKey}++` })}
           >+</button>
         </div>
@@ -39,7 +40,7 @@ export function EditorPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.editor.editorFont}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">{t.settings.editor.editorFontHint}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.editorFontHint}</p>
         </div>
         <button
           onClick={() => setFontFamily(fontFamily === 'mono' ? 'inter' : 'mono')}
@@ -55,7 +56,7 @@ export function EditorPanel() {
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.editor.contentWidth}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">{t.settings.editor.contentWidthHint}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.editor.contentWidthHint}</p>
         </div>
         <button
           onClick={() => setReadableWidth(!readableWidth)}

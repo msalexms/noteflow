@@ -2,7 +2,7 @@
 // this module turns a stored config into a runnable provider and a renderer-safe public view.
 // Each preset keeps its own baseUrl/model/key, so switching providers never mixes credentials.
 import type { LlmConfigStored, LlmConfigPublic, ResolvedLlmConfig, LlmProvider, ProviderCapabilities } from './types'
-import { presetOf, type LlmPreset } from './presets'
+import { presetOf, PRESETS as ALL_PRESETS, type LlmPreset } from './presets'
 import { decryptSecret } from './secret'
 import { AnthropicProvider } from './anthropic'
 import { OpenAiCompatibleProvider } from './openaiCompatible'
@@ -18,6 +18,27 @@ export type { LlmPreset } from './presets'
 export { encryptSecret, decryptSecret } from './secret'
 
 export const DEFAULT_LLM_CONFIG: LlmConfigStored = { active: 'anthropic', byPreset: {} }
+
+/**
+ * Switches the active preset, remembering the BYO provider being left behind
+ * whenever the managed `noteflow` plan takes over. That memory (lastByoProvider)
+ * is what a sign-out reverts to — the managed plan stops working without a
+ * session, and silently dropping the user on the generic default would lose the
+ * provider they had configured.
+ */
+export function withActiveProvider(cfg: LlmConfigStored, next: string): LlmConfigStored {
+  const out: LlmConfigStored = { ...cfg, active: next }
+  if (next === 'noteflow' && cfg.active !== 'noteflow') out.lastByoProvider = cfg.active
+  return out
+}
+
+/** Provider to fall back to when `noteflow` stops being usable: the last BYO one
+ *  the user had active (if it is still a known preset), else the default. */
+export function byoFallbackProvider(cfg: LlmConfigStored): string {
+  const last = cfg.lastByoProvider
+  if (last && last !== 'noteflow' && ALL_PRESETS.some((p) => p.id === last)) return last
+  return DEFAULT_LLM_CONFIG.active
+}
 
 function effectiveModel(cfg: LlmConfigStored): string {
   const preset = presetOf(cfg.active)

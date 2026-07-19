@@ -41,7 +41,7 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
     return off
   }, [loadConfig, loadSessions, initListeners])
 
-  // Resolve profile status once notes have loaded, so first-time routing doesn't flash the
+  // Resolve profile status once notes have loaded, so opening the Profile tab doesn't flash the
   // wizard on a machine that already has a synced profile.
   useEffect(() => {
     if (notesLoading) return
@@ -56,14 +56,14 @@ export function AiPanel({ onOpenNote, onCollapse }: { onOpenNote: (noteId: strin
       .catch(() => setProfileDone(true))
   }, [notesLoading, syncedProfileNote?.id])
 
-  // First-time routing once both config + profile status are known: show the profile wizard
-  // if it hasn't been done and a provider is configured; otherwise land on chat.
+  // First-time routing once the LLM config is known: with no provider configured we land on
+  // settings (onboarding); otherwise we stay on chat. The profile wizard is never auto-opened —
+  // the user reaches it by clicking the "Profile" tab (or from the command palette).
   useEffect(() => {
-    if (autoRouted || !configLoaded || profileDone === null) return
+    if (autoRouted || !configLoaded) return
     setAutoRouted(true)
-    if (!profileDone && llmConfig?.configured) setTab('profile')
-    else if (!llmConfig?.configured) setTab('settings')
-  }, [autoRouted, configLoaded, profileDone, llmConfig?.configured])
+    if (!llmConfig?.configured) setTab('settings')
+  }, [autoRouted, configLoaded, llmConfig?.configured])
 
   // Explicit routing from the command palette wins over the first-time auto-routing above.
   useEffect(() => {

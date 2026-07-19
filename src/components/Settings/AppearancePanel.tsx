@@ -4,16 +4,33 @@ import { THEMES, APP_FONTS } from '../../lib/themes'
 import { useThemeStore } from '../../stores/themeStore'
 import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { UI_SCALES } from '../../stores/themeStore'
-import type { HeadingLevel } from '../../stores/themeStore'
-import type { Theme } from '../../lib/themes'
+import type { EditorColorKey } from '../../stores/themeStore'
+import type { Theme, ThemeVars } from '../../lib/themes'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { SectionTitle, settingsButtonClass } from './ui'
 
-// Each heading level follows a theme var until the user overrides it.
-const HEADING_LEVELS: { level: HeadingLevel; label: string; themeVar: '--accent' | '--cyan' | '--text' }[] = [
-  { level: 'h1', label: 'H1', themeVar: '--accent' },
-  { level: 'h2', label: 'H2', themeVar: '--cyan' },
-  { level: 'h3', label: 'H3', themeVar: '--text' },
+// Each editor colour follows a theme var until the user overrides it (same fallbacks
+// as index.css).
+const EDITOR_COLOR_THEME_VARS: Record<EditorColorKey, keyof ThemeVars> = {
+  h1: '--accent',
+  h2: '--cyan',
+  h3: '--text',
+  italic: '--purple',
+  inlineCode: '--red',
+  codeAccent: '--accent',
+}
+
+// One row per editor colour; `sample` picks how the row label previews its own colour.
+type EditorColorRow = { key: EditorColorKey; sample: 'heading' | 'italic' | 'code' | 'border' }
+
+const EDITOR_COLOR_ROWS: EditorColorRow[] = [
+  { key: 'h1', sample: 'heading' },
+  { key: 'h2', sample: 'heading' },
+  { key: 'h3', sample: 'heading' },
+  { key: 'italic', sample: 'italic' },
+  { key: 'inlineCode', sample: 'code' },
+  { key: 'codeAccent', sample: 'border' },
 ]
 
 // Curated accent presets (as "r g b" triplets) spanning the hue wheel, on top of
@@ -52,9 +69,9 @@ export function AppearancePanel() {
   const setTheme = useThemeStore((s) => s.setTheme)
   const setFontOverride = useThemeStore((s) => s.setFontOverride)
   const setAccentOverride = useThemeStore((s) => s.setAccentOverride)
-  const headingOverrides = useThemeStore((s) => s.headingOverrides)
-  const setHeadingOverride = useThemeStore((s) => s.setHeadingOverride)
-  const resetHeadingOverrides = useThemeStore((s) => s.resetHeadingOverrides)
+  const editorColors = useThemeStore((s) => s.editorColors)
+  const setEditorColor = useThemeStore((s) => s.setEditorColor)
+  const resetEditorColors = useThemeStore((s) => s.resetEditorColors)
   const uiScale = useThemeStore((s) => s.uiScale)
   const changeUiScale = useThemeStore((s) => s.changeUiScale)
   const prefer3D = useBrainSettingsStore((s) => s.prefer3D)
@@ -68,9 +85,51 @@ export function AppearancePanel() {
   const effectiveAccent = accentOverride ?? theme.vars['--accent']
   const fonts = Object.values(APP_FONTS)
 
-  // Effective colour for each heading level — the override, else the theme var.
-  const headingColor = (l: typeof HEADING_LEVELS[number]) => headingOverrides[l.level] ?? theme.vars[l.themeVar]
-  const headingsOverridden = HEADING_LEVELS.some((l) => headingOverrides[l.level] !== null)
+  // Effective colour of an editor element — the override, else its theme var. `--accent`
+  // reads through the accent override, since that's what the root ends up carrying.
+  const editorColor = (key: EditorColorKey) => {
+    const themeVar = EDITOR_COLOR_THEME_VARS[key]
+    return editorColors[key] ?? (themeVar === '--accent' ? effectiveAccent : theme.vars[themeVar])
+  }
+  const editorColorsOverridden = EDITOR_COLOR_ROWS.some((row) => editorColors[row.key] !== null)
+
+  const editorColorLabels: Record<EditorColorKey, string> = {
+    h1: 'H1',
+    h2: 'H2',
+    h3: 'H3',
+    italic: t.settings.appearance.colorItalic,
+    inlineCode: t.settings.appearance.colorInlineCode,
+    codeAccent: t.settings.appearance.colorCodeAccent,
+  }
+
+  // The row label doubles as the swatch: it renders with the colour it controls.
+  function renderColorSample(row: EditorColorRow, color: string) {
+    const label = editorColorLabels[row.key]
+    switch (row.sample) {
+      case 'heading':
+        return <span className="text-sm font-bold leading-none" style={{ color: `rgb(${color})` }}>{label}</span>
+      case 'italic':
+        return <span className="text-sm italic leading-none" style={{ color: `rgb(${color})` }}>{label}</span>
+      case 'code':
+        return (
+          <span
+            className="max-w-full truncate rounded border border-border bg-surface-0 px-1 py-0.5 text-[10px] font-mono leading-none"
+            style={{ color: `rgb(${color})` }}
+          >
+            {label}
+          </span>
+        )
+      case 'border':
+        return (
+          <span
+            className="max-w-full truncate border-l-[3px] pl-1.5 text-[10px] leading-tight text-text-muted"
+            style={{ borderColor: `rgb(${color})` }}
+          >
+            {label}
+          </span>
+        )
+    }
+  }
 
   // Only the first four themes show by default; the rest live behind a toggle.
   const primaryThemes = THEMES.slice(0, 4)
@@ -115,10 +174,10 @@ export function AppearancePanel() {
   return (
     <div className="flex min-h-0 gap-4">
       {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 space-y-5">
+      <div className="flex-1 space-y-6">
         {/* Theme */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.theme}</div>
+          <SectionTitle>{t.settings.appearance.theme}</SectionTitle>
           <div className="grid grid-cols-2 gap-2">
             {primaryThemes.map(renderThemeCard)}
           </div>
@@ -131,7 +190,7 @@ export function AppearancePanel() {
               )}
               <button
                 onClick={() => setShowAllThemes((v) => !v)}
-                className="mt-2 flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
+                className={`mt-2 flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono ${settingsButtonClass}`}
               >
                 <ChevronDown size={11} className={`transition-transform ${showAllThemes ? 'rotate-180' : ''}`} />
                 {showAllThemes ? t.settings.appearance.fewerThemes : tf(t.settings.appearance.moreThemes, { count: moreThemes.length })}
@@ -142,17 +201,20 @@ export function AppearancePanel() {
 
         {/* Font */}
         <section>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.font}</div>
-            {fontOverride !== null && (
-              <button
-                onClick={() => setFontOverride(null)}
-                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
-              >
-                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
-              </button>
-            )}
-          </div>
+          <SectionTitle
+            action={
+              fontOverride !== null && (
+                <button
+                  onClick={() => setFontOverride(null)}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                >
+                  <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
+                </button>
+              )
+            }
+          >
+            {t.settings.appearance.font}
+          </SectionTitle>
           <div className="grid grid-cols-3 gap-1.5">
             {fonts.map((f) => {
               // A font tile is "selected" when it matches the effective font, but we
@@ -179,17 +241,20 @@ export function AppearancePanel() {
 
         {/* Accent */}
         <section>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.accent}</div>
-            {accentOverride !== null && (
-              <button
-                onClick={() => setAccentOverride(null)}
-                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
-              >
-                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
-              </button>
-            )}
-          </div>
+          <SectionTitle
+            action={
+              accentOverride !== null && (
+                <button
+                  onClick={() => setAccentOverride(null)}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                >
+                  <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
+                </button>
+              )
+            }
+          >
+            {t.settings.appearance.accent}
+          </SectionTitle>
           <div className="flex flex-wrap items-center gap-2">
             {ACCENT_PRESETS.map((rgb) => {
               const selected = effectiveAccent.trim() === rgb
@@ -224,64 +289,69 @@ export function AppearancePanel() {
           </div>
         </section>
 
-        {/* Headings */}
+        {/* Editor colours */}
         <section>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.headings}</div>
-            {headingsOverridden && (
-              <button
-                onClick={resetHeadingOverrides}
-                className="flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text transition-colors"
-              >
-                <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
-              </button>
-            )}
-          </div>
-          <div className="space-y-2">
-            {HEADING_LEVELS.map((l) => {
-              const color = headingColor(l)
+          <SectionTitle
+            action={
+              editorColorsOverridden && (
+                <button
+                  onClick={resetEditorColors}
+                  className={`flex flex-shrink-0 items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${settingsButtonClass}`}
+                >
+                  <RotateCcw size={9} /> {t.settings.appearance.themeDefault}
+                </button>
+              )
+            }
+          >
+            {t.settings.appearance.editorColors}
+          </SectionTitle>
+          {/* Six rows: smaller swatches than the accent row so the section keeps the
+              panel's density (the label column absorbs the longer i18n labels). */}
+          <div className="space-y-1.5">
+            {EDITOR_COLOR_ROWS.map((row) => {
+              const color = editorColor(row.key)
               return (
-                <div key={l.level} className="flex items-center gap-2">
+                <div key={row.key} className="flex items-center gap-2">
                   <span
-                    className="w-8 flex-shrink-0 text-sm font-bold leading-none tabular-nums"
-                    style={{ color: `rgb(${color})` }}
+                    className="w-[86px] flex-shrink-0 flex items-center overflow-hidden"
+                    title={row.key === 'codeAccent' ? t.settings.appearance.colorCodeAccentHint : editorColorLabels[row.key]}
                   >
-                    {l.label}
+                    {renderColorSample(row, color)}
                   </span>
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1">
                     {ACCENT_PRESETS.map((rgb) => {
                       const selected = color.trim() === rgb
                       return (
                         <button
                           key={rgb}
-                          onClick={() => setHeadingOverride(l.level, rgb)}
-                          className="w-5 h-5 rounded-full flex items-center justify-center transition-transform hover:scale-110"
+                          onClick={() => setEditorColor(row.key, rgb)}
+                          className="w-4 h-4 rounded-full flex items-center justify-center transition-transform hover:scale-110"
                           style={{
                             background: `rgb(${rgb})`,
                             boxShadow: selected ? '0 0 0 2px rgb(var(--bg-1)), 0 0 0 3px rgb(var(--text) / 0.6)' : undefined,
                           }}
                           title={`rgb(${rgb})`}
                         >
-                          {selected && <Check size={10} className="text-white drop-shadow" />}
+                          {selected && <Check size={9} className="text-white drop-shadow" />}
                         </button>
                       )
                     })}
                     {/* Custom colour picker */}
                     <label
-                      className="w-5 h-5 rounded-full border border-dashed border-text-muted/50 flex items-center justify-center cursor-pointer hover:border-text-muted transition-colors relative overflow-hidden"
+                      className="w-4 h-4 rounded-full border border-dashed border-text-muted/50 flex items-center justify-center cursor-pointer hover:border-text-muted transition-colors relative overflow-hidden"
                       title={t.settings.appearance.customColour}
                       style={{ background: `conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)` }}
                     >
                       <input
                         type="color"
                         value={rgbToHex(color)}
-                        onChange={(e) => setHeadingOverride(l.level, hexToRgb(e.target.value))}
+                        onChange={(e) => setEditorColor(row.key, hexToRgb(e.target.value))}
                         className="absolute inset-0 opacity-0 cursor-pointer"
                       />
                     </label>
-                    {headingOverrides[l.level] !== null && (
+                    {editorColors[row.key] !== null && (
                       <button
-                        onClick={() => setHeadingOverride(l.level, null)}
+                        onClick={() => setEditorColor(row.key, null)}
                         className="text-text-muted hover:text-text transition-colors"
                         title={t.settings.appearance.resetToThemeDefault}
                       >
@@ -297,12 +367,12 @@ export function AppearancePanel() {
 
         {/* Text size */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.textSize}</div>
+          <SectionTitle>{t.settings.appearance.textSize}</SectionTitle>
           <div className="flex items-center gap-2">
             <button
               onClick={() => changeUiScale(-1)}
               disabled={atMinScale}
-              className="w-8 h-8 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`w-8 h-8 flex items-center justify-center rounded-md ${settingsButtonClass}`}
               title={t.settings.appearance.smaller}
             >
               <Minus size={14} />
@@ -311,7 +381,7 @@ export function AppearancePanel() {
             <button
               onClick={() => changeUiScale(1)}
               disabled={atMaxScale}
-              className="w-8 h-8 flex items-center justify-center rounded-md border border-border text-text-muted hover:text-text hover:bg-surface-2 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`w-8 h-8 flex items-center justify-center rounded-md ${settingsButtonClass}`}
               title={t.settings.appearance.larger}
             >
               <Plus size={14} />
@@ -321,7 +391,7 @@ export function AppearancePanel() {
 
         {/* Brain view */}
         <section>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.appearance.brainView}</div>
+          <SectionTitle>{t.settings.appearance.brainView}</SectionTitle>
           <div className="grid grid-cols-2 gap-1.5">
             {([
               { value: true, label: '3D', desc: t.settings.appearance.immersive },
@@ -352,8 +422,8 @@ export function AppearancePanel() {
       </div>
 
       {/* ── Live preview ─────────────────────────────────────────────────── */}
-      <div className="w-[280px] flex-shrink-0 border-l border-border pl-4 flex flex-col gap-3">
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest">{t.settings.appearance.preview}</div>
+      <div className="w-[280px] flex-shrink-0 border-l border-border pl-4 flex flex-col">
+        <SectionTitle>{t.settings.appearance.preview}</SectionTitle>
         <div className="rounded-lg border border-border overflow-hidden bg-surface-0 shadow-inner">
           {/* fake titlebar */}
           <div className="flex items-center gap-1.5 px-2 py-1.5 bg-surface-2 border-b border-border">
@@ -377,12 +447,24 @@ export function AppearancePanel() {
             </div>
             {/* editor */}
             <div className="flex-1 p-2 space-y-1.5 bg-surface-0 overflow-hidden">
-              <div className="font-bold text-[12px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[0])})` }}>{t.settings.appearance.previewHeading}</div>
-              <div className="text-[10px] font-mono leading-none" style={{ color: `rgb(${headingColor(HEADING_LEVELS[1])})` }}>{t.settings.appearance.previewSubheading}</div>
+              <div className="font-bold text-[12px] font-mono leading-none" style={{ color: `rgb(${editorColor('h1')})` }}>{t.settings.appearance.previewHeading}</div>
+              <div className="text-[10px] font-mono leading-none" style={{ color: `rgb(${editorColor('h2')})` }}>{t.settings.appearance.previewSubheading}</div>
               <div className="text-text/80 text-[8px] font-mono leading-relaxed">
-                {t.settings.appearance.previewParagraph}
+                {t.settings.appearance.previewParagraph}{' '}
+                <em className="italic" style={{ color: `rgb(${editorColor('italic')})` }}>
+                  {t.settings.appearance.previewItalic}
+                </em>
               </div>
-              <span className="inline-block text-[8px] text-red font-mono bg-surface-0 border border-border rounded px-1">
+              <div
+                className="border-l-[3px] pl-1.5 text-[8px] font-mono leading-relaxed text-text-muted truncate"
+                style={{ borderColor: `rgb(${editorColor('codeAccent')})` }}
+              >
+                {t.settings.appearance.previewQuote}
+              </div>
+              <span
+                className="inline-block text-[8px] font-mono bg-surface-0 border border-border rounded px-1"
+                style={{ color: `rgb(${editorColor('inlineCode')})` }}
+              >
                 {t.settings.appearance.previewInlineCode}
               </span>
             </div>
@@ -390,7 +472,7 @@ export function AppearancePanel() {
         </div>
 
         {/* current selection summary */}
-        <div className="text-[11px] font-mono text-text-muted space-y-1 mt-auto">
+        <div className="text-[11px] font-mono text-text-muted space-y-1 pt-3 mt-auto">
           <div className="flex justify-between gap-2">
             <span className="text-text-muted/60">{t.settings.appearance.theme}</span>
             <span className="text-text truncate">{theme.label}</span>

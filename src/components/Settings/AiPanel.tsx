@@ -5,6 +5,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { useAiChatStore } from '../../stores/aiChatStore'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
 import { useT } from '../../i18n/useT'
+import { SectionTitle, settingsButtonClass } from './ui'
 
 export function AiPanel({ onClose }: { onClose: () => void }) {
   const t = useT()
@@ -44,15 +45,22 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Assistant (LLM provider) ────────────────────────────────── */}
+      <section>
+        <SectionTitle>{t.settings.ai.assistant}</SectionTitle>
+        <p className="text-[11px] font-mono text-text-muted mb-3 max-w-md leading-relaxed">
+          {t.settings.ai.assistantHint}
+        </p>
+        <LlmConfigView embedded />
+      </section>
+
       {/* ── Local AI (embeddings index) ─────────────────────────────── */}
       <section>
+        <SectionTitle>{t.settings.ai.localAi}</SectionTitle>
         <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-mono font-medium text-text">{t.settings.ai.localAi}</p>
-            <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
-              {t.settings.ai.localAiHint}
-            </p>
-          </div>
+          <p className="text-[11px] font-mono text-text-muted max-w-md leading-relaxed">
+            {t.settings.ai.localAiHint}
+          </p>
           <button
             onClick={() => void setEnabled(!enabled)}
             title={enabled ? t.settings.ai.disableLocalAi : t.settings.ai.enableLocalAi}
@@ -73,7 +81,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
             <button
               onClick={() => void reindexAll()}
               disabled={busy}
-              className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono ${settingsButtonClass}`}
             >
               {busy ? <Loader2 size={13} className="animate-spin text-text-muted" /> : <RefreshCw size={13} className="text-text-muted" />}
               {t.settings.ai.reindexAll}
@@ -87,21 +95,12 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         )}
       </section>
 
-      {/* ── Assistant (LLM provider) ────────────────────────────────── */}
-      <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.ai.assistant}</div>
-        <p className="text-[11px] font-mono text-text-muted mb-3 max-w-md leading-relaxed">
-          {t.settings.ai.assistantHint}
-        </p>
-        <LlmConfigView embedded />
-      </section>
-
       {/* ── Profile (second brain) ──────────────────────────────────── */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.ai.profile}</div>
+        <SectionTitle>{t.settings.ai.profile}</SectionTitle>
         <button
           onClick={openProfile}
-          className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
+          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
         >
           <Sparkles size={13} className="text-text-muted flex-shrink-0" />
           <span>{t.settings.ai.openProfileSetup}</span>
@@ -113,11 +112,11 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
 
       {/* ── AI agents (CLI skill) ───────────────────────────────────── */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.ai.aiAgents}</div>
+        <SectionTitle>{t.settings.ai.aiAgents}</SectionTitle>
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-mono font-medium text-text">{t.settings.ai.exposeSkill}</p>
-            <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
+            <p className="text-[11px] font-mono text-text-muted mt-1 max-w-md leading-relaxed">
               {t.settings.ai.exposeSkillHint}
             </p>
           </div>

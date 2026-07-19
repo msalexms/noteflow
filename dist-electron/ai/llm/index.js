@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_LLM_CONFIG = exports.decryptSecret = exports.encryptSecret = exports.PRESETS = void 0;
+exports.withActiveProvider = withActiveProvider;
+exports.byoFallbackProvider = byoFallbackProvider;
 exports.resolveConfig = resolveConfig;
 exports.resolveConfigAsync = resolveConfigAsync;
 exports.providerCapabilities = providerCapabilities;
@@ -19,6 +21,27 @@ var secret_2 = require("./secret");
 Object.defineProperty(exports, "encryptSecret", { enumerable: true, get: function () { return secret_2.encryptSecret; } });
 Object.defineProperty(exports, "decryptSecret", { enumerable: true, get: function () { return secret_2.decryptSecret; } });
 exports.DEFAULT_LLM_CONFIG = { active: 'anthropic', byPreset: {} };
+/**
+ * Switches the active preset, remembering the BYO provider being left behind
+ * whenever the managed `noteflow` plan takes over. That memory (lastByoProvider)
+ * is what a sign-out reverts to — the managed plan stops working without a
+ * session, and silently dropping the user on the generic default would lose the
+ * provider they had configured.
+ */
+function withActiveProvider(cfg, next) {
+    const out = { ...cfg, active: next };
+    if (next === 'noteflow' && cfg.active !== 'noteflow')
+        out.lastByoProvider = cfg.active;
+    return out;
+}
+/** Provider to fall back to when `noteflow` stops being usable: the last BYO one
+ *  the user had active (if it is still a known preset), else the default. */
+function byoFallbackProvider(cfg) {
+    const last = cfg.lastByoProvider;
+    if (last && last !== 'noteflow' && presets_1.PRESETS.some((p) => p.id === last))
+        return last;
+    return exports.DEFAULT_LLM_CONFIG.active;
+}
 function effectiveModel(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);
     const ps = cfg.byPreset[preset.id] ?? {};

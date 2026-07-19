@@ -26,6 +26,11 @@ const api = {
     // Settings
     getTheme: () => electron_1.ipcRenderer.sendSync('settings:get-theme'),
     setTheme: (id) => electron_1.ipcRenderer.send('settings:set-theme', id),
+    // Synced UI settings (ui-settings.json). Sync read on purpose: initTheme()
+    // needs it before the first paint to avoid a theme flash.
+    getUiSettings: () => electron_1.ipcRenderer.sendSync('ui-settings:get'),
+    // Partial patch — main merges it over what is on disk (see ui-settings:set).
+    setUiSettings: (patch) => electron_1.ipcRenderer.invoke('ui-settings:set', patch),
     getLanguage: () => electron_1.ipcRenderer.sendSync('settings:get-language'),
     setLanguage: (setting) => electron_1.ipcRenderer.send('settings:set-language', setting),
     onLanguageChanged: (callback) => {
@@ -129,8 +134,11 @@ const api = {
     cloudSetup: (passphrase) => electron_1.ipcRenderer.invoke('cloud:setup', passphrase),
     // Managed (standard) mode setup — no passphrase, no recovery code.
     cloudSetupManaged: () => electron_1.ipcRenderer.invoke('cloud:setup-managed'),
-    // One-way managed → e2ee upgrade; returns the new recovery code ONCE.
+    // Managed → e2ee upgrade; returns the new recovery code ONCE.
     cloudUpgradeE2ee: (passphrase) => electron_1.ipcRenderer.invoke('cloud:upgrade-e2ee', passphrase),
+    // e2ee → managed downgrade (explicit, UI-confirmed; passphrase + recovery
+    // code stop working). Requires the keys to be unlocked.
+    cloudDowngradeManaged: () => electron_1.ipcRenderer.invoke('cloud:downgrade-managed'),
     cloudUnlock: (secret) => electron_1.ipcRenderer.invoke('cloud:unlock', secret),
     // Silent managed unlock retry (the panel polls it while "Unlocking…" shows).
     cloudAutoUnlock: () => electron_1.ipcRenderer.invoke('cloud:auto-unlock'),

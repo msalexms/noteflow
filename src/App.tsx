@@ -3,6 +3,8 @@ import { useNotesStore } from './stores/notesStore'
 import { useGroupsStore } from './stores/groupsStore'
 import { useTemplatesStore } from './stores/templatesStore'
 import { useSectionTagColorsStore } from './stores/sectionTagColorsStore'
+import { useThemeStore } from './stores/themeStore'
+import { useEditorSettingsStore } from './stores/editorSettingsStore'
 import { useAiStore } from './stores/aiStore'
 import { TitleBar } from './components/TitleBar'
 import { Sidebar } from './components/Sidebar/Sidebar'
@@ -184,6 +186,10 @@ export function App() {
         loadGroups()
         loadTemplates()
         loadSectionTagColors()
+        // Synced appearance/editor settings (ui-settings.json) — re-apply after
+        // a pull or when another window changes them. Read-only, so no loop.
+        useThemeStore.getState().reloadUiSettings()
+        useEditorSettingsStore.getState().reloadUiSettings()
       }
     })
 

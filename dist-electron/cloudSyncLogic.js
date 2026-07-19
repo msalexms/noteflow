@@ -35,6 +35,7 @@ exports.CLOUD_METADATA_FILENAMES = [
     'section-colors.json',
     'note-order.json',
     'templates.json',
+    'ui-settings.json',
 ];
 // ── Path mapping ──────────────────────────────────────────────────────────────
 /**

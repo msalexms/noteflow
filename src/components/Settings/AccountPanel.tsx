@@ -4,6 +4,7 @@ import type { AccountStatus } from '../../types'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { useLanguageStore } from '../../stores/languageStore'
+import { settingsButtonClass } from './ui'
 
 // Public legal pages on the website; Spanish UI links to the /es mirrors.
 const LEGAL_BASE = 'https://yagoid.github.io/noteflow'
@@ -269,7 +270,7 @@ export function AccountPanel() {
             <button
               onClick={handleUseDifferentEmail}
               disabled={busy}
-              className="px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-text transition-colors disabled:opacity-40"
+              className={`px-3 py-1.5 rounded text-xs font-mono ${settingsButtonClass}`}
             >
               {t.settings.account.useDifferentEmail}
             </button>

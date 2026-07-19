@@ -99,18 +99,24 @@ export const aiPanel = {
     hintAnthropic: 'Claude via the official API (BYO key).',
     hintOpenAiCompat: 'OpenAI-compatible endpoint (BYO key).',
     hintLocal: 'Local / no API key required.',
-    hintNoteflow: 'Managed by NoteFlow — no API key needed.',
     noteflowSignIn: 'Sign in to your NoteFlow account in Settings → Account to use NoteFlow AI.',
     noteflowNeedsSubscription: 'Requires a NoteFlow AI subscription — manage your plan in Settings → Account.',
-    // Dedicated "premium" card for the managed NoteFlow AI plan (shown separately from the
-    // regular provider <select>, only with the 'ai' entitlement or if already active).
+    // Two-card selector: the assistant runs on EITHER the managed plan OR a provider of
+    // your own (API key / local model). Badges tell which one is actually in use.
+    chooseSourceDesc: 'Pick one source for the assistant: the managed NoteFlow AI plan, or a provider of your own.',
+    badgeActive: 'Active',
+    badgeInactive: 'Inactive',
     noteflowCard: {
-      subtitle: 'Included with your subscription — no API key needed.',
+      subtitle: 'Managed plan — chat with your notes without any API key.',
       useButton: 'Use NoteFlow AI',
-      active: 'Active',
       // Monthly consumption line under the progress bar; {used}/{limit} come
       // pre-abbreviated (e.g. "1.2M", "3M").
       usage: '{used} / {limit} tokens this month',
+    },
+    byoCard: {
+      title: 'Your provider / local AI',
+      subtitle: 'OpenAI, Anthropic, OpenRouter… with your own API key, or a local model (Ollama).',
+      useButton: 'Use this provider',
     },
     // Suffix appended to model options that burn the monthly quota faster
     // (e.g. "anthropic/claude-sonnet-5 (6× quota)").
