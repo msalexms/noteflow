@@ -172,9 +172,17 @@ export const es: Content = {
     h2: `Dale un <em style="font-style:italic;">cerebro</em> a tus notas.`,
     windows: 'Descargar para Windows',
     linux: 'Descargar para Linux',
+    versionLabel: 'Última versión',
     disclaimer: `Tus notas se quedan en tu máquina como archivos <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> planos. La sincronización es tu propio repo privado de GitHub. Usa tu propia clave de modelo. Sin servidores, sin telemetría.`,
     footer: {
       brand: 'NoteFlow',
+      tagline: 'Notas rápidas, con cerebro.',
+      groups: {
+        explore: 'Explorar',
+        docs: 'Docs',
+        project: 'Proyecto',
+        legal: 'Legal',
+      },
       theBrain: 'El Cerebro',
       notes: 'Notas',
       cliDocs: 'Docs del CLI',

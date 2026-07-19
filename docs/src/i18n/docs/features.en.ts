@@ -274,7 +274,7 @@ export const featuresEn = {
     darkLabel: 'Dark · 11',
     lightLabel: 'Light · 3',
     moreP:
-      'Beyond the theme, <strong>Settings → Appearance</strong> exposes the knobs individually: the app-wide <strong>font</strong>, the <strong>accent color</strong>, <strong>heading style</strong> and the overall <strong>UI scale</strong>. The editor has its own font and size settings, independent from the chrome.',
+      'Beyond the theme, <strong>Settings → Appearance</strong> exposes the knobs individually: the app-wide <strong>font</strong>, the <strong>accent color</strong>, the <strong>editor colors</strong> (headings, italics, inline code and the accent bar of code blocks and quotes) and the overall <strong>UI scale</strong>. The editor has its own font and size settings, independent from the chrome.',
     widthP:
       'And for long-form writing, <strong>Settings → Editor → Width</strong> switches the editor between <strong>Full</strong> (content uses the whole editor area) and <strong>Readable</strong> — a centered ~72-character column, iA-Writer style, where only tables and images break out to full width.',
   },

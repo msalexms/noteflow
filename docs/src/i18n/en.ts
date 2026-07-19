@@ -181,9 +181,20 @@ export const en = {
     h2: `Give your notes <em style="font-style:italic;">a brain.</em>`,
     windows: 'Download for Windows',
     linux: 'Download for Linux',
+    // Version label under the buttons, followed by the tag (e.g. "v2.0.0"). Hidden until the
+    // client script reads the tag from the GitHub API — no version is known at build time.
+    versionLabel: 'Latest release',
     disclaimer: `Your notes stay on your machine as plain <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> files. Sync is your own private GitHub repo. Bring your own model key. No servers, no telemetry.`,
     footer: {
       brand: 'NoteFlow',
+      tagline: 'Fast notes, with a brain.',
+      // Column headings of the grouped footer.
+      groups: {
+        explore: 'Explore',
+        docs: 'Docs',
+        project: 'Project',
+        legal: 'Legal',
+      },
       theBrain: 'The Brain',
       notes: 'Notes',
       // Links to the long-form docs pages (/cli, /ai, /features, /pricing).

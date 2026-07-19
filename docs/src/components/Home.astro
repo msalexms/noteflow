@@ -24,9 +24,17 @@ const termsHref = getRelativeLocaleUrl(lang, '/terms');
 // Discreet ghost CTA style shared by the three docs links (echoes the hero CTA).
 const docsCta =
   "display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:13px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:11px 18px;border-radius:5px;";
+// Secondary download button of the #get section (Linux). Same weight as the primary one:
+// both are downloads, so neither should read as the lesser option.
+const dlGhost =
+  "display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:16px 28px;border-radius:5px;";
 
-const RELEASES = 'https://github.com/yagoid/noteflow/releases';
 const GITHUB = 'https://github.com/yagoid/noteflow';
+// #get download buttons. Release assets carry the version in their file name, so there is no
+// stable URL pointing at a binary — we link the *page* of the newest release (never 404s, never
+// goes stale) and let the client script upgrade it to the exact asset. Nothing is baked at build
+// time: Pages only redeploys on `docs/**` changes, so a baked version would lie after a release.
+const RELEASES_LATEST_URL = `${GITHUB}/releases/latest`;
 // Showcase clip: an in-app screen recording, one per theme. The poster (static PNG) shows
 // while the video loads and is the fallback if autoplay is blocked.
 const VID_DARK = asset('/video/demo-dark.mp4');
@@ -485,15 +493,49 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           <div style={`display:inline-flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:var(--detail);"></span>{t.download.kicker}</div>
           <h2 style="margin:0;font-size:clamp(40px,6vw,82px);line-height:1.02;letter-spacing:-.018em;font-weight:500;color:var(--ink-strong);" set:html={t.download.h2}></h2>
           <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:42px;">
-            <a href={RELEASES} target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">{t.download.windows}</a>
-            <a href={RELEASES} target="_blank" rel="noopener" class="nf-ghost" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:16px 28px;border-radius:5px;">{t.download.linux}</a>
+            <a href={RELEASES_LATEST_URL} data-dl="win" target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">{t.download.windows}</a>
+            <a href={RELEASES_LATEST_URL} data-dl="linux" target="_blank" rel="noopener" class="nf-ghost" style={dlGhost}>{t.download.linux}</a>
           </div>
+          {/* Hidden until the client script reports the real tag_name — `visibility` (not `display`)
+              so the reserved line never shifts what follows when it appears. It labels the two
+              buttons above ("what you are about to download"), hence the tight margin. */}
+          <p data-dl-version-row style="visibility:hidden;margin:16px 0 0;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
           <p style="margin:30px auto 0;max-width:460px;font-size:17px;line-height:1.6;color:var(--ink-faint);" set:html={t.download.disclaimer}></p>
         </div>
-        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-top:clamp(60px,9vw,110px);padding-top:28px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);">
-          <div style="display:flex;align-items:center;gap:10px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--detail);"></span>{t.download.footer.brand}</div>
-          <div style="display:flex;gap:22px;flex-wrap:wrap;"><a href="#brain" data-nav="brain">{t.download.footer.theBrain}</a><a href="#notes" data-nav="notes">{t.download.footer.notes}</a><a href={cliHref}>{t.download.footer.cliDocs}</a><a href={aiHref}>{t.download.footer.aiDocs}</a><a href={featuresHref}>{t.download.footer.featuresDocs}</a><a href={pricingHref}>{t.download.footer.pricingDocs}</a><a href={GITHUB} target="_blank" rel="noopener">{t.download.footer.source}</a><a href={privacyHref}>{t.download.footer.privacy}</a><a href={termsHref}>{t.download.footer.terms}</a><a href={privacyHref} data-cookie-settings>{t.download.footer.cookies}</a><a href={switchHref} aria-label={t.langSwitch.aria}>{t.langSwitch.label}</a></div>
-          <div>{t.download.footer.copyright}</div>
+        {/* Grouped footer: brand block + four link columns (Explore / Docs / Project / Legal),
+            then the copyright row. Docs and legal links carry no data-nav — the synapse script
+            only knows the in-page anchors. */}
+        <div class="nf-footer" style="margin-top:clamp(60px,9vw,110px);padding-top:34px;border-top:1px solid var(--line);text-align:left;">
+          <div class="nf-footer-grid">
+            <div class="nf-footer-brand">
+              <div style="display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--detail);flex:none;"></span>{t.download.footer.brand}</div>
+              <p style="margin:12px 0 0;max-width:220px;font-size:14px;line-height:1.55;color:var(--ink-faint);">{t.download.footer.tagline}</p>
+            </div>
+            <div class="nf-footer-col">
+              <div class="nf-footer-head">{t.download.footer.groups.explore}</div>
+              <a href="#brain" data-nav="brain">{t.download.footer.theBrain}</a>
+              <a href="#notes" data-nav="notes">{t.download.footer.notes}</a>
+            </div>
+            <div class="nf-footer-col">
+              <div class="nf-footer-head">{t.download.footer.groups.docs}</div>
+              <a href={cliHref}>{t.download.footer.cliDocs}</a>
+              <a href={aiHref}>{t.download.footer.aiDocs}</a>
+              <a href={featuresHref}>{t.download.footer.featuresDocs}</a>
+              <a href={pricingHref}>{t.download.footer.pricingDocs}</a>
+            </div>
+            <div class="nf-footer-col">
+              <div class="nf-footer-head">{t.download.footer.groups.project}</div>
+              <a href={GITHUB} target="_blank" rel="noopener">{t.download.footer.source}</a>
+              <a href={switchHref} aria-label={t.langSwitch.aria}>{t.langSwitch.label}</a>
+            </div>
+            <div class="nf-footer-col">
+              <div class="nf-footer-head">{t.download.footer.groups.legal}</div>
+              <a href={privacyHref}>{t.download.footer.privacy}</a>
+              <a href={termsHref}>{t.download.footer.terms}</a>
+              <a href={privacyHref} data-cookie-settings>{t.download.footer.cookies}</a>
+            </div>
+          </div>
+          <div style="margin-top:clamp(30px,5vw,44px);padding-top:22px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-faint);">{t.download.footer.copyright}</div>
         </div>
       </div>
     </footer>
@@ -813,6 +855,42 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       filter: drop-shadow(0 0 6px var(--detail));
       transform: translateY(-1px);
       border-color: var(--detail);
+    }
+
+    /* ── Grouped footer (Download section) ──────────────────────────────────── */
+    /* Brand block takes the leftover space; the four link columns size to content. */
+    .nf-footer-grid {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      column-gap: clamp(24px, 4.5vw, 60px);
+      row-gap: 34px;
+      align-items: start;
+    }
+    .nf-footer-col { display: flex; flex-direction: column; gap: 11px; }
+    .nf-footer-head {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      margin-bottom: 4px;
+    }
+    .nf-footer-col a {
+      width: max-content;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      letter-spacing: .02em;
+      color: var(--ink-faint);
+      transition: color 0.2s ease;
+    }
+    .nf-footer-col a:hover { color: var(--ink-strong); }
+    @media (max-width: 780px) {
+      /* Brand on its own row, then the four columns in a 2×2 grid. */
+      .nf-footer-grid { grid-template-columns: repeat(2, 1fr); }
+      .nf-footer-brand { grid-column: 1 / -1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .nf-footer-col a { transition: none; }
     }
   </style>
 
@@ -1244,5 +1322,51 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     } else {
       reveals.forEach((el) => (el.style.opacity = '1'));
     }
+
+    // ── #get: upgrade the download buttons to the newest release's assets ──
+    // Nothing about the release is baked at build time: asset names carry the version, and Pages
+    // only redeploys on `docs/**` changes, so any baked number/URL would go stale on the next
+    // release. Instead the buttons ship pointing at the *page* of the latest release — always
+    // valid, and what the user gets without JS or with the API down (offline, 403 rate limit).
+    // Here we ask the API (it already excludes prereleases) and, when the asset is there, swap in
+    // its exact `browser_download_url` (read from the API, never rebuilt from a name pattern).
+    // A direct binary shouldn't open a blank tab, so `target` goes away with the rewrite.
+    // Missing asset → that button is left alone on /releases/latest, still a correct landing spot.
+    (async () => {
+      const win = document.querySelector<HTMLAnchorElement>('[data-dl="win"]');
+      const linux = document.querySelector<HTMLAnchorElement>('[data-dl="linux"]');
+      if (!win && !linux) return;
+      try {
+        const res = await fetch('https://api.github.com/repos/yagoid/noteflow/releases/latest');
+        if (!res.ok) return;
+        const rel = (await res.json()) as {
+          tag_name?: string;
+          assets?: { name?: string; browser_download_url?: string }[];
+        };
+        const assets = rel.assets || [];
+        const urlFor = (re: RegExp) =>
+          assets.find((a) => re.test(a.name || ''))?.browser_download_url;
+        // `$`-anchored so the `.blockmap` siblings never match.
+        const toAsset = (a: HTMLAnchorElement | null, re: RegExp) => {
+          const url = a && urlFor(re);
+          if (!a || !url) return;
+          a.href = url;
+          a.removeAttribute('target');
+        };
+
+        toAsset(win, /-Setup\.exe$/);
+        toAsset(linux, /_amd64\.deb$/);
+
+        // Progressive enhancement: the version only shows once we know it for real.
+        const label = document.querySelector<HTMLElement>('[data-dl-version]');
+        const row = document.querySelector<HTMLElement>('[data-dl-version-row]');
+        if (label && row && rel.tag_name) {
+          label.textContent = rel.tag_name;
+          row.style.visibility = 'visible';
+        }
+      } catch {
+        /* keep the /releases/latest links */
+      }
+    })();
   </script>
 </Base>

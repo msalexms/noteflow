@@ -31,9 +31,14 @@
       this._mo = new MutationObserver(() => { this._readColors(); if (this._reduced) this._drawStatic(); });
       this._mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
       // The document can grow taller after late images/fonts load — rebuild the field then
-      // so the parallax covers the whole page.
-      this._onLoad = () => this._resize();
+      // so the parallax covers the whole page. Also re-read the palette: on a cold load the
+      // stylesheet may still have been in-flight at connect time (see _awaitColors).
+      this._onLoad = () => { this._readColors(); this._resize(); };
       window.addEventListener('load', this._onLoad);
+      // Cold, uncached load: brain-site.css (which defines --brain-*) can still be downloading
+      // when this element connects during body parse, so _readColors just fell back to a flat
+      // gray with invisible wires/sparks. Poll until the vars resolve, then recolour live.
+      if (!this._colorsReady) this._awaitColors();
       this._loop = this._loop.bind(this);
       // Reduced motion: the mesh is drawn once per resize/theme change and the loop never
       // starts (no sparks, no twinkle). Otherwise animate, but pause while the tab is
@@ -55,13 +60,30 @@
     }
     disconnectedCallback() {
       cancelAnimationFrame(this._raf);
+      cancelAnimationFrame(this._colorRaf);
       if (this._ro) this._ro.disconnect();
       if (this._mo) this._mo.disconnect();
       if (this._onLoad) window.removeEventListener('load', this._onLoad);
       if (this._onVis) document.removeEventListener('visibilitychange', this._onVis);
     }
 
+    // Re-runs cheaply; the animation loop reads _bg/_wire/_accents fresh each frame, so
+    // recolouring is live. _colorsReady is false until brain-site.css has applied the vars.
+    _awaitColors() {
+      const tick = () => {
+        if (!this.isConnected) return;
+        this._readColors();
+        if (this._colorsReady) { if (this._reduced) this._drawStatic(); return; }
+        this._colorRaf = requestAnimationFrame(tick);
+      };
+      this._colorRaf = requestAnimationFrame(tick);
+    }
+
     _readColors() {
+      // The vars come from an external stylesheet; on a cold load it may not have applied yet,
+      // in which case getComputedStyle returns '' and readTriple falls back to a flat gray.
+      this._colorsReady = getComputedStyle(document.documentElement)
+        .getPropertyValue('--brain-bg').trim().length > 0;
       const bg = readTriple('--brain-bg'), text = readTriple('--brain-text');
       const lum = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255;
       this._dark = lum < 0.5;
