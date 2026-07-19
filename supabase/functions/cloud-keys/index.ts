@@ -16,8 +16,15 @@
 //   POST <fn>/unlock   no body → returns {dek} unwrapped when the caller's row
 //                      exists and is managed. 404 without a row; 409 when the
 //                      row is e2ee (that unlock is local, with the passphrase).
+//   POST <fn>/downgrade body {dek: base64url(32 bytes)} → explicit e2ee →
+//                      managed switch: the client sends its unlocked DEK (same
+//                      trust as setup), which gets wrapped with the operator
+//                      KEK; the row flips to mode 'managed' and every
+//                      passphrase/recovery column is nulled (they stop
+//                      working — intentional). 404 without a row; 409 when the
+//                      row is already managed.
 //
-// Neither endpoint checks entitlements: key material must always be creatable/
+// No endpoint checks entitlements: key material must always be creatable/
 // readable, also with a lapsed subscription (mirror of the user_keys RLS).
 //
 // Auth: `Authorization: Bearer <Supabase access token>` — resolved to a user
@@ -142,6 +149,47 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const detail = await insertRes.text().catch(() => '')
       console.error(`cloud-keys: user_keys insert failed (${insertRes.status}): ${detail}`)
       return json(500, keysErrorBody('Could not store the cloud keys. Try again.', 'insert_failed'))
+    }
+    return json(200, { ok: true })
+  }
+
+  if (route === 'downgrade') {
+    // Explicit e2ee → managed switch (user-confirmed in the UI — never silent).
+    // The caller proves possession of the DEK by sending it (it only has it
+    // while unlocked); the row must exist and be e2ee.
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return json(404, keysErrorBody('No cloud keys exist for this account yet.', 'no_keys'))
+    }
+    if (rows[0].mode === 'managed') {
+      return json(409, keysErrorBody('This account already uses standard encryption.', 'already_managed'))
+    }
+    const body: unknown = await req.json().catch(() => null)
+    const dek = parseDekParam(body)
+    if (!dek) {
+      return json(400, keysErrorBody('Body must be {dek: base64url of 32 bytes}.', 'invalid_dek'))
+    }
+    // Null every passphrase/recovery column: after the downgrade neither the
+    // passphrase nor the recovery code works — unlocking is session-automatic.
+    // The user_keys_mode_coherent CHECK (migration 0005) allows this end state.
+    const patchRes = await fetch(`${supabaseUrl}/rest/v1/user_keys?user_id=eq.${userId}`, {
+      method: 'PATCH',
+      headers: { ...serviceHeaders(serviceRoleKey), Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        mode: 'managed',
+        dek_managed_ct: await wrapDek(dek, kek),
+        dek_pass_ct: null,
+        pass_salt: null,
+        pass_iterations: null,
+        dek_recovery_ct: null,
+        recovery_salt: null,
+        recovery_iterations: null,
+        updated_at: new Date().toISOString(),
+      }),
+    })
+    if (!patchRes.ok) {
+      const detail = await patchRes.text().catch(() => '')
+      console.error(`cloud-keys: user_keys downgrade failed (${patchRes.status}): ${detail}`)
+      return json(500, keysErrorBody('Could not switch to standard encryption. Try again.', 'downgrade_failed'))
     }
     return json(200, { ok: true })
   }

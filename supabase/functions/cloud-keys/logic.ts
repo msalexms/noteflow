@@ -39,8 +39,8 @@ export function fromB64Url(s: string): Uint8Array | null {
 // ── Input parsing / validation ────────────────────────────────────────────────
 
 /**
- * Extracts and validates the client-generated DEK from a parsed setup body
- * ({ dek: base64url of exactly 32 bytes }). Returns null on anything else.
+ * Extracts and validates the client-sent DEK from a parsed setup/downgrade
+ * body ({ dek: base64url of exactly 32 bytes }). Returns null on anything else.
  */
 export function parseDekParam(body: unknown): Uint8Array | null {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return null
@@ -108,13 +108,14 @@ export async function unwrapDek(sealed: string, kek: Uint8Array): Promise<Uint8A
 
 // ── HTTP surface helpers ──────────────────────────────────────────────────────
 
-export type CloudKeysRoute = 'setup' | 'unlock'
+export type CloudKeysRoute = 'setup' | 'unlock' | 'downgrade'
 
-/** POST <fn>/setup | POST <fn>/unlock — anything else is a 404. */
+/** POST <fn>/setup | POST <fn>/unlock | POST <fn>/downgrade — anything else is a 404. */
 export function resolveRoute(method: string, pathname: string): CloudKeysRoute | null {
   if (method !== 'POST') return null
   if (pathname.endsWith('/setup')) return 'setup'
   if (pathname.endsWith('/unlock')) return 'unlock'
+  if (pathname.endsWith('/downgrade')) return 'downgrade'
   return null
 }
 

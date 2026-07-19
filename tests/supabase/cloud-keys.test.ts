@@ -114,10 +114,12 @@ describe('wrapDek / unwrapDek', () => {
 })
 
 describe('resolveRoute', () => {
-  it('routes only POST /setup and POST /unlock', () => {
+  it('routes only POST /setup, POST /unlock and POST /downgrade', () => {
     expect(resolveRoute('POST', '/functions/v1/cloud-keys/setup')).toBe('setup')
     expect(resolveRoute('POST', '/functions/v1/cloud-keys/unlock')).toBe('unlock')
+    expect(resolveRoute('POST', '/functions/v1/cloud-keys/downgrade')).toBe('downgrade')
     expect(resolveRoute('GET', '/functions/v1/cloud-keys/unlock')).toBeNull()
+    expect(resolveRoute('GET', '/functions/v1/cloud-keys/downgrade')).toBeNull()
     expect(resolveRoute('POST', '/functions/v1/cloud-keys')).toBeNull()
     expect(resolveRoute('POST', '/functions/v1/cloud-keys/other')).toBeNull()
   })
