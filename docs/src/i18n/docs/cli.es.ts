@@ -5,7 +5,7 @@ export const cliEs: CliContent = {
   meta: {
     title: 'NoteFlow CLI — notas headless desde tu terminal',
     description:
-      'Referencia completa del CLI de NoteFlow v1.8.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub e intégralo en scripts o agentes de IA. Un único script Node.js, cero dependencias.',
+      'Referencia completa del CLI de NoteFlow v1.10.0: crea, lee, edita y organiza notas markdown desde cualquier terminal, sincroniza con GitHub o NoteFlow Cloud e intégralo en scripts o agentes de IA. Un único script Node.js, cero dependencias.',
   },
 
   hero: {
@@ -20,9 +20,9 @@ export const cliEs: CliContent = {
       '',
       'uso: noteflow <comando> [opciones]',
       '',
-      '  add · new · list · get · read · set',
+      '  add · new · list · get · read · set · path · touch',
       '  sections · section · move · groups · folders',
-      '  login · push · pull · migrate · self-update · status',
+      '  login · cloud · push · pull · migrate · self-update · status',
       '',
       '~ $ noteflow add "Funciona." --section Ideas',
       '✓ Añadido a "07-07-2026" · Ideas',
@@ -122,6 +122,10 @@ export const cliEs: CliContent = {
         name: 'NOTEFLOW_NO_APP_CHECK',
         desc: 'Ponla a <code>1</code> para silenciar el aviso por stderr al mutar grupos/carpetas con la app de escritorio abierta.',
       },
+      {
+        name: 'NOTEFLOW_CLOUD_PASSPHRASE',
+        desc: 'Passphrase (o recovery code) para cuentas NoteFlow Cloud en modo privado (e2ee) — evita el prompt interactivo en servidores y cron. Nunca se guarda en disco.',
+      },
     ],
     colEnv: 'Variable',
     colEnvDesc: 'Efecto',
@@ -132,6 +136,7 @@ export const cliEs: CliContent = {
     intro: [
       'El CLI es deliberadamente agent-friendly: todos los comandos de lectura aceptan <code>--json</code> para salida machine-readable, los resultados van a <strong>stdout</strong> y los errores a <strong>stderr</strong>, y el exit code es <code>0</code> en éxito y <code>1</code> en error. Como todo se direcciona por título de nota y nombre de sección, un agente nunca necesita rastrear ids.',
       'Dos convenciones importan: <code>read</code> vs <code>get</code> — <code>get</code> es para humanos (indenta y decora) mientras <code>read</code> emite el contenido verbatim, así que los agentes deben usar siempre <code>read</code>. Y <code>set</code> vs <code>add</code> — <code>set</code> <strong>reemplaza</strong> una sección, <code>add</code> <strong>añade al final</strong>.',
+      'Para <strong>ediciones parciales de una sección grande</strong> hay un atajo: el CLI no tiene find-replace, así que <code>read</code> + <code>set</code> obliga a sacar la sección entera y volver a escribirla. Si tu agente ya tiene herramientas de edición de ficheros, pídele a <code>path</code> el <code>.md</code> de la sección, edítalo in situ y cierra con <code>touch</code> — que bumpea <code>updated:</code> y hace el push.',
     ],
     flowH3: 'Flujo típico de un agente',
     flowTermTitle: 'sesión de agente',
@@ -142,6 +147,9 @@ export const cliEs: CliContent = {
       '$ noteflow read "Proyecto Alpha" "Tasks"',
       '# 3 · sobrescribirla — o añadir al final con `add`',
       '$ noteflow set "Proyecto Alpha" "Tasks" --text "- [x] deploy"',
+      '# 3b · …o editar el fichero de la sección in situ con tus herramientas',
+      '$ noteflow path "Proyecto Alpha" "Tasks"',
+      '$ noteflow touch "Proyecto Alpha"',
       '# 4 · sincronizar',
       '$ noteflow push',
     ],
@@ -184,7 +192,7 @@ export const cliEs: CliContent = {
       {
         q: 'Estoy logueado en la app, pero el CLI me pide login',
         a:
-          'Es lo esperado: el CLI <strong>no puede descifrar</strong> los tokens que la app de escritorio guarda con <code>safeStorage</code> de Electron. Mantiene su propio token — ejecuta <code>noteflow login</code> una vez.',
+          'Es lo esperado: el CLI <strong>no puede descifrar</strong> los tokens que la app de escritorio guarda con <code>safeStorage</code> de Electron, y las sesiones tampoco pueden compartirse (rotan en cada uso). Mantiene sus propias credenciales — ejecuta <code>noteflow login</code> (GitHub) o <code>noteflow cloud login</code> (NoteFlow Cloud) una vez.',
       },
       {
         q: 'Una nota no aparece en list / read',

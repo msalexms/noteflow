@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
-description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.8.0
+description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
+version: 1.10.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -242,12 +242,77 @@ noteflow set "Proyecto Alpha" Notas --file ./notas.txt
 > PowerShell añade. Regla práctica para agentes: **contenido no trivial → `--file`.**
 
 **Editar una parte concreta de una sección grande:** el CLI edita a nivel de
-sección (no hay find-replace). El patrón es leer → modificar → sobrescribir:
+sección (no hay find-replace). Con `set` el patrón es leer → modificar → sobrescribir:
 
 ```bash
 noteflow read "Proyecto Alpha" Arquitectura > sec.md   # (en PowerShell, esto pasa a CRLF)
 # …editas sec.md…
 noteflow set "Proyecto Alpha" Arquitectura --file sec.md
+```
+
+> Si tienes herramientas de edición propias (un agente con edit/patch), evita el
+> round-trip: **`noteflow path` + `touch`** te dejan editar el `.md` de la sección
+> directamente en disco (ver abajo).
+
+---
+
+### `path` — Ruta absoluta del `.md` de una sección (o del dir de la nota)
+
+```bash
+noteflow path <título> [sección]
+```
+
+Imprime **rutas absolutas** en stdout, **verbatim y sin decorar** (igual que `read`).
+Sirve para **editar el `.md` de una sección directamente con tus propias
+herramientas** en vez de hacer round-trips `read` → `set --file`. Después de editar,
+ejecuta **`noteflow touch <título>`** (bumpea `updated:` y sincroniza).
+
+| Forma | Resultado |
+|---|---|
+| `noteflow path "Proyecto Alpha"` | Ruta absoluta del **directorio** de la nota |
+| `noteflow path "Proyecto Alpha" Tasks` | Ruta absoluta del `.md` de esa sección |
+| `noteflow path "Proyecto Alpha" --section Tasks` | Igual, forma con flag (útil con títulos multi-palabra) |
+| `noteflow path "Proyecto Alpha" --json` | `{ id, title, dir, noteFile, sections: [{ id, name, file, isRawMode }] }` |
+| `noteflow path "Proyecto Alpha" Tasks --json` | `{ id, title, dir, section, file, isRawMode }` |
+
+- En `--json`, `file` es siempre la ruta **absoluta** del `.md`.
+- Resolución idéntica a `read`: título parcial, sufijo `#n` para nombres de sección
+  duplicados, error pidiendo precisión si hay ambigüedad. Notas cifradas se ignoran.
+
+```bash
+noteflow path "Proyecto Alpha" Tasks
+# C:\Users\me\noteflow-notes\proyecto-alpha-abc12345\sec002.md
+
+noteflow path "Proyecto Alpha" --json | jq -r '.sections[] | "\(.name) → \(.file)"'
+```
+
+---
+
+### `touch` — Bumpear `updated:` y sincronizar tras editar a mano
+
+```bash
+noteflow touch <título>
+```
+
+Relee la nota **desde disco** y la reescribe: bumpea el `updated:` de `note.md` (el
+timestamp canónico de sync de la nota) y empuja `note.md` + todos los `.md` de
+sección al backend de sync activo (Cloud si hay sesión, si no GitHub). Es el
+**paso obligatorio después** de editar un `.md` con `noteflow path`: sin él, el
+cambio queda solo en local y el sync no se entera.
+
+- Sin sync configurado no falla: bumpea `updated:` y no imprime línea de sync.
+- Como cualquier comando que escribe, reescribe la carpeta de la nota: los `.md`
+  que no sean `note.md` ni una sección listada en el índice **se eliminan**. No
+  dejes ficheros sueltos dentro de la carpeta de una nota.
+- No crea ni renombra secciones: para eso usa `section add` / `section rename`
+  (editar `note.md` a mano no es una vía soportada).
+
+```bash
+SEC=$(noteflow path "Proyecto Alpha" Tasks)
+# …editas $SEC con tus herramientas…
+noteflow touch "Proyecto Alpha"
+# Updated "Proyecto Alpha"  (updated: 2026-07-16T17:37:48.807Z)
+# Synced to NoteFlow Cloud
 ```
 
 ---
@@ -539,6 +604,70 @@ Si ya está en la última versión: `Already up to date`.
 
 ---
 
+## Sync con NoteFlow Cloud (cuenta, cifrado)
+
+Alternativa al sync de GitHub ligada a la **cuenta NoteFlow** (requiere suscripción Cloud
+para subir cambios). Todo viaja **cifrado en el cliente** (AES-256-GCM); el CLI habla
+directamente con el backend, pensado para **máquinas headless** (RPi, servidores, cron).
+
+Mientras hay sesión con Cloud habilitado, **Cloud tiene prioridad sobre GitHub**: los
+comandos `push`, `pull`, `status` y el sync automático tras cada mutación usan Cloud
+(el sync de GitHub queda en pausa aunque siga configurado).
+
+### `cloud login` — Iniciar sesión
+
+```bash
+noteflow cloud login [email]
+```
+
+Envía un código de 6 dígitos por email y lo pide por prompt. La sesión del CLI es
+**independiente de la de la app de escritorio** (los tokens rotan en cada uso; compartirla
+los desconectaría mutuamente). Al iniciar sesión, el sync Cloud del CLI queda habilitado.
+
+### `cloud logout` — Cerrar sesión
+
+```bash
+noteflow cloud logout
+```
+
+Conserva las notas locales y el cursor de sync (volver a entrar retoma incremental).
+
+### `cloud setup` — Crear las claves de cifrado (modo estándar)
+
+```bash
+noteflow cloud setup
+```
+
+Solo para el modo **estándar (managed)**: genera la clave y la deposita en el servidor —
+nada que recordar. El modo **privado (e2ee)** se configura desde la **app de escritorio**
+(muestra el recovery code de un solo uso); el CLI entonces pide la passphrase o el
+recovery code en cada ejecución, o lee `NOTEFLOW_CLOUD_PASSPHRASE` para servidores/cron.
+La clave **nunca se guarda en disco** en esta máquina.
+
+### `cloud push` / `cloud pull` — Sync completo manual
+
+```bash
+noteflow cloud push   # cifra y sube todas las notas + metadatos
+noteflow cloud pull   # baja y descifra los cambios remotos (incremental)
+```
+
+El primer push ejecuta automáticamente un pull inicial de reconciliación
+(`First Cloud reconcile…`) para no pisar remoto más nuevo. En el pull manda el
+`updated:` del ancla de cada nota: el remoto más nuevo gana la carpeta entera; los
+borrados remotos solo se aplican si la copia local no cambió desde el último sync.
+
+### `cloud status` — Estado de la cuenta y el sync
+
+```bash
+noteflow cloud status [--json]
+```
+
+Muestra email, modo de claves (`standard (managed)` / `private (e2ee)` / `none`),
+habilitado, último sync y cursor. JSON:
+`{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }`.
+
+---
+
 ### `status` — Estado actual
 
 ```bash
@@ -549,16 +678,20 @@ Muestra: número de notas, directorio, grupos, estado de GitHub y última sync.
 
 JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }, groups }`.
 
+> Con NoteFlow Cloud activo, `status` enruta a `cloud status` y su JSON cambia a la
+> forma documentada arriba — los scripts que dependan del shape de GitHub deben
+> comprobar la clave `cloud`.
+
 ---
 
 ## Flags globales
 
 | Flag | Aplica a | Descripción |
 |---|---|---|
-| `--json` | `list`, `get`, `read`, `new`, `groups`, `folders`, `status` | Salida JSON machine-readable |
+| `--json` | `list`, `get`, `read`, `path`, `new`, `groups`, `folders`, `status`, `cloud status` | Salida JSON machine-readable |
 | `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva |
 | `--archived` | `list` | Incluye notas archivadas |
-| `--section <nombre>` | `read`, `get`, `add`, `set` | Apunta a una sección por nombre |
+| `--section <nombre>` | `read`, `path`, `get`, `add`, `set` | Apunta a una sección por nombre |
 | `--group <nombre>` | `add`, `new`, `move`, `list`, `folders`, `folder *` | Apunta a/filtra por un grupo |
 | `--folder <nombre>` | `add`, `new`, `move`, `list` | Apunta a/filtra por una carpeta (requiere grupo) |
 | `--ungroup` | `move` | Saca la nota del grupo y la carpeta |
@@ -607,6 +740,11 @@ echo "contenido" | noteflow set "título" "Sección" --stdin
 # 3b. …o añadir al final en vez de sobrescribir
 noteflow add "más contenido" --title "título" --section "Sección"
 
+# 3c. …o editar el .md de la sección con tus propias herramientas (ver abajo)
+noteflow path "título" "Sección"     # → ruta absoluta del .md
+# …lo editas…
+noteflow touch "título"              # bumpea updated: y sincroniza
+
 # 4. Gestionar la estructura de secciones si hace falta
 noteflow section rename "título" "Sección" "Nuevo nombre"
 
@@ -618,11 +756,30 @@ noteflow push
 > contenido verbatim — úsalo siempre que vayas a procesar el texto.
 > **`set` vs `add`:** `set` **reemplaza** la sección; `add` **añade al final**.
 
+**Ediciones parciales de secciones grandes → `path` + `touch`, no `read` + `set`.**
+El CLI no tiene find-replace, así que con `read`/`set` toda edición parcial obliga a
+sacar la sección entera, modificarla y volver a escribirla completa. Si tu agente ya
+tiene herramientas de edición de ficheros (edit/patch), es mejor pedirle a `path` la
+ruta del `.md` de la sección, **editarlo in situ** y cerrar con `touch`:
+
+```bash
+# Alternativa a read → modificar → set --file, sin mover el contenido entero
+SEC=$(noteflow path "título" "Sección")
+# …editas $SEC con tus herramientas de edición (find-replace, patch, append…)…
+noteflow touch "título"
+```
+
+- `touch` es **obligatorio**: es quien bumpea `updated:` en `note.md` y hace el push
+  (editar el `.md` a pelo no sincroniza nada por sí solo).
+- Usa `read`/`set` cuando reescribas la sección entera, o cuando no tengas acceso al
+  sistema de ficheros (p. ej. la nota vive en otra máquina).
+
 ---
 
 ## Notas importantes
 
-- El CLI **no puede descifrar** tokens guardados por la app de escritorio con `safeStorage` de Electron. Requiere su propio `login`.
+- El CLI **no puede descifrar** tokens guardados por la app de escritorio con `safeStorage` de Electron. Requiere su propio `login` (GitHub) y su propio `cloud login` (NoteFlow Cloud) — la sesión Cloud además **no debe** compartirse con la app: los refresh tokens rotan en cada uso y compartirla desconectaría a ambos.
+- En modo e2ee la passphrase se pide en cada ejecución (o `NOTEFLOW_CLOUD_PASSPHRASE`); ni la passphrase ni la clave de cifrado se guardan nunca en disco.
 - Notas encriptadas (`encryption:` en `note.md`) se **ignoran** en todos los comandos de lectura.
 - `NOTEFLOW_NOTES_DIR` (variable de entorno) redirige el directorio de notas — útil para scripts y tests.
 - **⚠ App de escritorio abierta ⇒ riesgo de perder cambios de grupos/carpetas.**

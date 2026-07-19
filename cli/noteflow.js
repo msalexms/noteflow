@@ -5,7 +5,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const https = require('node:https')
-const { randomBytes } = require('node:crypto')
+const { randomBytes, webcrypto } = require('node:crypto')
 const { execSync } = require('node:child_process')
 const readline = require('node:readline')
 
@@ -13,6 +13,13 @@ const readline = require('node:readline')
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
+
+// NoteFlow Cloud (Supabase). ⚠️ keep in sync with electron/cloudConfig.ts.
+// Public by design, same model as GITHUB_CLIENT_ID: the anon key grants nothing
+// by itself — security comes from RLS policies and per-user Auth JWTs.
+const SUPABASE_URL = 'https://bolnhekicavuzscdjoty.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_1Ifj7iwZ7w_Xx5B2aLcDfQ_4AbBeFFx'
+const CLOUD_KEYS_URL = `${SUPABASE_URL}/functions/v1/cloud-keys`
 const GROUP_COLORS = ['--accent', '--accent-2', '--red', '--cyan', '--purple', '--text', '--orange', '--pink']
 
 // On-disk format v2: one DIRECTORY per note ('<slug>-<id>/') containing a
@@ -21,7 +28,12 @@ const GROUP_COLORS = ['--accent', '--accent-2', '--red', '--cyan', '--purple', '
 const NOTE_MD = 'note.md'
 const FORMAT_VERSION = 2
 const FORMAT_MARKER = '.noteflow-format'
-const METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json']
+const METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'ui-settings.json']
+
+// Root metadata files synced to NoteFlow Cloud. ⚠️ keep in sync with
+// CLOUD_METADATA_FILENAMES in electron/cloudSyncLogic.ts — note it carries
+// templates.json, which the GitHub METADATA_FILES list above does not.
+const CLOUD_METADATA_FILES = ['groups.json', 'folders.json', 'section-colors.json', 'note-order.json', 'templates.json', 'ui-settings.json']
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +97,53 @@ function getToken() {
   const decoded = Buffer.from(sync.encryptedToken, 'base64').toString('utf-8')
   if (!/^[\x20-\x7e]+$/.test(decoded)) return null
   return decoded
+}
+
+// ── NoteFlow Cloud settings (CLI-owned) ───────────────────────────────────────
+//
+// The CLI keeps its OWN GoTrue session in settings.cliAccount and its OWN sync
+// state in settings.cliCloud. It must NEVER read or write settings.account /
+// settings.cloudSync (the desktop app's): GoTrue ROTATES the refresh token on
+// every grant, so a shared session would sign the app and the CLI out of each
+// other on every refresh. The refresh token is stored base64-encoded — same
+// trade-off as the CLI's GitHub token (a plain Node process has no safeStorage).
+
+function getCliAccount() {
+  const a = readSettings().cliAccount
+  return a && a.refreshToken ? a : null
+}
+
+function saveCliAccount(account) {
+  const settings = readSettings()
+  settings.cliAccount = account
+  writeSettings(settings)
+  // Best-effort: the file now holds a session token — make it owner-only on POSIX.
+  if (process.platform !== 'win32') {
+    try { fs.chmodSync(SETTINGS_PATH, 0o600) } catch { /* ignore */ }
+  }
+}
+
+function clearCliAccount() {
+  const settings = readSettings()
+  delete settings.cliAccount
+  writeSettings(settings)
+}
+
+// { enabled, pullCursor, lastSync } — the CLI's own cursor/lastSync, never the
+// desktop app's settings.cloudSync (each client reconciles independently).
+function getCliCloud() {
+  return readSettings().cliCloud || { enabled: false }
+}
+
+function patchCliCloud(patch) {
+  const settings = readSettings()
+  settings.cliCloud = { ...(settings.cliCloud || { enabled: false }), ...patch }
+  writeSettings(settings)
+}
+
+/** Cloud takes priority over GitHub whenever the CLI is signed in and Cloud is enabled. */
+function cloudActive() {
+  return !!(getCliCloud().enabled && getCliAccount())
 }
 
 // ── Groups ────────────────────────────────────────────────────────────────────
@@ -318,6 +377,11 @@ function writeNoteFolder(dirname, note, opts = {}) {
   return written
 }
 
+/** Absolute path of a section's markdown file (same resolution readNoteFolder uses). */
+function sectionFilePath(note, sec) {
+  return path.join(path.resolve(note.filePath), path.basename(sec.file || `${sec.id}.md`))
+}
+
 function findNoteByTitle(titleQuery) {
   const notes = loadAllNotes()
   const q = titleQuery.toLowerCase()
@@ -545,8 +609,27 @@ async function removeRemoteFile(token, owner, repo, relPath, message) {
   } catch { /* not there — nothing to do */ }
 }
 
-/** Pushes the given files of a note dir ('<dirname>/<file>') to GitHub. */
+/** Pushes the given files of a note dir ('<dirname>/<file>') to the active sync backend. */
 async function syncPushNoteFiles(dirname, files) {
+  if (cloudActive()) {
+    // Cloud takes priority: never double-push to GitHub while Cloud is active
+    // (mirror of the desktop app's syncProvider routing). Sync errors are
+    // reported but never abort the local mutation, which already landed.
+    try {
+      await cloudEnsureReconciled()
+      const dek = await getCliDek()
+      const noteKey = await cloudGetNoteKey(dek, dirname)
+      for (const f of files) await cloudPushFile(dek, noteKey, `${dirname}/${f}`)
+      // Bump lastSync like the app's schedulePush: without it a later remote
+      // tombstone would be skipped forever (`updated <= lastSync` rule) while
+      // the cursor advances past it — and the next push would resurrect the note.
+      patchCliCloud({ lastSync: new Date().toISOString() })
+      out('  Synced to NoteFlow Cloud')
+    } catch (e) {
+      err(`Cloud sync failed: ${e.message}`)
+    }
+    return
+  }
   const sync = getSyncSettings()
   if (!sync.enabled || !sync.owner || !sync.repo) return
   const token = getToken()
@@ -560,6 +643,767 @@ async function syncPushNoteFiles(dirname, files) {
   } catch (e) {
     err(`Sync failed: ${e.message}`)
   }
+}
+
+// ── NoteFlow Cloud: crypto ────────────────────────────────────────────────────
+//
+// ⚠️ Port of electron/cloudCrypto.ts to plain JS — keep every parameter in sync;
+// interoperating with rows the desktop app wrote is the hard requirement here.
+// AES-256-GCM sealed blobs: base64url( iv (12 bytes) || ciphertext+tag ). Key
+// hierarchy: DEK (master) → per-note key (files.key_ct) → content/path blobs.
+
+const { subtle } = webcrypto
+const KEY_BYTES = 32
+const IV_BYTES = 12
+const PATH_HMAC_INFO = 'noteflow-cloud-path'
+const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const RECOVERY_CODE_LEN = 30 // 6 groups × 5 chars
+
+function toB64Url(bytes) { return Buffer.from(bytes).toString('base64url') }
+function fromB64Url(s) { return new Uint8Array(Buffer.from(s, 'base64url')) }
+
+function randomCloudKey() {
+  const bytes = new Uint8Array(KEY_BYTES)
+  webcrypto.getRandomValues(bytes)
+  return bytes
+}
+const generateDek = randomCloudKey
+const generateNoteKey = randomCloudKey
+
+async function importAesKey(raw, usage) {
+  if (raw.length !== KEY_BYTES) throw new Error(`expected a ${KEY_BYTES}-byte key, got ${raw.length}`)
+  return subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, [usage])
+}
+
+/** Seals plaintext bytes under an AES-256 key → base64url(iv || ciphertext+tag). */
+async function cloudSeal(keyBytes, plaintext) {
+  const iv = new Uint8Array(IV_BYTES)
+  webcrypto.getRandomValues(iv)
+  const key = await importAesKey(keyBytes, 'encrypt')
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext))
+  const blob = new Uint8Array(IV_BYTES + ct.length)
+  blob.set(iv)
+  blob.set(ct, IV_BYTES)
+  return toB64Url(blob)
+}
+
+/** Opens a sealed blob. Throws on a wrong key or tampered data (GCM tag mismatch). */
+async function cloudOpen(keyBytes, sealed) {
+  const blob = fromB64Url(sealed)
+  if (blob.length <= IV_BYTES) throw new Error('sealed blob too short')
+  const key = await importAesKey(keyBytes, 'decrypt')
+  const plain = await subtle.decrypt({ name: 'AES-GCM', iv: blob.subarray(0, IV_BYTES) }, key, blob.subarray(IV_BYTES))
+  return new Uint8Array(plain)
+}
+
+async function wrapKey(key, wrappingKey) {
+  if (key.length !== KEY_BYTES) throw new Error(`expected a ${KEY_BYTES}-byte key to wrap, got ${key.length}`)
+  return cloudSeal(wrappingKey, key)
+}
+
+async function unwrapKey(wrapped, wrappingKey) {
+  const key = await cloudOpen(wrappingKey, wrapped)
+  if (key.length !== KEY_BYTES) throw new Error(`unwrapped key has ${key.length} bytes, expected ${KEY_BYTES}`)
+  return key
+}
+
+async function encryptContent(noteKey, plaintext) {
+  return cloudSeal(noteKey, new TextEncoder().encode(plaintext))
+}
+
+async function decryptContent(noteKey, sealed) {
+  return new TextDecoder().decode(await cloudOpen(noteKey, sealed))
+}
+
+/** PBKDF2-SHA256 passphrase/recovery-code → 256-bit KEK (params mirror the app). */
+async function deriveKek(passphrase, salt, iterations) {
+  const material = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveBits'])
+  const bits = await subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, material, KEY_BYTES * 8)
+  return new Uint8Array(bits)
+}
+
+/** Uppercases and strips anything outside the recovery alphabet (tolerant typing). */
+function normalizeRecoveryCode(code) {
+  let normalized = ''
+  for (const ch of code.toUpperCase()) {
+    if (RECOVERY_ALPHABET.includes(ch)) normalized += ch
+  }
+  return normalized
+}
+
+/** A secret is treated as a recovery code only with the EXACT generated length. */
+function looksLikeRecoveryCode(input) {
+  return normalizeRecoveryCode(input).length === RECOVERY_CODE_LEN
+}
+
+/** path_key = base64url(HMAC-SHA256(subkey, relPath)); subkey = HKDF(DEK, info 'noteflow-cloud-path'). */
+async function derivePathKeyHmac(dek, relPath) {
+  if (dek.length !== KEY_BYTES) throw new Error(`expected a ${KEY_BYTES}-byte DEK, got ${dek.length}`)
+  const material = await subtle.importKey('raw', dek, 'HKDF', false, ['deriveBits'])
+  const subkeyBits = await subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode(PATH_HMAC_INFO) },
+    material,
+    KEY_BYTES * 8
+  )
+  const hmacKey = await subtle.importKey('raw', subkeyBits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = await subtle.sign('HMAC', hmacKey, new TextEncoder().encode(relPath))
+  return toB64Url(new Uint8Array(mac))
+}
+
+// ── NoteFlow Cloud: row ↔ file mapping (port of electron/cloudSyncLogic.ts) ───
+
+function noteDirOf(relPath) {
+  const i = relPath.indexOf('/')
+  return i > 0 ? relPath.slice(0, i) : null
+}
+
+function isAnchorPath(relPath) {
+  const dir = noteDirOf(relPath)
+  return dir !== null && relPath === `${dir}/${NOTE_MD}`
+}
+
+/** Defense in depth for DECRYPTED remote paths: only '<dir>/<file>.md' or a known root json. */
+function isSafeCloudRelPath(relPath) {
+  if (!relPath || relPath.includes('\\') || relPath.startsWith('/')) return false
+  const parts = relPath.split('/')
+  if (parts.some(p => !p || p === '.' || p === '..')) return false
+  if (parts.length === 1) return CLOUD_METADATA_FILES.includes(relPath)
+  return parts.length === 2 && parts[1].endsWith('.md')
+}
+
+function parseUpdatedTimestamp(value) {
+  if (!value) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+// updated_at of a pushed row: anchor → its own frontmatter `updated:`; section
+// → the ANCHOR's `updated:` (edits travel as one coherent group in the pull
+// window); root json or unparseable frontmatter → nowIso. Mirror of the app.
+function resolveRowUpdatedAt(relPath, content, anchorContent, nowIso) {
+  const dir = noteDirOf(relPath)
+  if (dir === null) return nowIso
+  const source = isAnchorPath(relPath) ? content : anchorContent
+  const ms = parseUpdatedTimestamp(extractUpdatedTimestamp(source || ''))
+  return ms === null ? nowIso : new Date(ms).toISOString()
+}
+
+/** Newer remote anchor wins wholesale; missing local = fresh note from another device. */
+function shouldApplyRemoteDir(remoteUpdatedMs, localUpdatedMs) {
+  if (remoteUpdatedMs === null) return false
+  if (localUpdatedMs === null) return true
+  return remoteUpdatedMs > localUpdatedMs
+}
+
+/** Tombstones delete locally only when the local `updated` is <= lastSync (safety rule). */
+function shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs) {
+  if (lastSyncMs === null) return false
+  if (localUpdatedMs === null) return false
+  return localUpdatedMs <= lastSyncMs
+}
+
+/** Advances the incremental-pull cursor to the max remote updated_at reconciled. */
+function nextPullCursor(current, entries) {
+  let maxMs = current ? Date.parse(current) : null
+  let maxIso = current
+  for (const e of entries) {
+    const ms = Date.parse(e.updatedAt)
+    if (!Number.isFinite(ms)) continue
+    if (maxMs === null || ms > maxMs) {
+      maxMs = ms
+      maxIso = new Date(ms).toISOString()
+    }
+  }
+  return maxIso
+}
+
+async function buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt, deleted = false) {
+  return {
+    path_key: await derivePathKeyHmac(dek, relPath),
+    path_ct: await encryptContent(noteKey, relPath),
+    content_ct: deleted ? '' : await encryptContent(noteKey, content),
+    key_ct: await wrapKey(noteKey, dek),
+    updated_at: updatedAt,
+    deleted,
+  }
+}
+
+async function decryptFileRow(dek, row) {
+  const noteKey = await unwrapKey(row.key_ct, dek)
+  const relPath = await decryptContent(noteKey, row.path_ct)
+  const content = row.deleted || !row.content_ct ? '' : await decryptContent(noteKey, row.content_ct)
+  const updatedAtMs = Date.parse(row.updated_at)
+  return {
+    relPath,
+    content,
+    noteKey,
+    updatedAt: row.updated_at,
+    updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    deleted: row.deleted,
+  }
+}
+
+// ── NoteFlow Cloud: session + REST ────────────────────────────────────────────
+
+// One access token per invocation: the process lives for seconds and GoTrue
+// access tokens last ~1h — no expiry tracking or single-flight needed.
+let cloudAccessToken = null
+
+async function supabaseFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    method: opts.method || 'GET',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      ...(opts.accessToken ? { Authorization: `Bearer ${opts.accessToken}` } : {}),
+      ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(opts.headers || {}),
+    },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: AbortSignal.timeout(20000),
+  })
+  let json = null
+  try { json = await res.json() } catch { /* empty body — fine */ }
+  return { status: res.status, json }
+}
+
+/**
+ * Mints an access token from the CLI's persisted refresh token. GoTrue ROTATES
+ * the refresh token on every grant — the rotated one is persisted IMMEDIATELY,
+ * before the access token is used, so a crash mid-command cannot strand the
+ * session on a consumed token. 400/401 = revoked → the session is dropped.
+ */
+async function getCloudAccessToken() {
+  if (cloudAccessToken) return cloudAccessToken
+  const account = getCliAccount()
+  if (!account) throw new Error('Not signed in to NoteFlow Cloud. Run: noteflow cloud login')
+  const refreshToken = Buffer.from(account.refreshToken, 'base64').toString('utf-8')
+  const res = await supabaseFetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    body: { refresh_token: refreshToken },
+  })
+  if (res.status === 400 || res.status === 401) {
+    clearCliAccount()
+    throw new Error('Session expired — run `noteflow cloud login` again.')
+  }
+  if (res.status >= 400 || !res.json || !res.json.access_token) {
+    throw new Error(`Could not refresh the NoteFlow session (HTTP ${res.status})`)
+  }
+  if (res.json.refresh_token) {
+    saveCliAccount({ ...account, refreshToken: Buffer.from(res.json.refresh_token).toString('base64') })
+  }
+  cloudAccessToken = res.json.access_token
+  return cloudAccessToken
+}
+
+/** Authenticated PostgREST request against the Supabase project. */
+async function cloudRest(endpoint, opts = {}) {
+  const token = await getCloudAccessToken()
+  return supabaseFetch(`${SUPABASE_URL}${endpoint}`, { ...opts, accessToken: token })
+}
+
+/** One retry on network errors / 5xx (upserts are idempotent) — mirror of the app's restWithRetry. */
+async function cloudRestWithRetry(fn) {
+  try {
+    const res = await fn()
+    if (res.status >= 500) {
+      await new Promise(r => setTimeout(r, 1000))
+      return await fn()
+    }
+    return res
+  } catch {
+    await new Promise(r => setTimeout(r, 1000))
+    return fn()
+  }
+}
+
+// ── NoteFlow Cloud: DEK per invocation ────────────────────────────────────────
+
+// The DEK lives ONLY in process memory for the duration of one command. It is
+// NEVER cached on disk, and neither is the passphrase: in e2ee mode the machine
+// must not custody the key — that is the whole point of private mode on a
+// headless box. Managed mode re-fetches it from the cloud-keys Edge Function
+// on every run instead (one extra round-trip, zero secrets at rest).
+let cloudDek = null
+
+function promptLine(question) {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    rl.question(`  ${question}`, answer => { rl.close(); resolve(answer.trim()) })
+  })
+}
+
+/** Interactive prompt with hidden echo (passphrases). Plain line read when stdin is not a TTY. */
+function promptHidden(question) {
+  if (!process.stdin.isTTY) return promptLine(question)
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    let muted = false
+    const write = rl._writeToOutput.bind(rl)
+    rl._writeToOutput = (s) => { if (!muted) write(s) }
+    rl.question(`  ${question}`, answer => {
+      muted = false
+      rl.output.write('\n')
+      rl.close()
+      resolve(answer.trim())
+    })
+    muted = true // question() wrote the prompt synchronously; keystrokes stay hidden
+  })
+}
+
+/**
+ * Resolves the account's DEK: managed rows via the cloud-keys unlock endpoint;
+ * e2ee rows by deriving a KEK from NOTEFLOW_CLOUD_PASSPHRASE (or an interactive
+ * hidden prompt) and unwrapping locally — recovery codes are detected by their
+ * exact normalized length, like the desktop app.
+ */
+async function getCliDek() {
+  if (cloudDek) return cloudDek
+  const res = await cloudRest(
+    '/rest/v1/user_keys?select=mode,dek_pass_ct,pass_salt,pass_iterations,dek_recovery_ct,recovery_salt,recovery_iterations'
+  )
+  if (res.status >= 400) throw new Error(`Could not load the Cloud keys (HTTP ${res.status})`)
+  const rows = Array.isArray(res.json) ? res.json : []
+  if (!rows.length) {
+    throw new Error('No Cloud keys for this account — run `noteflow cloud setup` (or set up Cloud in the desktop app).')
+  }
+  const row = rows[0]
+
+  if (row.mode === 'managed') {
+    const token = await getCloudAccessToken()
+    const unlock = await supabaseFetch(`${CLOUD_KEYS_URL}/unlock`, { method: 'POST', body: {}, accessToken: token })
+    if (unlock.status >= 400) throw new Error(`Could not unlock the Cloud keys (HTTP ${unlock.status})`)
+    const raw = unlock.json && unlock.json.dek
+    if (typeof raw !== 'string' || !raw) throw new Error('Unlock response carried no key')
+    const dek = fromB64Url(raw)
+    if (dek.length !== KEY_BYTES) throw new Error(`unlocked DEK has ${dek.length} bytes, expected ${KEY_BYTES}`)
+    cloudDek = dek
+    return cloudDek
+  }
+
+  // e2ee: the secret comes from the env (headless/scripted) or a hidden prompt.
+  let secret = process.env.NOTEFLOW_CLOUD_PASSPHRASE || ''
+  if (!secret) secret = await promptHidden('Cloud passphrase (or recovery code): ')
+  if (!secret) {
+    throw new Error('This account uses private (e2ee) encryption — set NOTEFLOW_CLOUD_PASSPHRASE or enter the passphrase when prompted.')
+  }
+
+  let wrapped, kek
+  if (looksLikeRecoveryCode(secret) && row.dek_recovery_ct && row.recovery_salt && row.recovery_iterations) {
+    wrapped = row.dek_recovery_ct
+    kek = await deriveKek(normalizeRecoveryCode(secret), fromB64Url(row.recovery_salt), row.recovery_iterations)
+  } else {
+    if (!row.dek_pass_ct || !row.pass_salt || !row.pass_iterations) {
+      throw new Error('This account has no passphrase-wrapped Cloud key.')
+    }
+    wrapped = row.dek_pass_ct
+    kek = await deriveKek(secret, fromB64Url(row.pass_salt), row.pass_iterations)
+  }
+  try {
+    cloudDek = await unwrapKey(wrapped, kek)
+  } catch {
+    throw new Error('Wrong passphrase or recovery code.')
+  }
+  return cloudDek
+}
+
+// ── NoteFlow Cloud: push / pull engine ────────────────────────────────────────
+
+// Per-process note-key cache: '<dir>' (note folders) or '<name>.json' (root
+// metadata) → key. One remote anchor lookup per scope per invocation.
+const cloudNoteKeys = new Map()
+
+async function cloudGetNoteKey(dek, scope) {
+  const cached = cloudNoteKeys.get(scope)
+  if (cached) return cached
+  const anchorRel = scope.endsWith('.json') ? scope : `${scope}/${NOTE_MD}`
+  const pathKey = await derivePathKeyHmac(dek, anchorRel)
+  const res = await cloudRest(`/rest/v1/files?select=key_ct&path_key=eq.${encodeURIComponent(pathKey)}`)
+  let noteKey = null
+  if (res.status < 400 && Array.isArray(res.json) && res.json.length > 0) {
+    try { noteKey = await unwrapKey(res.json[0].key_ct, dek) } catch { noteKey = null }
+  }
+  if (!noteKey) noteKey = generateNoteKey()
+  cloudNoteKeys.set(scope, noteKey)
+  return noteKey
+}
+
+/** Uploads one file as an encrypted upsert row. `e.subscription` marks the RLS 403 (stop the whole push). */
+async function cloudPushFile(dek, noteKey, relPath) {
+  const account = getCliAccount()
+  const content = fs.readFileSync(path.join(NOTES_DIR, relPath), 'utf-8')
+  const dir = noteDirOf(relPath)
+  let anchorContent = null
+  if (dir && !isAnchorPath(relPath)) {
+    try { anchorContent = fs.readFileSync(path.join(NOTES_DIR, dir, NOTE_MD), 'utf-8') } catch { anchorContent = null }
+  }
+  const updatedAt = resolveRowUpdatedAt(relPath, content, anchorContent, new Date().toISOString())
+  const row = await buildFileUpsertRow(dek, noteKey, relPath, content, updatedAt)
+  const res = await cloudRestWithRetry(() =>
+    cloudRest('/rest/v1/files?on_conflict=user_id,path_key', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: { user_id: account.userId, ...row },
+    })
+  )
+  if (res.status === 403) {
+    const e = new Error('An active NoteFlow Cloud subscription is required to upload changes.')
+    e.subscription = true
+    throw e
+  }
+  if (res.status >= 400) throw new Error(`Cloud upload failed (HTTP ${res.status})`)
+}
+
+/** All non-deleted remote rows decrypted to (relPath, pathKey) — whole-note deletes. */
+async function cloudListRemotePaths(dek) {
+  const res = await cloudRest('/rest/v1/files?select=path_key,path_ct,key_ct&deleted=eq.false')
+  if (res.status >= 400) throw new Error(`Cloud listing failed (HTTP ${res.status})`)
+  const remote = []
+  for (const raw of Array.isArray(res.json) ? res.json : []) {
+    try {
+      const noteKey = await unwrapKey(raw.key_ct, dek)
+      remote.push({ relPath: await decryptContent(noteKey, raw.path_ct), pathKey: raw.path_key })
+    } catch { /* undecryptable row (not this DEK) — skip */ }
+  }
+  return remote
+}
+
+/**
+ * Tombstones rows (deleted=true, content blanked) so other devices pick the
+ * deletion up on their incremental pull. Without a subscription RLS blocks the
+ * UPDATE (403) → falls back to a physical DELETE (allowed by ownership alone).
+ */
+async function cloudTombstonePathKeys(pathKeys) {
+  if (!pathKeys.length) return
+  const filter = `path_key=in.(${pathKeys.map(k => `"${k}"`).join(',')})`
+  const res = await cloudRestWithRetry(() =>
+    cloudRest(`/rest/v1/files?${filter}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: { deleted: true, content_ct: '', updated_at: new Date().toISOString() },
+    })
+  )
+  if (res.status < 400) return
+  if (res.status !== 403) throw new Error(`Cloud delete failed (HTTP ${res.status})`)
+  const del = await cloudRestWithRetry(() =>
+    cloudRest(`/rest/v1/files?${filter}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } })
+  )
+  if (del.status >= 400) throw new Error(`Cloud delete failed (HTTP ${del.status})`)
+}
+
+async function cloudTombstoneRelPaths(relPaths) {
+  if (!relPaths.length) return
+  const dek = await getCliDek()
+  const pathKeys = []
+  for (const p of relPaths) pathKeys.push(await derivePathKeyHmac(dek, p))
+  await cloudTombstonePathKeys(pathKeys)
+}
+
+// Push gate: never push before the first reconcile — a fresh machine pushing
+// old disk state over a newer remote corpus would clobber it (mirror of the
+// desktop app's initial-pull gate). Cursor or lastSync present = reconciled.
+async function cloudEnsureReconciled() {
+  const c = getCliCloud()
+  if (c.pullCursor || c.lastSync) return
+  out('  First Cloud reconcile…')
+  await cloudPullNow()
+}
+
+async function cloudFetchChangedRows(cursor) {
+  const PAGE = 1000 // PostgREST caps responses (Supabase default max-rows)
+  const rows = []
+  const base =
+    '/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&order=updated_at.asc' +
+    (cursor
+      ? `&updated_at=gt.${encodeURIComponent(cursor)}`
+      : '&deleted=eq.false') // first reconcile: nothing local to delete safely
+  for (let offset = 0; ; offset += PAGE) {
+    const res = await cloudRest(base, {
+      headers: { Range: `${offset}-${offset + PAGE - 1}`, 'Range-Unit': 'items' },
+    })
+    if (res.status === 416) break // requested range past the end — done paging
+    if (res.status >= 400) throw new Error(`Cloud pull failed (HTTP ${res.status})`)
+    const page = Array.isArray(res.json) ? res.json : []
+    rows.push(...page)
+    if (page.length < PAGE) break
+  }
+  return rows
+}
+
+/** Fetches + decrypts the remote anchor row of a dir (or null). */
+async function cloudFetchRemoteAnchor(dek, dir) {
+  const pathKey = await derivePathKeyHmac(dek, `${dir}/${NOTE_MD}`)
+  const res = await cloudRest(
+    `/rest/v1/files?select=path_key,path_ct,content_ct,key_ct,updated_at,deleted&path_key=eq.${encodeURIComponent(pathKey)}`
+  )
+  if (res.status >= 400 || !Array.isArray(res.json) || !res.json.length) return null
+  try { return await decryptFileRow(dek, res.json[0]) } catch { return null }
+}
+
+/** Incremental pull — same grouping/conflict/tombstone rules as the app's cloudSync.pullNotes. */
+async function cloudPullNow() {
+  const c = getCliCloud()
+  const dek = await getCliDek()
+  const lastSyncMs = c.lastSync ? Date.parse(c.lastSync) : null
+  const rows = await cloudFetchChangedRows(c.pullCursor)
+
+  let errors = 0
+  const entries = []
+  for (const row of rows) {
+    try {
+      const entry = await decryptFileRow(dek, row)
+      if (!isSafeCloudRelPath(entry.relPath)) { errors++; continue }
+      entries.push(entry)
+      // Seed the per-folder key cache so pushes reuse the same note key.
+      cloudNoteKeys.set(noteDirOf(entry.relPath) || entry.relPath, entry.noteKey)
+    } catch { errors++ }
+  }
+
+  const dirs = new Map()
+  const rootFiles = []
+  for (const e of entries) {
+    const dir = noteDirOf(e.relPath)
+    if (dir === null) { rootFiles.push(e); continue }
+    if (!dirs.has(dir)) dirs.set(dir, [])
+    dirs.get(dir).push(e)
+  }
+
+  if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
+
+  let pulled = 0, deleted = 0
+  for (const [dir, group] of dirs) {
+    try {
+      // The anchor decides. If the window only carried section rows
+      // (interrupted push on the origin device), fetch it separately.
+      let anchor = group.find(e => isAnchorPath(e.relPath)) || null
+      if (!anchor) anchor = await cloudFetchRemoteAnchor(dek, dir)
+      if (!anchor) continue // never fully uploaded — skip
+
+      const localDirPath = path.join(NOTES_DIR, dir)
+      const localAnchorPath = path.join(localDirPath, NOTE_MD)
+      let localUpdatedMs = null
+      if (fs.existsSync(localAnchorPath)) {
+        localUpdatedMs = parseUpdatedTimestamp(extractUpdatedTimestamp(fs.readFileSync(localAnchorPath, 'utf-8')))
+      }
+
+      if (anchor.deleted) {
+        // Note deleted remotely — apply locally only under the safety rule.
+        if (fs.existsSync(localAnchorPath) && shouldApplyRemoteDeletion(localUpdatedMs, lastSyncMs)) {
+          fs.rmSync(localDirPath, { recursive: true, force: true })
+          deleted++
+        }
+        continue
+      }
+
+      if (fs.existsSync(localAnchorPath) && !shouldApplyRemoteDir(anchor.updatedAtMs, localUpdatedMs)) {
+        continue // local is newer or equal — cursor advances anyway
+      }
+
+      fs.mkdirSync(localDirPath, { recursive: true })
+      fs.writeFileSync(localAnchorPath, anchor.content, 'utf-8')
+      for (const entry of group) {
+        if (isAnchorPath(entry.relPath)) continue
+        const localFile = path.join(NOTES_DIR, entry.relPath)
+        if (entry.deleted) {
+          try { fs.unlinkSync(localFile) } catch { /* already gone */ }
+        } else {
+          fs.writeFileSync(localFile, entry.content, 'utf-8')
+        }
+      }
+      pulled++
+      out(`  ${dir}/`)
+    } catch (e) {
+      errors++
+      err(`${dir}: ${e.message}`)
+    }
+  }
+
+  // Root metadata json — remote write wins (same LWW as the app / GitHub pull).
+  for (const entry of rootFiles) {
+    try {
+      if (entry.deleted) continue // metadata is never deleted by the app
+      const metadataPath = path.join(NOTES_DIR, entry.relPath)
+      const localContent = fs.existsSync(metadataPath) ? fs.readFileSync(metadataPath, 'utf-8') : null
+      if (localContent !== entry.content) fs.writeFileSync(metadataPath, entry.content, 'utf-8')
+    } catch { errors++ }
+  }
+
+  patchCliCloud({ pullCursor: nextPullCursor(c.pullCursor, entries), lastSync: new Date().toISOString() })
+  return { pulled, deleted, errors }
+}
+
+// ── NoteFlow Cloud: commands ──────────────────────────────────────────────────
+
+// noteflow cloud login [email]
+async function cmdCloudLogin(emailArg) {
+  let email = (emailArg || '').trim()
+  if (!email) email = await promptLine('Email: ')
+  if (!email || !email.includes('@')) { err('A valid email is required'); process.exit(1) }
+
+  const otp = await supabaseFetch(`${SUPABASE_URL}/auth/v1/otp`, {
+    method: 'POST',
+    body: { email, create_user: true },
+  })
+  if (otp.status >= 400) {
+    err(otp.status === 429
+      ? 'Too many attempts — wait a moment and try again'
+      : `Could not send the sign-in code (HTTP ${otp.status})`)
+    process.exit(1)
+  }
+  out(`  Sent a 6-digit code to ${email}`)
+  const code = await promptLine('Code: ')
+  if (!code) { err('No code entered'); process.exit(1) }
+
+  const verify = await supabaseFetch(`${SUPABASE_URL}/auth/v1/verify`, {
+    method: 'POST',
+    body: { type: 'email', email, token: code },
+  })
+  const session = verify.json
+  if (verify.status >= 400 || !session || !session.access_token || !session.refresh_token || !session.user) {
+    err('That code is invalid or has expired. Run `noteflow cloud login` again.')
+    process.exit(1)
+  }
+  saveCliAccount({
+    email: session.user.email || email,
+    userId: session.user.id,
+    refreshToken: Buffer.from(session.refresh_token).toString('base64'),
+  })
+  patchCliCloud({ enabled: true })
+  cloudAccessToken = session.access_token
+  out(`  Signed in as ${session.user.email || email} — NoteFlow Cloud sync enabled`)
+
+  // Best-effort: tell the user whether the account already has Cloud keys.
+  try {
+    const res = await cloudRest('/rest/v1/user_keys?select=mode')
+    if (res.status < 400 && Array.isArray(res.json)) {
+      if (res.json.length) {
+        out(`  Cloud keys: ${res.json[0].mode === 'e2ee' ? 'private (e2ee) — passphrase needed to sync' : 'standard (managed)'}`)
+      } else {
+        out('  No Cloud keys yet — run `noteflow cloud setup` (or set up Cloud in the desktop app)')
+      }
+    }
+  } catch { /* informational only */ }
+}
+
+// noteflow cloud logout — best-effort server revocation, keeps cursor/lastSync
+async function cmdCloudLogout() {
+  const account = getCliAccount()
+  if (!account) {
+    patchCliCloud({ enabled: false })
+    out('  Not signed in')
+    return
+  }
+  try {
+    const token = await getCloudAccessToken()
+    await supabaseFetch(`${SUPABASE_URL}/auth/v1/logout`, { method: 'POST', accessToken: token })
+  } catch { /* best-effort revocation */ }
+  clearCliAccount()
+  patchCliCloud({ enabled: false }) // keeps pullCursor/lastSync — re-login resumes incrementally
+  out('  Signed out of NoteFlow Cloud')
+}
+
+// noteflow cloud status [--json]
+async function cmdCloudStatus(opts) {
+  const account = getCliAccount()
+  const c = getCliCloud()
+  let keysMode = null // 'managed' | 'e2ee' | 'none' | null (unknown/unreachable)
+  if (account) {
+    try {
+      const res = await cloudRest('/rest/v1/user_keys?select=mode')
+      if (res.status < 400 && Array.isArray(res.json)) keysMode = res.json.length ? res.json[0].mode : 'none'
+    } catch { /* offline or expired — leave unknown */ }
+  }
+  const gh = getSyncSettings()
+  const noteCount = listLocalNoteDirs().length
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      notesDir: NOTES_DIR,
+      noteCount,
+      cloud: account
+        ? { email: account.email, enabled: !!c.enabled, keysMode, lastSync: c.lastSync || null, pullCursor: c.pullCursor || null }
+        : null,
+      githubConfigured: !!(gh.enabled && gh.owner && gh.repo),
+    }) + '\n')
+    return
+  }
+  out('\n  NoteFlow Cloud')
+  if (!account) {
+    out('  Account:   not signed in — run: noteflow cloud login')
+  } else {
+    out(`  Account:   ${account.email}`)
+    const keysLabel = keysMode === 'none' ? 'none — run: noteflow cloud setup'
+      : keysMode === 'e2ee' ? 'private (e2ee)'
+      : keysMode === 'managed' ? 'standard (managed)'
+      : 'unknown (could not reach the server)'
+    out(`  Keys:      ${keysLabel}`)
+    out(`  Sync:      ${c.enabled ? 'enabled' : 'disabled'}`)
+    if (c.lastSync) out(`  Last sync: ${c.lastSync}`)
+    if (c.pullCursor) out(`  Cursor:    ${c.pullCursor}`)
+  }
+  out(`  Notes:     ${noteCount} in ${NOTES_DIR}`)
+  if (gh.enabled && gh.owner && gh.repo) {
+    out(`  GitHub:    ${gh.owner}/${gh.repo}${cloudActive() ? ' (paused — NoteFlow Cloud takes priority)' : ''}`)
+  }
+  out('')
+}
+
+// noteflow cloud setup — MANAGED mode only: the e2ee setup (passphrase + the
+// one-time recovery code UX) lives in the desktop app.
+async function cmdCloudSetup() {
+  if (!getCliAccount()) { err('Not signed in. Run: noteflow cloud login'); process.exit(1) }
+  const token = await getCloudAccessToken()
+  const dek = generateDek()
+  const res = await supabaseFetch(`${CLOUD_KEYS_URL}/setup`, {
+    method: 'POST',
+    body: { dek: toB64Url(dek) },
+    accessToken: token,
+  })
+  if (res.status === 409) { err('Cloud keys already exist for this account'); process.exit(1) }
+  if (res.status >= 400) { err(`Could not set up the Cloud keys (HTTP ${res.status})`); process.exit(1) }
+  out('  Cloud keys created (standard/managed mode)')
+  out('  For private end-to-end encryption, set up NoteFlow Cloud in the desktop app instead.')
+}
+
+// noteflow cloud push (also plain `noteflow push` while Cloud is active)
+async function cmdCloudPush() {
+  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); process.exit(1) }
+  if (!fs.existsSync(NOTES_DIR)) { out('  No notes to push'); return }
+  await cloudEnsureReconciled()
+  const dek = await getCliDek()
+
+  const relPaths = []
+  for (const dir of listLocalNoteDirs()) {
+    for (const f of fs.readdirSync(path.join(NOTES_DIR, dir))) {
+      if (f.endsWith('.md')) relPaths.push(`${dir}/${f}`)
+    }
+  }
+  for (const m of CLOUD_METADATA_FILES) {
+    if (fs.existsSync(path.join(NOTES_DIR, m))) relPaths.push(m)
+  }
+
+  out(`  Pushing ${relPaths.length} files to NoteFlow Cloud...`)
+  let pushed = 0, errors = 0
+  for (const relPath of relPaths) {
+    try {
+      const noteKey = await cloudGetNoteKey(dek, noteDirOf(relPath) || relPath)
+      await cloudPushFile(dek, noteKey, relPath)
+      pushed++
+      process.stdout.write(`\r  ${pushed}/${relPaths.length}`)
+    } catch (e) {
+      if (e.subscription) { process.stdout.write('\n'); err(e.message); process.exit(1) }
+      errors++
+      console.error(`\n  Failed: ${relPath} — ${e.message}`)
+    }
+  }
+  patchCliCloud({ lastSync: new Date().toISOString() })
+  out(`\n  Done: ${pushed} pushed, ${errors} errors`)
+}
+
+// noteflow cloud pull (also plain `noteflow pull` while Cloud is active)
+async function cmdCloudPull() {
+  if (!cloudActive()) { err('Not connected to NoteFlow Cloud. Run: noteflow cloud login'); process.exit(1) }
+  out('  Pulling from NoteFlow Cloud...')
+  const { pulled, deleted, errors } = await cloudPullNow()
+  out(`  Done: ${pulled} pulled, ${deleted} deleted, ${errors} errors`)
 }
 
 // ── Confirm prompt ────────────────────────────────────────────────────────────
@@ -801,6 +1645,19 @@ async function cmdDelete(titleQuery, opts) {
   fs.rmSync(note.filePath, { recursive: true, force: true })
   out(`  Deleted "${note.title}"`)
 
+  // Remove the note from the remote too — Cloud (tombstones) takes priority.
+  if (cloudActive()) {
+    try {
+      const dek = await getCliDek()
+      // path_key is opaque by design — list + decrypt to find the dir's rows.
+      const remote = await cloudListRemotePaths(dek)
+      const targets = remote.filter(r => r.relPath.startsWith(`${note.dirname}/`))
+      await cloudTombstonePathKeys(targets.map(t => t.pathKey))
+      out('  Deleted from NoteFlow Cloud')
+    } catch (e) { err(`Cloud delete failed: ${e.message}`) }
+    return
+  }
+
   // Remove the whole note dir from GitHub if connected
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
@@ -909,6 +1766,46 @@ function cmdRead(titleQuery, sectionName, opts) {
   process.stdout.write(buf)
 }
 
+// noteflow path <title> [section]  — absolute paths, pipe-friendly (no decoration)
+// Lets an agent edit a section's .md with its own tools instead of read/set round-trips.
+// Pair it with 'noteflow touch <title>' afterwards to bump `updated:` and sync.
+function cmdPath(titleQuery, sectionName, opts) {
+  const note = resolveNote(titleQuery)
+  const dir = path.resolve(note.filePath)
+  if (sectionName) {
+    const sec = resolveSection(note, sectionName)
+    const file = sectionFilePath(note, sec)
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ id: note.id, title: note.title, dir, section: sec.name, file, isRawMode: sec.isRawMode }) + '\n')
+      return
+    }
+    process.stdout.write(file + '\n')
+    return
+  }
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      id: note.id, title: note.title, dir, noteFile: path.join(dir, NOTE_MD),
+      sections: (note.sections || []).map(s => ({ id: s.id, name: s.name, file: sectionFilePath(note, s), isRawMode: s.isRawMode })),
+    }) + '\n')
+    return
+  }
+  process.stdout.write(dir + '\n')
+}
+
+// noteflow touch <title>  — after editing a section .md by hand: bump `updated:` and push
+async function cmdTouch(titleQuery) {
+  const found = resolveNote(titleQuery)
+  // Re-read from disk right before writing: writeNoteFolder rewrites every
+  // section file from note.sections[].content, so a stale copy would clobber
+  // the very edit we are here to publish.
+  const note = readNoteFolder(found.dirname)
+  if (!note) { err(`Could not read note "${found.title}"`); process.exit(1) }
+  const written = writeNoteFolder(note.dirname, note)
+  const stamp = extractUpdatedTimestamp(fs.readFileSync(path.join(NOTES_DIR, note.dirname, NOTE_MD), 'utf-8'))
+  out(`  Updated "${note.title}"  (updated: ${stamp})`)
+  await syncPushNoteFiles(note.dirname, written)
+}
+
 // noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--rich]
 // Overwrites the section's content (creates it if missing). Complements `add` (append).
 async function cmdSet(titleQuery, sectionName, opts) {
@@ -969,6 +1866,11 @@ async function cmdSectionDelete(titleQuery, name, opts) {
   out(`  Deleted section "${sec.name}" from "${note.title}"`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD])
   // Remove the section's file from the remote too, or a pull would resurrect it
+  if (cloudActive()) {
+    try { await cloudTombstoneRelPaths([`${note.dirname}/${removedFile}`]) }
+    catch (e) { err(`Cloud delete failed: ${e.message}`) }
+    return
+  }
   const sync = getSyncSettings()
   if (sync.enabled && sync.owner && sync.repo) {
     const token = getToken()
@@ -1499,6 +2401,37 @@ function cmdHelp(topic) {
 
   Duplicate section names: target one with a 1-based suffix, e.g. "Tasks#2".
 `,
+    path: `
+  noteflow path <title> [section]
+
+  Prints ABSOLUTE paths to stdout — raw, one per line, safe to pipe. Lets an
+  agent (or an editor) open the section's .md directly instead of doing
+  read/set round-trips. Run 'noteflow touch <title>' after editing a file.
+
+  Forms:
+    noteflow path "Project Alpha"            The note's directory
+    noteflow path "Project Alpha" "Tasks"    That section's .md file
+    noteflow path "Project Alpha" --section Tasks   Same, flag form (multi-word titles)
+    noteflow path "Project Alpha" --json     { id, title, dir, noteFile, sections[] }
+    noteflow path "Project Alpha" Tasks --json   { id, title, dir, section, file, isRawMode }
+
+  Title can be partial; duplicate section names take a 1-based suffix ("Tasks#2").
+`,
+    touch: `
+  noteflow touch <title>
+
+  Bumps the note's 'updated:' timestamp and pushes it to the active sync backend
+  (NoteFlow Cloud when signed in, else GitHub). Run it AFTER editing a section's
+  .md by hand — the counterpart of 'noteflow path'.
+
+  The note is re-read from disk first, so your manual edits are what gets synced.
+  Files inside the note dir that are not note.md nor a listed section are removed.
+
+  Example:
+    noteflow path "Project Alpha" Tasks      # -> /home/me/noteflow-notes/project-alpha-ab12/sec002.md
+    # …edit that file with any editor/tool…
+    noteflow touch "Project Alpha"
+`,
     set: `
   noteflow set <title> <section> [content source] [--rich]
 
@@ -1613,6 +2546,27 @@ function cmdHelp(topic) {
   Example:
     noteflow rename "Projct Alpha" "Project Alpha"
 `,
+    cloud: `
+  noteflow cloud login [email]    Sign in with an emailed 6-digit code
+  noteflow cloud logout           Sign out (keeps notes and the sync cursor)
+  noteflow cloud status [--json]  Account, keys mode and sync state
+  noteflow cloud setup            Create Cloud keys (standard/managed mode)
+  noteflow cloud push             Encrypt and upload all notes
+  noteflow cloud pull             Download and decrypt remote changes
+
+  NoteFlow Cloud is the account-based encrypted sync (a subscription is needed
+  to upload). While signed in with Cloud enabled, plain 'noteflow push', 'pull',
+  'status' and the automatic after-command sync use Cloud INSTEAD of GitHub.
+  The first push runs an automatic initial pull to reconcile with the remote.
+
+  Encryption modes:
+    standard (managed)  'noteflow cloud setup' — nothing to remember.
+    private (e2ee)      Set up in the DESKTOP app (it shows the one-time
+                        recovery code). The CLI then asks for your passphrase or
+                        recovery code on each run; set NOTEFLOW_CLOUD_PASSPHRASE
+                        to skip the prompt on servers/cron. The key is never
+                        stored on this machine.
+`,
   }
 
   const aliases = { folder: 'folders', group: 'groups', sections: 'section', pin: 'favorite', rm: 'delete' }
@@ -1629,6 +2583,8 @@ function cmdHelp(topic) {
     get <title>           Show note content (pretty, human-readable)
     read <title> [sec]    Print note/section content RAW (pipe/agent-friendly)
     set <title> <sec>     Overwrite a section's content (creates it if missing)
+    path <title> [sec]    Print the absolute path of a section's .md (or the note dir)
+    touch <title>         Bump 'updated:' and push (after editing a .md by hand)
     delete <title>        Delete a note
     rename <old> <new>    Rename a note
     move <title>          Move a note to a group/folder (--group/--folder/--ungroup)
@@ -1653,9 +2609,12 @@ function cmdHelp(topic) {
   Sync commands:
     login [repo]          Connect to GitHub
     logout                Disconnect from GitHub
-    push                  Push all notes to GitHub
-    pull / update         Pull notes from GitHub  [--force: overwrite even if local is newer]
+    push                  Push all notes (NoteFlow Cloud when signed in, else GitHub)
+    pull / update         Pull notes (NoteFlow Cloud when signed in, else GitHub)
+                          [--force: GitHub only — overwrite even if local is newer]
     status                Show notes and sync status
+    cloud <subcommand>    NoteFlow Cloud (encrypted, account-based sync):
+                          login/logout/status/setup/push/pull — 'noteflow help cloud'
     migrate               One-time migration: flat .md notes → folder format v2
     self-update           Update this CLI script to the latest version
 
@@ -1668,6 +2627,8 @@ function cmdHelp(topic) {
     noteflow read "<title>" "<section>"       Read one section RAW (pipe-friendly)
     noteflow set  "<title>" "<section>" --text "..."   Overwrite a section
     noteflow add  "..." --title "<title>" --section "<section>"   Append instead
+    noteflow path "<title>" "<section>"       Get the .md path, edit it, then:
+    noteflow touch "<title>"                  …bump 'updated:' and sync
 
   AI agent integration:
     NoteFlow ships with an AI agent skill that teaches LLMs how to use this CLI.
@@ -1685,6 +2646,8 @@ function cmdHelp(topic) {
     noteflow list --group backend
     noteflow read "Project Alpha" "Tasks"
     noteflow set "Project Alpha" "Tasks" --text "- [ ] deploy"
+    noteflow path "Project Alpha" "Tasks"
+    noteflow touch "Project Alpha"
     noteflow section rename "Project Alpha" Tasks To-do
     noteflow group create backend --color cyan
     noteflow folder create Planning --group backend
@@ -1768,6 +2731,19 @@ async function main() {
       if (!title) { err('Usage: noteflow read <title> [section]'); process.exit(1) }
       const section = flags.section || positional.slice(1).join(' ')
       cmdRead(title, section, flags)
+      break
+    }
+    case 'path': {
+      const title = positional[0]
+      if (!title) { err('Usage: noteflow path <title> [section]'); process.exit(1) }
+      const section = flags.section || positional.slice(1).join(' ')
+      cmdPath(title, section, flags)
+      break
+    }
+    case 'touch': {
+      const title = positional.join(' ')
+      if (!title) { err('Usage: noteflow touch <title>'); process.exit(1) }
+      await cmdTouch(title)
       break
     }
     case 'set': {
@@ -1854,12 +2830,26 @@ async function main() {
     }
     case 'login':   await cmdLogin(positional[0]); break
     case 'logout':  cmdLogout(); break
-    case 'push':    await cmdPush(); break
+    // Top-level push/pull/status route to NoteFlow Cloud while it is active
+    // (signed in + enabled) and to GitHub otherwise — mirror of the app's
+    // syncProvider priority.
+    case 'push':    if (cloudActive()) await cmdCloudPush(); else await cmdPush(); break
     case 'pull':
-    case 'update':        await cmdPull(flags); break
+    case 'update':  if (cloudActive()) await cmdCloudPull(); else await cmdPull(flags); break
+    case 'cloud': {
+      const sub = positional[0]
+      if (sub === 'login')       await cmdCloudLogin(positional[1])
+      else if (sub === 'logout') await cmdCloudLogout()
+      else if (sub === 'status') await cmdCloudStatus(flags)
+      else if (sub === 'setup')  await cmdCloudSetup()
+      else if (sub === 'push')   await cmdCloudPush()
+      else if (sub === 'pull')   await cmdCloudPull()
+      else { err('Usage: noteflow cloud login|logout|status|setup|push|pull'); process.exit(1) }
+      break
+    }
     case 'migrate':       await cmdMigrate(); break
     case 'self-update':   await cmdSelfUpdate(); break
-    case 'status':  cmdStatus(flags); break
+    case 'status':  if (cloudActive()) await cmdCloudStatus(flags); else cmdStatus(flags); break
     default:
       err(`Unknown command: ${cmd}`)
       cmdHelp()
@@ -1867,4 +2857,19 @@ async function main() {
   }
 }
 
-main().catch(e => { err(e.message); process.exit(1) })
+if (require.main === module) {
+  main().catch(e => { err(e.message); process.exit(1) })
+} else {
+  // Test-only surface: pure crypto + row-mapping functions, exported so the
+  // interop with the desktop app (dist-electron/cloudCrypto.js and
+  // cloudSyncLogic.js) can be verified. The CLI itself always runs as a script.
+  module.exports = {
+    toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
+    derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
+    generateDek, generateNoteKey,
+    noteDirOf, isAnchorPath, isSafeCloudRelPath, parseUpdatedTimestamp,
+    resolveRowUpdatedAt, shouldApplyRemoteDir, shouldApplyRemoteDeletion,
+    nextPullCursor, buildFileUpsertRow, decryptFileRow,
+    CLOUD_METADATA_FILES,
+  }
+}

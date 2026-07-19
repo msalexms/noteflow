@@ -7,7 +7,7 @@ export const cliEn = {
   meta: {
     title: 'NoteFlow CLI — headless notes from your terminal',
     description:
-      'Complete reference for the NoteFlow CLI v1.8.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub, and drive it from scripts or AI agents. A single Node.js script, zero dependencies.',
+      'Complete reference for the NoteFlow CLI v1.10.0: create, read, edit and organize markdown notes from any terminal, sync with GitHub or NoteFlow Cloud, and drive it from scripts or AI agents. A single Node.js script, zero dependencies.',
   },
 
   hero: {
@@ -22,9 +22,9 @@ export const cliEn = {
       '',
       'usage: noteflow <command> [options]',
       '',
-      '  add · new · list · get · read · set',
+      '  add · new · list · get · read · set · path · touch',
       '  sections · section · move · groups · folders',
-      '  login · push · pull · migrate · self-update · status',
+      '  login · cloud · push · pull · migrate · self-update · status',
       '',
       '~ $ noteflow add "It works." --section Ideas',
       '✓ Added to "07-07-2026" · Ideas',
@@ -124,6 +124,10 @@ export const cliEn = {
         name: 'NOTEFLOW_NO_APP_CHECK',
         desc: 'Set to <code>1</code> to silence the stderr warning when mutating groups/folders while the desktop app is running.',
       },
+      {
+        name: 'NOTEFLOW_CLOUD_PASSPHRASE',
+        desc: 'Passphrase (or recovery code) for NoteFlow Cloud accounts in private (e2ee) mode — skips the interactive prompt on servers and cron jobs. Never stored on disk.',
+      },
     ],
     colEnv: 'Variable',
     colEnvDesc: 'Effect',
@@ -134,6 +138,7 @@ export const cliEn = {
     intro: [
       'The CLI is deliberately agent-friendly: every read command takes <code>--json</code> for machine-readable output, results go to <strong>stdout</strong> and errors to <strong>stderr</strong>, and the exit code is <code>0</code> on success, <code>1</code> on error. Since everything is addressed by note title and section name, an agent never needs to track ids.',
       'Two conventions matter: <code>read</code> vs <code>get</code> — <code>get</code> is for humans (indented, decorated) while <code>read</code> emits content verbatim, so agents should always use <code>read</code>. And <code>set</code> vs <code>add</code> — <code>set</code> <strong>replaces</strong> a section, <code>add</code> <strong>appends</strong> to it.',
+      'For <strong>partial edits of a large section</strong> there is a shortcut: the CLI has no find-replace, so <code>read</code> + <code>set</code> means hauling the whole section out and back. If your agent already has file-editing tools, ask <code>path</code> for the section’s <code>.md</code>, edit it in place, and close with <code>touch</code> — which bumps <code>updated:</code> and pushes.',
     ],
     flowH3: 'Typical agent flow',
     flowTermTitle: 'agent session',
@@ -144,6 +149,9 @@ export const cliEn = {
       '$ noteflow read "Project Alpha" "Tasks"',
       '# 3 · overwrite it — or append with `add`',
       '$ noteflow set "Project Alpha" "Tasks" --text "- [x] deploy"',
+      '# 3b · …or edit the section file in place with your own tools',
+      '$ noteflow path "Project Alpha" "Tasks"',
+      '$ noteflow touch "Project Alpha"',
       '# 4 · sync',
       '$ noteflow push',
     ],
@@ -186,7 +194,7 @@ export const cliEn = {
       {
         q: 'I’m logged in in the app, but the CLI asks me to log in',
         a:
-          'Expected: the CLI <strong>can’t decrypt</strong> tokens the desktop app stores with Electron’s <code>safeStorage</code>. It keeps its own token — run <code>noteflow login</code> once.',
+          'Expected: the CLI <strong>can’t decrypt</strong> tokens the desktop app stores with Electron’s <code>safeStorage</code>, and sessions can’t be shared anyway (they rotate on every use). It keeps its own credentials — run <code>noteflow login</code> (GitHub) or <code>noteflow cloud login</code> (NoteFlow Cloud) once.',
       },
       {
         q: 'A note doesn’t show up in list / read',

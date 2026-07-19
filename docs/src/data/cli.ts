@@ -1,4 +1,4 @@
-// Structural reference data for the /cli page — mirrors the NoteFlow CLI v1.8.0.
+// Structural reference data for the /cli page — mirrors the NoteFlow CLI v1.10.0.
 // Language-neutral fields (usage, flags, examples, colour tokens) live here once;
 // the short bilingual descriptions are inline per row (the table is ~30 rows with
 // 80% identical structure — two mirror files would drift apart).
@@ -127,6 +127,28 @@ export const cliGroups: CliGroup[] = [
           { flag: '--rich', desc: { en: 'If the section is created, create it in rich-text mode (default: raw).', es: 'Si crea la sección, la crea en modo rich text (default: raw).' } },
         ],
         example: ['$ noteflow set "Project Alpha" Tasks --text "- [ ] deploy"', '$ cat todo.md | noteflow set "Project Alpha" Tasks --stdin'],
+      },
+      {
+        id: 'path',
+        usage: 'noteflow path <title> [section]',
+        desc: {
+          en: 'Print <strong>absolute paths</strong> verbatim: the section’s <code>.md</code> file, or the note’s directory when no section is given. Lets an agent or editor change a section <strong>in place</strong> — no <code>read</code>/<code>set</code> round-trip. Follow every edit with <code>touch</code>.',
+          es: 'Imprime <strong>rutas absolutas</strong> tal cual: el <code>.md</code> de la sección, o el directorio de la nota si no se indica sección. Permite a un agente o editor cambiar una sección <strong>in situ</strong> — sin round-trip <code>read</code>/<code>set</code>. Cierra cada edición con <code>touch</code>.',
+        },
+        flags: [
+          { flag: '--section <name>', desc: { en: 'Flag form of the positional section (handy with multi-word titles).', es: 'Forma con flag de la sección posicional (útil con títulos multi-palabra).' } },
+          { flag: '--json', desc: { en: '<code>{ id, title, dir, noteFile, sections[] }</code> — or <code>{ id, title, dir, section, file, isRawMode }</code> when a section is given.', es: '<code>{ id, title, dir, noteFile, sections[] }</code> — o <code>{ id, title, dir, section, file, isRawMode }</code> si se indica sección.' } },
+        ],
+        example: ['$ noteflow path "Project Alpha" Tasks', '$ noteflow path "Project Alpha" --json | jq -r \'.sections[].file\''],
+      },
+      {
+        id: 'touch',
+        usage: 'noteflow touch <title>',
+        desc: {
+          en: 'Bump the note’s <code>updated:</code> timestamp and push it to the active sync backend — the counterpart of <code>path</code>, <strong>required after editing a section’s <code>.md</code> by hand</strong> (a raw file edit syncs nothing on its own). The note is re-read from disk first, so your edits are what travels.',
+          es: 'Bumpea el <code>updated:</code> de la nota y la empuja al backend de sync activo — el complemento de <code>path</code>, <strong>obligatorio tras editar el <code>.md</code> de una sección a mano</strong> (editar el fichero no sincroniza nada por sí solo). La nota se relee de disco primero, así que viaja lo que editaste.',
+        },
+        example: ['$ noteflow touch "Project Alpha"'],
       },
       {
         id: 'delete',
@@ -307,6 +329,62 @@ export const cliGroups: CliGroup[] = [
     ]),
   },
   {
+    id: 'cloud',
+    label: { en: 'NoteFlow Cloud', es: 'NoteFlow Cloud' },
+    tok: 'accent',
+    commands: g('accent', [
+      {
+        id: 'cloud-login',
+        usage: 'noteflow cloud login [email]',
+        desc: {
+          en: 'Sign in to your NoteFlow account with an emailed 6-digit code. The CLI keeps its own session, separate from the desktop app’s. While signed in with Cloud enabled, <code>push</code>, <code>pull</code>, <code>status</code> and the automatic after-command sync use NoteFlow Cloud <strong>instead of</strong> GitHub.',
+          es: 'Inicia sesión en tu cuenta NoteFlow con un código de 6 dígitos por email. El CLI guarda su propia sesión, separada de la de la app de escritorio. Con sesión y Cloud habilitado, <code>push</code>, <code>pull</code>, <code>status</code> y el sync automático tras cada comando usan NoteFlow Cloud <strong>en vez de</strong> GitHub.',
+        },
+        example: ['$ noteflow cloud login me@example.com'],
+      },
+      {
+        id: 'cloud-logout',
+        usage: 'noteflow cloud logout',
+        desc: {
+          en: 'Sign out. Keeps your local notes and the sync cursor — signing back in resumes incrementally.',
+          es: 'Cierra la sesión. Conserva las notas locales y el cursor de sync — volver a entrar retoma incremental.',
+        },
+      },
+      {
+        id: 'cloud-setup',
+        usage: 'noteflow cloud setup',
+        desc: {
+          en: 'Create the account’s encryption keys in <strong>standard (managed)</strong> mode — nothing to remember. The <strong>private (e2ee)</strong> mode is set up in the desktop app (it shows the one-time recovery code); the CLI then asks for your passphrase or recovery code on each run, or reads <code>NOTEFLOW_CLOUD_PASSPHRASE</code> for servers and cron. Keys are never stored on disk.',
+          es: 'Crea las claves de cifrado de la cuenta en modo <strong>estándar (managed)</strong> — nada que recordar. El modo <strong>privado (e2ee)</strong> se configura en la app de escritorio (muestra el recovery code de un solo uso); el CLI pide entonces la passphrase o el recovery code en cada ejecución, o lee <code>NOTEFLOW_CLOUD_PASSPHRASE</code> para servidores y cron. Las claves nunca se guardan en disco.',
+        },
+      },
+      {
+        id: 'cloud-push',
+        usage: 'noteflow cloud push',
+        desc: {
+          en: 'Encrypt and upload every note and metadata file (AES-256-GCM, client-side). The first push runs an automatic initial pull to reconcile with the remote. Uploading requires an active NoteFlow Cloud subscription.',
+          es: 'Cifra y sube todas las notas y metadatos (AES-256-GCM, en el cliente). El primer push ejecuta un pull inicial automático de reconciliación. Subir requiere una suscripción NoteFlow Cloud activa.',
+        },
+      },
+      {
+        id: 'cloud-pull',
+        usage: 'noteflow cloud pull',
+        desc: {
+          en: 'Download and decrypt remote changes (incremental). The note’s <code>updated</code> timestamp decides: a newer remote wins the whole note folder; remote deletions only apply when the local copy hasn’t changed since the last sync.',
+          es: 'Baja y descifra los cambios remotos (incremental). Decide el <code>updated</code> de la nota: un remoto más nuevo gana la carpeta entera; los borrados remotos solo se aplican si la copia local no cambió desde el último sync.',
+        },
+      },
+      {
+        id: 'cloud-status',
+        usage: 'noteflow cloud status [--json]',
+        desc: {
+          en: 'Account email, keys mode (standard/private), sync state and cursor. JSON shape: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }</code>.',
+          es: 'Email de la cuenta, modo de claves (estándar/privado), estado del sync y cursor. JSON: <code>{ notesDir, noteCount, cloud: { email, enabled, keysMode, lastSync, pullCursor } | null, githubConfigured }</code>.',
+        },
+      },
+    ]),
+  },
+  {
     id: 'maintenance',
     label: { en: 'Maintenance', es: 'Mantenimiento' },
     tok: 'pink',
@@ -357,7 +435,7 @@ export interface GlobalFlag {
 export const globalFlags: GlobalFlag[] = [
   {
     flag: '--json',
-    applies: 'list · get · read · new · groups · folders · status',
+    applies: 'list · get · read · path · new · groups · folders · status · cloud status',
     desc: { en: 'Machine-readable JSON output.', es: 'Salida JSON machine-readable.' },
   },
   {
@@ -372,7 +450,7 @@ export const globalFlags: GlobalFlag[] = [
   },
   {
     flag: '--section <name>',
-    applies: 'read · get · add · set',
+    applies: 'read · path · get · add · set',
     desc: { en: 'Target a section by name.', es: 'Apunta a una sección por nombre.' },
   },
   {
