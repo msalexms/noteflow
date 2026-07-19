@@ -190,15 +190,18 @@ Anclas: `#organize` `#templates` `#sticky` `#links` `#shortcuts` `#views` `#temp
 | `#personalize` | **14 temas (11 dark + 3 light)** con swatches de valores reales, fuentes, ancho readable | `src/lib/themes.ts` (¡los swatches llevan colores literales!) |
 
 ### `/pricing` — fuente de verdad: **`.claude/context/monetization.md`** (§§ visión / 3 / 4)
-Anclas: `#free` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central: todo lo
-esencial es gratis y lo seguirá siendo; los planes compran comodidad, no capacidad (ambas
-capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub Sync).
+Anclas: `#free` `#plans` `#ai` `#cloud` `#compare` `#privacy`. Accent **pink**. Mensaje central:
+todo lo esencial es gratis y lo seguirá siendo; los planes compran comodidad, no capacidad (ambas
+capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub Sync). Desde
+2026-07 la página **SÍ publica las cifras de precio** (fuente de verdad: monetization.md § visión
+"Precios"; el checkout de Lemon Squeezy sigue mostrando el precio final autoritativo).
 
 | Sección | Documenta | Sincronizar si cambia |
 |---|---|---|
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
-| `#ai` | Plan NoteFlow AI: **modelos curados literales** (gpt-4o-mini, gpt-4.1-mini, claude-haiku-4.5, gemini-2.5-flash), **cuota 3M tokens/mes**, mensual/anual, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy; sin cifras de precio a propósito) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `AI_MONTHLY_TOKENS`) |
-| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in); GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; nota: el producto en Lemon Squeezy aún no existe → botón Subscribe oculto en la app) |
+| `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; las cifras van también al JSON-LD (`offers`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
+| `#ai` | Plan NoteFlow AI: **modelos curados literales** (gpt-4o-mini, gpt-4.1-mini, claude-haiku-4.5, gemini-2.5-flash), **cuota 3M tokens/mes**, mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `AI_MONTHLY_TOKENS`) + § visión "Precios" |
+| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; nota: el producto en Lemon Squeezy aún no existe → botón Subscribe oculto en la app) + § visión "Precios" |
 | `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 

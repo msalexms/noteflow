@@ -2,8 +2,9 @@
 // The /pricing docs page (both locales render through this component — see
 // src/pages/pricing.astro and src/pages/es/pricing.astro). Layout + shell behaviour
 // come from DocsShell; all prose lives in src/i18n/docs/pricing.{en,es}.ts.
-// Content facts come from .claude/context/monetization.md — no price figures are
-// published (pricing is shown at the Lemon Squeezy checkout). Accent = pink.
+// Content facts come from .claude/context/monetization.md — including the price
+// figures in the #plans section (the Lemon Squeezy checkout still shows the
+// final, authoritative price). Accent = pink.
 import DocsShell from '../../layouts/DocsShell.astro';
 import { getRelativeLocaleUrl } from 'astro:i18n';
 import { getPricingContent } from '../../i18n/docs/pricing';
@@ -28,7 +29,18 @@ const jsonLd = {
   name: t.meta.title,
   description: t.meta.description,
   inLanguage: lang,
-  about: { '@type': 'SoftwareApplication', name: 'NoteFlow', applicationCategory: 'ProductivityApplication' },
+  about: {
+    '@type': 'SoftwareApplication',
+    name: 'NoteFlow',
+    applicationCategory: 'ProductivityApplication',
+    // Monthly price of each subscription plan (figures from the plans cards).
+    offers: t.plans.cards.map((c) => ({
+      '@type': 'Offer',
+      name: c.name,
+      priceCurrency: 'EUR',
+      price: c.monthly.replace('€', ''),
+    })),
+  },
 };
 
 // Mono section kicker: "01 / free", numbered from the TOC order.
@@ -67,6 +79,27 @@ const kickerFor = (id: string) => {
       <h3>{t.free.keep.title}</h3>
       <p set:html={t.free.keep.html} />
     </aside>
+  </section>
+
+  <!-- ── Plans & pricing ── -->
+  <section id="plans" data-reveal>
+    <div class="nf-sec-head">{kickerFor('plans')}</div>
+    <h2>{t.plans.title}</h2>
+    {t.plans.intro.map((p) => <p class="nf-docs-p" set:html={p} />)}
+    <div class="nf-plan-grid">
+      {t.plans.cards.map((c) => (
+        <article class="nf-plan-price-card nf-edge">
+          {c.badge && <span class="nf-plan-best">{c.badge}</span>}
+          <h3>{c.name}</h3>
+          <p class="nf-plan-sub">{c.subtitle}</p>
+          <div class="nf-plan-monthly">
+            {c.monthly}<span>{t.plans.perMonth}</span>
+          </div>
+          <div class="nf-plan-yearly">{c.yearly}{t.plans.perYear}</div>
+        </article>
+      ))}
+    </div>
+    <p class="nf-docs-p nf-plan-note">{t.plans.note}</p>
   </section>
 
   <!-- ── NoteFlow AI ── -->
@@ -168,6 +201,55 @@ const kickerFor = (id: string) => {
   }
   .nf-price-card h3 { margin: 0; font-size: 15.5px; font-weight: 600; color: var(--ink-strong); }
   .nf-price-card p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-dim); flex: 1; }
+
+  /* Plan pricing cards (#plans) */
+  .nf-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin: 20px 0 16px;
+  }
+  .nf-plan-price-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 18px 19px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  .nf-plan-price-card h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--ink-strong); }
+  .nf-plan-sub { margin: 0 0 10px; font-size: 12.5px; line-height: 1.45; color: var(--ink-dim); flex: 1; }
+  .nf-plan-monthly {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    color: var(--ink-strong);
+  }
+  .nf-plan-monthly span { font-size: 13px; font-weight: 400; color: var(--ink-dim); margin-left: 2px; }
+  .nf-plan-yearly {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+  /* "Best value" badge on the Bundle card — pink, sibling of .nf-plan-badge */
+  .nf-plan-best {
+    align-self: flex-start;
+    margin-bottom: 8px;
+    padding: 3px 10px;
+    border: 1px solid rgb(var(--pink) / .55);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgb(var(--pink));
+    box-shadow: 0 0 10px rgb(var(--pink) / .18);
+    white-space: nowrap;
+  }
+  .nf-plan-note { font-size: 13.5px; color: var(--ink-dim); }
 
   /* Plan status badge next to the section h2 */
   .nf-plan-badge {

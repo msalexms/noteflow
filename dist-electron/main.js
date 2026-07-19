@@ -1740,11 +1740,9 @@ electron_1.ipcMain.handle('account:refresh-entitlements', () => {
 // attribute the purchase. Built here in main so the user id never crosses to
 // the renderer.
 electron_1.ipcMain.handle('account:open-checkout', (_event, product) => {
-    const base = product === 'ai'
-        ? cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.ai
-        : product === 'cloud'
-            ? cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.cloud
-            : '';
+    const base = product === 'ai' || product === 'cloud' || product === 'bundle'
+        ? cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS[product]
+        : '';
     if (!base)
         return { ok: false, error: 'Checkout is not available yet.' };
     const userId = account.getUserId();

@@ -26,7 +26,20 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
    (push por websocket, no pull cada 5 min), sin fricción de push/pull, más rápido y fiable.
    Futuro no-foco: historial de versiones y compartir notas entre usuarios en tiempo real.
 
-La decisión "un paquete vs dos planes" queda **abierta** — el esquema de entitlements soporta ambos.
+**Precios (decididos 2026-07, EUR** — publicados en la app (Settings → Account) y en `/pricing` de la web):
+
+| Plan | Mensual | Anual |
+|---|---|---|
+| NoteFlow AI | €5.99 | €49.99 |
+| NoteFlow Cloud | €3.99 | €39.99 |
+| NoteFlow Bundle (AI + Cloud) | €7.99 | €79.99 |
+
+El **Bundle** es el tercer producto (resuelve la vieja duda "un paquete vs dos planes": hay ambos):
+una fila `product='bundle'` activa las dos entitlements (`electron/entitlements.ts` ya lo soporta).
+Las cifras de display viven en `src/lib/subscriptionPlans.ts` (la autoritativa es siempre la del
+checkout de Lemon Squeezy — mantener en sync con las variantes de LS y con la web). En LS solo
+existe el producto AI: los productos **Cloud y Bundle están pendientes de crearse** (URLs vacías en
+`LEMONSQUEEZY_CHECKOUT_URLS` → su plan muestra "Coming soon" en vez del botón Subscribe).
 
 ## 1. Backend: Supabase (veredicto y caveats)
 
@@ -158,10 +171,13 @@ es **un preset más**, no una implementación nueva.
   motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
   `LlmConfigView` refresca la config al cambiar el estado de cuenta (`onAccountStatusChanged`).
-  En `AccountPanel`, si hay sesión sin entitlement `ai` y `LEMONSQUEEZY_CHECKOUT_URLS.ai` no está
-  vacía, botón "Subscribe to NoteFlow AI" → IPC `account:open-checkout` (main construye la URL con
+  En `AccountPanel`, con sesión iniciada se muestra la sección de **planes** (Bundle → AI → Cloud,
+  cada uno con nombre y precio de `src/lib/subscriptionPlans.ts`; un plan solo aparece mientras
+  falte su entitlement, y Bundle exige que falten AMBAS — para no facilitar doble facturación).
+  Cada plan con checkout configurado lleva botón "Subscribe" → IPC `account:open-checkout`
+  (`'ai' | 'cloud' | 'bundle'`; main construye la URL con
   `checkout%5Bcustom%5D%5Buser_id%5D=<uuid>` y la abre con `shell.openExternal`; el userId
-  **no cruza al renderer**). URL vacía = botón oculto ("Subscriptions are coming soon.").
+  **no cruza al renderer**). URL vacía = nota "Coming soon" en ese plan.
 - **Auto-activación al suscribirse:** `electron/main.ts` (junto a `account.onStatusChanged`)
   detecta la transición real `entitlements.ai` `false→true` **dentro de la misma sesión de
   cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
@@ -493,12 +509,13 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   `syncError` (rojo, accionable) + botones Enable/Disable, Sync now (`cloudPull`, resultado tipo
   GitHub) y Lock.
 - **Gating (decisión):** solo **Enable sync** exige la entitlement `cloud` — sin ella, mensaje
-  "requires subscription" + botón "Subscribe to NoteFlow Cloud" si
-  `LEMONSQUEEZY_CHECKOUT_URLS.cloud` no está vacía (hoy LO ESTÁ — no existe el producto en LS;
-  el botón queda oculto y se muestra "Subscriptions are coming soon"). Setup/unlock/pull/disable
-  NO se gatean (RLS solo bloquea escrituras; un suscriptor caducado puede bajar sus datos). El
-  IPC `account:open-checkout` acepta ahora `'ai' | 'cloud'` y `AccountStatus` expone
-  `cloudCheckoutConfigured` junto a `aiCheckoutConfigured`.
+  "requires subscription" + la línea de precio del plan Cloud (de `subscriptionPlans.ts`) + botón
+  "Subscribe to NoteFlow Cloud" si `LEMONSQUEEZY_CHECKOUT_URLS.cloud` no está vacía (hoy LO ESTÁ —
+  no existe el producto en LS; el botón queda oculto y se muestra "Subscriptions are coming
+  soon"). Setup/unlock/pull/disable NO se gatean (RLS solo bloquea escrituras; un suscriptor
+  caducado puede bajar sus datos). El IPC `account:open-checkout` acepta `'ai' | 'cloud' |
+  'bundle'` y `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
+  `bundleCheckoutConfigured`.
 - **Exclusión mutua (visual):** el selector de dos tarjetas ya la comunica (solo un backend
   activo; badge "Paused" en GitHub mientras Cloud esté enabled). Además, dentro del panel de
   GitHub sigue el aviso ámbar "paused while NoteFlow Cloud is enabled" (la config se conserva) y,
@@ -602,6 +619,5 @@ puro vía `fetch` desde el proceso main.
   `AccountEntitlements` en `src/types/index.ts`.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
-  email → código de 6 dígitos; signed in → email + badges de plan + Refresh + Sign out + botón
-  "Subscribe to NoteFlow AI" (si hay sesión sin entitlement `ai` y `LEMONSQUEEZY_CHECKOUT_URLS.ai`
-  no está vacía; con la URL vacía se muestra "Subscriptions are coming soon.").
+  email → código de 6 dígitos; signed in → email + badges de plan + sección de **planes con
+  precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión "Precios") + Refresh + Sign out.

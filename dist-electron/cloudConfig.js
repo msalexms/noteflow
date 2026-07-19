@@ -29,6 +29,8 @@ exports.LEMONSQUEEZY_CHECKOUT_URLS = {
     ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',
     // No NoteFlow Cloud product in the LS store yet — empty hides the button.
     cloud: '',
+    // No NoteFlow Bundle (AI + Cloud) product in the LS store yet either.
+    bundle: '',
 };
 /** True once the build carries a real Supabase project configuration. */
 function isCloudConfigured() {

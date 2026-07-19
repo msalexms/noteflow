@@ -1786,11 +1786,9 @@ ipcMain.handle('account:refresh-entitlements', () => {
 // attribute the purchase. Built here in main so the user id never crosses to
 // the renderer.
 ipcMain.handle('account:open-checkout', (_event, product: string) => {
-  const base = product === 'ai'
-    ? LEMONSQUEEZY_CHECKOUT_URLS.ai
-    : product === 'cloud'
-      ? LEMONSQUEEZY_CHECKOUT_URLS.cloud
-      : ''
+  const base = product === 'ai' || product === 'cloud' || product === 'bundle'
+    ? LEMONSQUEEZY_CHECKOUT_URLS[product]
+    : ''
   if (!base) return { ok: false, error: 'Checkout is not available yet.' }
   const userId = account.getUserId()
   if (!userId) return { ok: false, error: 'Sign in to your NoteFlow account first.' }

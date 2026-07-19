@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, Loader, LogOut, Mail, RefreshCw, Sparkles, UserCircle } from 'lucide-react'
 import type { AccountStatus } from '../../types'
+import { SUBSCRIPTION_PRICES, type SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { useLanguageStore } from '../../stores/languageStore'
@@ -77,9 +78,9 @@ export function AccountPanel() {
     if (!result.ok) setError(result.error ?? t.settings.account.couldNotRefresh)
   }
 
-  async function handleSubscribeAi() {
+  async function handleSubscribe(product: SubscriptionProduct) {
     setError(null)
-    const result = await window.noteflow.accountOpenCheckout('ai')
+    const result = await window.noteflow.accountOpenCheckout(product)
     if (!result.ok) setError(result.error ?? t.settings.account.couldNotOpenCheckout)
   }
 
@@ -140,28 +141,10 @@ export function AccountPanel() {
             </p>
           )}
 
-          {/* Subscribe to NoteFlow AI — only when the build carries a checkout
-              URL and the user does not have the entitlement yet. */}
-          {status.aiCheckoutConfigured && !status.entitlements.ai && (
-            <div className="space-y-2">
-              <button
-                onClick={handleSubscribeAi}
-                disabled={busy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
-              >
-                <Sparkles size={11} />
-                {t.settings.account.subscribeAi}
-              </button>
-              <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
-                {t.settings.account.subscribeAiHint}
-              </p>
-            </div>
-          )}
-          {!status.aiCheckoutConfigured && (
-            <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-              {t.settings.account.subscriptionsSoon}
-            </p>
-          )}
+          {/* Subscription plans — each plan shows only while its entitlement is
+              missing (Bundle needs both missing, to avoid double billing). A
+              plan without a checkout URL in this build shows "Coming soon". */}
+          <PlansSection status={status} busy={busy} onSubscribe={handleSubscribe} />
 
           <div className="flex gap-2">
             <button
@@ -277,6 +260,69 @@ export function AccountPanel() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Plans the signed-in user can still subscribe to. Bundle only shows while
+// BOTH entitlements are missing (a bundle on top of a single plan would mean
+// paying twice for the same product); if every plan is covered, nothing renders.
+function PlansSection({
+  status,
+  busy,
+  onSubscribe,
+}: {
+  status: AccountStatus
+  busy: boolean
+  onSubscribe: (product: SubscriptionProduct) => void
+}) {
+  const t = useT()
+  const { ai, cloud } = status.entitlements
+  const plans: Array<{ product: SubscriptionProduct; name: string; subtitle?: string; visible: boolean; configured: boolean }> = [
+    { product: 'bundle', name: 'NoteFlow Bundle', subtitle: t.settings.account.planBundleSubtitle, visible: !ai && !cloud, configured: status.bundleCheckoutConfigured },
+    { product: 'ai', name: 'NoteFlow AI', visible: !ai, configured: status.aiCheckoutConfigured },
+    { product: 'cloud', name: 'NoteFlow Cloud', visible: !cloud, configured: status.cloudCheckoutConfigured },
+  ]
+  const visible = plans.filter((p) => p.visible)
+  if (visible.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {visible.map((plan) => (
+        <div key={plan.product} className="px-3 py-2 rounded bg-surface-0 border border-border">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <span className="text-xs font-mono text-text">{plan.name}</span>
+              {plan.subtitle && (
+                <span className="ml-2 text-[11px] font-mono text-text-muted/60">{plan.subtitle}</span>
+              )}
+              <p className="text-[11px] font-mono text-text-muted mt-0.5">
+                {tf(t.settings.account.planPrice, {
+                  monthly: SUBSCRIPTION_PRICES[plan.product].monthly,
+                  yearly: SUBSCRIPTION_PRICES[plan.product].yearly,
+                })}
+              </p>
+            </div>
+            {plan.configured ? (
+              <button
+                onClick={() => onSubscribe(plan.product)}
+                disabled={busy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40 shrink-0"
+              >
+                <Sparkles size={11} />
+                {t.settings.account.subscribe}
+              </button>
+            ) : (
+              <span className="text-[11px] font-mono text-text-muted/60 shrink-0">
+                {t.settings.account.comingSoon}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+      <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
+        {t.settings.account.subscribeHint}
+      </p>
     </div>
   )
 }

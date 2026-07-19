@@ -42,6 +42,8 @@ export interface AccountStatus {
   aiCheckoutConfigured: boolean
   /** Same, for the NoteFlow Cloud product (gates the Subscribe button in the Cloud panel). */
   cloudCheckoutConfigured: boolean
+  /** Same, for the NoteFlow Bundle (AI + Cloud) product. */
+  bundleCheckoutConfigured: boolean
 }
 
 export interface AccountOpResult {
@@ -179,6 +181,7 @@ export function getAccountStatus(): AccountStatus {
     entitlementsFetchedAt: signedIn ? entitlementsFetchedAt : undefined,
     aiCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
     cloudCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
+    bundleCheckoutConfigured: LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
   }
 }
 

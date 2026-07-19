@@ -3,8 +3,9 @@
 // are rendered with `set:html` in PricingPage.astro; %AI_PROVIDERS_URL% /
 // %AI_PRIVACY_URL% placeholders are filled with locale-aware links there.
 // All facts (plans, curated models, quota, Cloud status) come from
-// .claude/context/monetization.md — no price figures are published on purpose
-// (pricing is shown at checkout).
+// .claude/context/monetization.md — including the price figures in `plans`
+// and the ai/cloud bullets: keep them in sync with monetization.md (§ visión)
+// and the Lemon Squeezy variants. The checkout still shows the final price.
 
 export const pricingEn = {
   meta: {
@@ -22,6 +23,7 @@ export const pricingEn = {
 
   toc: [
     { id: 'free', label: 'Free forever' },
+    { id: 'plans', label: 'Plans & pricing' },
     { id: 'ai', label: 'NoteFlow AI' },
     { id: 'cloud', label: 'NoteFlow Cloud' },
     { id: 'compare', label: 'Managed vs DIY' },
@@ -65,6 +67,39 @@ export const pricingEn = {
     },
   },
 
+  plans: {
+    title: 'Plans & pricing',
+    intro: [
+      'The plans buy convenience, not capability — and you subscribe <strong>from inside the app</strong>: Settings → Account, monthly or annual. The checkout opens in your browser and payment is processed by <strong>Lemon Squeezy</strong>, our merchant of record.',
+    ],
+    perMonth: '/month',
+    perYear: '/year',
+    cards: [
+      {
+        name: 'NoteFlow AI',
+        subtitle: 'The managed model',
+        monthly: '€5.99',
+        yearly: '€49.99',
+        badge: '',
+      },
+      {
+        name: 'NoteFlow Cloud',
+        subtitle: 'Encrypted managed sync',
+        monthly: '€3.99',
+        yearly: '€39.99',
+        badge: '',
+      },
+      {
+        name: 'NoteFlow Bundle',
+        subtitle: 'NoteFlow AI + NoteFlow Cloud together',
+        monthly: '€7.99',
+        yearly: '€79.99',
+        badge: 'Best value',
+      },
+    ],
+    note: 'The final price is always shown at checkout. Annual billing costs less than 12 months at the monthly price.',
+  },
+
   ai: {
     badge: 'Available now',
     title: 'NoteFlow AI — the managed model',
@@ -74,7 +109,7 @@ export const pricingEn = {
     bullets: [
       'No Ollama to install, no third-party account, no API key to buy, store or rotate.',
       'A monthly token quota is included — <strong>3M tokens per month</strong> by default.',
-      'Monthly or annual subscription. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser (handled by Lemon Squeezy, our merchant of record) and shows the price there.',
+      'Monthly or annual subscription — <strong>€5.99/month or €49.99/year</strong>. Subscribe from inside the app: <strong>Settings → Account → Subscribe</strong> — checkout opens in your browser, handled by Lemon Squeezy, our merchant of record.',
       'Once the payment goes through, NoteFlow AI activates itself as your provider — nothing to configure.',
     ],
     modelsTitle: 'Curated models',
@@ -111,6 +146,7 @@ export const pricingEn = {
     bullets: [
       'Automatic sync across devices — no manual pushes, no waiting on a git flow.',
       'Two encryption modes: managed by default (zero secrets to keep), or opt into strict E2EE where the keys never leave your devices.',
+      'Monthly or annual subscription — <strong>€3.99/month or €39.99/year</strong>, subscribed from inside the app (Settings → Account).',
       'For people who don’t want to create and manage a GitHub repo just to sync notes.',
     ],
     alt: {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck, Sparkles } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
+import { SUBSCRIPTION_PRICES } from '../../lib/subscriptionPlans'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
@@ -507,6 +508,14 @@ export function CloudPanel() {
             <div className="space-y-2">
               <p className="text-[11px] font-mono text-text-muted leading-relaxed">
                 {t.settings.cloud.requiresSubscription}
+              </p>
+              {/* Display price — the authoritative figure is the checkout's
+                  (see src/lib/subscriptionPlans.ts). */}
+              <p className="text-[11px] font-mono text-text-muted">
+                {tf(t.settings.account.planPrice, {
+                  monthly: SUBSCRIPTION_PRICES.cloud.monthly,
+                  yearly: SUBSCRIPTION_PRICES.cloud.yearly,
+                })}
               </p>
               {account.cloudCheckoutConfigured ? (
                 <>

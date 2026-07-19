@@ -254,8 +254,14 @@ export const settings = {
     active: 'Active',
     lastChecked: 'Last checked: {time}',
     subscriptionsSoon: 'Subscriptions are coming soon.',
-    subscribeAi: 'Subscribe to NoteFlow AI',
-    subscribeAiHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
+    // Plans block (signed in, entitlements missing). Price figures are NOT in
+    // the dicts — they live in src/lib/subscriptionPlans.ts; only the pattern
+    // is translated and filled with tf().
+    planBundleSubtitle: 'AI + Cloud',
+    planPrice: '{monthly}/month · {yearly}/year',
+    subscribe: 'Subscribe',
+    comingSoon: 'Coming soon',
+    subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
     couldNotOpenCheckout: 'Could not open the checkout.',
     refresh: 'Refresh',
     signOut: 'Sign out',

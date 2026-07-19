@@ -140,6 +140,7 @@ function getAccountStatus() {
         entitlementsFetchedAt: signedIn ? entitlementsFetchedAt : undefined,
         aiCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.ai.length > 0,
         cloudCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.cloud.length > 0,
+        bundleCheckoutConfigured: cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS.bundle.length > 0,
     };
 }
 /** Supabase user id of the signed-in session (main-process only — used to tag
