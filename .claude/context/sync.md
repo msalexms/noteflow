@@ -6,8 +6,16 @@
 `getActiveSyncProvider()`, que devuelve el backend activo — **NoteFlow Cloud si
 `settings.cloudSync.enabled` (prioridad), GitHub en caso contrario**. Son **mutuamente
 excluyentes**: esta función es la única fuente de verdad (el tick del autosync de GitHub se salta
-si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (aviso "paused"
-en la sección GitHub con Cloud activo — tramo 4, ver `monetization.md` § 4 "Settings UI").
+si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (selector de dos
+tarjetas con badges de estado + aviso "paused" en el panel de GitHub con Cloud activo — tramo 4,
+ver `monetization.md` § 4 "Settings UI").
+
+**Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
+que conserva `lastSync`/`pullCursor`/journal) → se **libera la exclusión mutua** y GitHub Sync
+vuelve a sincronizar solo en su siguiente tick si estaba conectado. Sin ese apagado la app se
+quedaba sin ningún backend activo (Cloud sin sesión no puede sincronizar y GitHub seguía "Paused").
+Lógica pura de la transición: `electron/accountTransition.ts` (ver `monetization.md` § 4 "Cerrar
+sesión").
 
 Superficie (extraída de lo que `main.ts` consumía de `githubSync.ts`; ambos adapters son finos y
 delegan 1:1 sin cambiar comportamiento): `isConnected()`, `schedulePush(relPath, content,
@@ -32,6 +40,10 @@ contra Supabase con E2EE, tombstones en vez de borrado por ausencia, sin cola de
 con pull incremental por `updated_at`): detalle completo en `monetization.md` § 4. Su journal
 reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
 (`userData/cloud-sync-state.json`) — nunca el `sync-state.json` de GitHub.
+
+**El CLI** (`cli/noteflow.js`) tiene su propio cliente Cloud headless (`noteflow cloud …`, con
+sesión y cursor propios en `settings.cliAccount`/`cliCloud`, y la misma prioridad Cloud > GitHub):
+ver `monetization.md` § 4 "Cliente CLI (headless)".
 
 ### GitHub Sync (`electron/githubSync.ts`)
 - **Auth:** Device Flow OAuth — sin client secret; el usuario autoriza en
@@ -70,9 +82,12 @@ reutiliza las transiciones puras de `syncState.ts` en un fichero PROPIO
   aún no aterrizaron), y la regla de borrado local se salta cualquier dir con `upsert` pendiente
   (su push no aterrizó; borrarlo sería pérdida de datos).
 - **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
-  **note-order.json**, templates.json (los dos en negrita se pusheaban pero NO se pulleaban — bug
-  arreglado con el cambio de formato). `templates.json` (plantillas de nota) sigue el mismo patrón
-  simple que note-order: push debounced + pull.
+  **note-order.json**, templates.json, ui-settings.json (los dos en negrita se pusheaban pero NO
+  se pulleaban — bug arreglado con el cambio de formato). `templates.json` (plantillas) y
+  `ui-settings.json` (apariencia + ajustes del editor, ver `architecture.md`) siguen el mismo
+  patrón simple que note-order: push debounced + pull. ⚠️ La lista tiene un espejo en
+  `CLOUD_METADATA_FILENAMES` (`cloudSyncLogic.ts`), en `RESERVED_ROOT_NAMES` (`main.ts`) y en
+  `METADATA_FILES` del CLI (`cli/noteflow.js`) — mantener las cuatro en sync al añadir un JSON raíz.
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
   journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el

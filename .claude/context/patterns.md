@@ -69,7 +69,10 @@ recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hov
 acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan los primitivos del
 store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
 iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
-pasa por `ConfirmModal`. `Esc` limpia la selección antes de cerrar la vista. Sin IPC nuevo.
+pasa por `ConfirmModal`. **Color del grupo:** el punto de la cabecera es un botón que abre un popover
+con la paleta `TAG_COLOR_VARS` y llama a `useGroupsStore.setGroupColor` (misma acción que usa el color
+picker del menú contextual del sidebar). `Esc` cierra el popover de color si está abierto; si no, limpia
+la selección; si no, cierra la vista (los inline-edit siguen gestionando su propio `Esc`). Sin IPC nuevo.
 
 ### Vista de nota (note overview)
 `notesStore` tiene `noteViewId: string | null` + `setNoteView(id)`. Es una de las **vistas full-area
@@ -188,8 +191,9 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   background: transparent }`). Botón en la toolbar (icono `Highlighter`).
 - **Blockquote / cita (`> texto`, estilo VSCode):** `@tiptap/extension-blockquote`. Round-trip con
   `mdBlockquoteToHtml` (líneas consecutivas → `<p>` con `<br>`; línea `>` vacía → nuevo párrafo) y el
-  caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo `--accent-2`
-  + texto atenuado. Botón en la toolbar (icono `Quote`).
+  caso `blockquote` en `blockElToMd` (prefija cada línea con `> `). Estilo: borde izquierdo del color
+  compartido `--code-accent` (fallback `--accent`; el mismo que el borde del `pre`, personalizable —
+  ver "Colores del editor") + texto atenuado. Botón en la toolbar (icono `Quote`).
 - **Bloque de código — selector de lenguaje (`CodeBlockWithCopy.tsx`):** el NodeView de
   `CodeBlockLowlight` pinta a la izquierda (`top-2 left-2`) un botón con el lenguaje actual ("Plain
   text" si `language` es null) y a la derecha el botón Copy. El botón izquierdo abre un dropdown
@@ -255,8 +259,12 @@ oculta en lugar de cerrarse (`win.hide()`); la app vive en el system tray. Atajo
 
 ### Ventana de Ajustes unificada (`src/components/Settings/`)
 El ⚙ del TitleBar abre `SettingsModal` (overlay in-app, NO un BrowserWindow): split **nav
-izquierda + panel derecho**, una sección por panel (Appearance, Editor, Templates, Startup, Sync,
-Data, AI, Account, Shortcuts, About — un `.tsx` por panel en `src/components/Settings/`).
+izquierda + panel derecho**, una sección por panel (un `.tsx` por panel en
+`src/components/Settings/`). El orden canónico de la nav es el array `NAV` de `SettingsModal.tsx`
+(icono + id; las labels salen del diccionario i18n por id) — no se duplica aquí. La **sección por
+defecto es `general`** (la primera de la nav): el default vive en dos sitios y deben ir a la par —
+la prop `initialSection` de `SettingsModal` y el `useState<SettingsSection>` del `TitleBar` (que es
+quien la abre; la paleta de comandos solo cambia esa sección vía eventos).
 Sustituyó al antiguo dropdown del titlebar y a los modales sueltos (eliminados);
 `ExportImportModal` se conserva y se lanza desde el `DataPanel` por callback. Tamaño **fijo
 proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]`. Cada panel gestiona su propio
@@ -264,6 +272,28 @@ estado/efectos. El `CommandPalette` dispara los mismos eventos de siempre
 (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/-export/-import`) y el TitleBar
 los reinterpreta para abrir la ventana en la sección correcta (export/import siguen abriendo el
 flujo `ExportImportModal` directo).
+
+**Lenguaje visual compartido (`src/components/Settings/ui.tsx`) — úsalo en cualquier panel nuevo.**
+Los 13 paneles repetían a mano el estilo de sus encabezados y botones, y la jerarquía se había
+perdido (títulos casi invisibles en `text-text-muted/70`, botones "fantasma" que eran solo texto).
+La fuente única de verdad ahora es:
+- **`<SectionTitle>`** — encabezado de subsección: `text-[11px] font-mono font-semibold text-text
+  uppercase tracking-widest` + **línea `border-b border-border` a todo el ancho** (se eligió el
+  borde inferior sobre un chip con fondo: no compite con las tarjetas, que ya tienen fondo). Props:
+  `children`, `icon?` (icono a la izquierda) y `action?` (slot a la derecha para acciones de la
+  subsección, p. ej. los "Theme default" de Appearance).
+- **`settingsButtonClass`** — cuerpo del botón **secundario** (el default): `bg-surface-2 border
+  border-border text-text hover:bg-surface-3` + estados `disabled`. **No** incluye tamaño/padding/
+  rounded: cada llamada mantiene los suyos. Los botones **primarios** (`border-text/20`, en Account/
+  Cloud/Sync) y los **destructivos** (rojo) conservan su propio color — la distinción es intencional.
+- **`settingsRaisedButtonClass`** — el mismo botón pero con `bg-surface-3`, para los que van **sobre
+  una tarjeta `surface-2`** (las filas de Templates), donde un fill `surface-2` desaparecería.
+Jerarquía resultante: título de la sección activa (`SettingsModal`, `text-sm font-semibold` + regla
+inferior) → `SectionTitle` de cada subsección → etiqueta `text-text` + su hint a `mt-1` →
+contenido. Los contenedores de panel van a `space-y-6`. Toggles/switches, swatches de color y
+tarjetas seleccionables (tema/fuente/backend) **no** usan estas clases: tienen su propio lenguaje.
+Todo en **tokens del tema** (`surface-*`, `border`, `text`, `text-muted`) — nunca colores
+hardcodeados, o se rompe en alguno de los 14 temas.
 
 ### Single instance
 `app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente.
@@ -371,14 +401,22 @@ abrir el dmg en Finder** (no reemplazo automático). Qué cambió y qué NO:
 
 ### CLI companion (`cli/noteflow.js`)
 Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`. Comandos:
-`add`, `new`, `list`, `get`, `read`, `set`, `delete`, `rename`, `sections`, `section add/rename/delete`,
-`favorite` (alias `pin`), `archive`, `groups`, `group create/delete`, `login`, `logout`, `push`,
-`pull`/`update`, `status`, `self-update`.
+`add`, `new`, `list`, `get`, `read`, `set`, `path`, `touch`, `delete`, `rename`, `move`, `sections`,
+`section add/rename/delete`, `favorite` (alias `pin`), `archive`, `groups`, `group create/delete`,
+`folders`, `folder create/rename/delete`, `login`, `logout`, `push`, `pull`/`update`, `status`,
+`cloud login/logout/status/setup/push/pull` (cliente NoteFlow Cloud headless — ver
+`monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
+sync automático van a Cloud en vez de a GitHub), `migrate`, `self-update`.
 Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
 sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). Pensado para
 agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
-**`set`** sobrescribe una sección (vs `add`, que solo añade al final). Detalle completo en
-`cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
+**`set`** sobrescribe una sección (vs `add`, que solo añade al final). Como el CLI no tiene
+find-replace, para **ediciones parciales** existe la vía sin round-trip: **`path`** imprime la ruta
+absoluta del `.md` de una sección (o del dir de la nota) para que el agente lo edite con sus propias
+herramientas, y **`touch`** cierra el ciclo — relee la nota de disco (obligatorio: `writeNoteFolder()`
+reescribe cada `<secId>.md` desde `note.sections[].content`, así que una copia vieja pisaría la
+edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. Detalle
+completo en `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
 
 **Auto-instalación de la skill.** Para que un agente (Claude Code) descubra la CLI sin descargar nada,
 la app copia `cli/noteflow-cli/SKILL.md` a `~/.claude/skills/noteflow-cli/SKILL.md`. La carpeta
@@ -403,6 +441,26 @@ Dark: Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, Gru
 Obsidian, Emerald Forest, Synthwave. Light: Arctic Day, Parchment. El tema se persiste en
 `settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`); usuarios
 existentes conservan el suyo, los nuevos arrancan en `noteflow-dark`.
+
+### Colores del editor (overrides sobre el tema)
+
+Además del acento y la fuente de la app, Ajustes → Apariencia permite repintar **6 colores del
+editor** por encima del tema activo (`editorColors` en `src/stores/themeStore.ts`):
+
+| Key (`EditorColorKey`) | CSS var | Fallback del tema | Qué pinta |
+|---|---|---|---|
+| `h1` / `h2` / `h3` | `--heading-1/2/3` | `--accent` / `--cyan` / `--text` | Encabezados |
+| `italic` | `--em-color` | `--purple` | Cursiva (`em`) |
+| `inlineCode` | `--code-inline` | `--red` | Código inline (`code`, no el `pre code`) |
+| `codeAccent` | `--code-accent` | `--accent` | Borde izquierdo **compartido** de `pre` y `blockquote` |
+
+Mecánica (la misma para los 6): el override se guarda como triplete `"r g b"` o `null` = seguir el
+tema; se aplica con `setProperty`/`removeProperty` sobre `document.documentElement` y el CSS usa el
+fallback nativo (`color: rgb(var(--code-inline, var(--red)))` en `src/index.css`), así que sin
+override el color sigue vivo al cambiar de tema. Persistencia en `localStorage` bajo la clave
+**`noteflow-heading-overrides`** — nombre heredado de cuando solo había H1/H2/H3: se mantiene (en vez
+de migrar a otra clave) porque el parser tolera claves ausentes → `null`, y así los usuarios que ya
+habían personalizado sus encabezados no pierden nada. La clave se borra cuando los 6 vuelven a `null`.
 
 ### UI text size (zoom global) y posicionamiento de popups `fixed`
 

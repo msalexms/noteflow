@@ -128,7 +128,7 @@ es **un preset más**, no una implementación nueva.
   cuota) tras resolver el token a `user_id`, **sin gate de entitlement** (ver el consumo es
   inocuo y sigue siendo útil tras caducar la suscripción). Lo consume el IPC `ai:llm-usage`
   (main pide un access token fresco; devuelve `null` ante cualquier fallo — la UI solo oculta la
-  barra) que alimenta la barra de consumo de la card premium en `LlmConfigView`.
+  barra) que alimenta la barra de consumo de la **sección NoteFlow AI** de `LlmConfigView`.
 - **Upstream OpenRouter:** una key, cientos de modelos, cambiar el catálogo sin tocar infra
   (sobrecoste ~5%, asumido). Lista curada actual (todos tool-calling; **visión en todos salvo los
   dos DeepSeek**, text-only) — **estándar ×1:** `openai/gpt-4o-mini`, `openai/gpt-4.1-mini`,
@@ -148,14 +148,15 @@ es **un preset más**, no una implementación nueva.
   `toPublic().configured` para este preset exige sesión + entitlement `ai`, y
   `notConfiguredMessage()` da el motivo exacto ("sign in" vs "requires subscription").
   Capabilities: imágenes sí (modelos curados con visión); PDF no (anthropic-only).
-- **UI:** el preset **NoteFlow AI ya no aparece en el `<select>` de proveedores** de
-  `LlmConfigView` (se filtra explícitamente por id) — tiene su propia **card "premium"** (acento
-  de marca, `border-accent/50 bg-accent/15`) por encima de la lista normal, visible solo si
-  `account.entitlements.ai` está activa **o** si ya es el proveedor activo (caso de suscripción
-  perdida: sigue viendo la card para entender qué pasa y cambiar de proveedor desde el `<select>`).
-  La card tiene un botón "Use NoteFlow AI" (`changeProvider('noteflow')`) cuando no es el activo, o
-  un check "Active" cuando sí lo es; el aviso ámbar de sesión/suscripción faltante
-  (`noteflowSignIn`/`noteflowNeedsSubscription`) vive ahora dentro de esa card, no en la principal.
+- **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
+  selector de dos cards (**NoteFlow AI** vs **proveedor propio / IA local**, ambas siempre visibles,
+  con badge Activo/Inactivo) y debajo solo la sección de la elegida. El preset **NoteFlow AI no
+  aparece en el `<select>` de proveedores** (se filtra por id). Su sección: barra de consumo mensual +
+  botón "Use NoteFlow AI" (`changeProvider('noteflow')`) **solo con entitlement `ai`**; sin sesión o
+  sin entitlement, en su lugar el aviso ámbar (`noteflowSignIn`/`noteflowNeedsSubscription`) que
+  remite a Ajustes → Cuenta — también cuando la suscripción caduca teniéndolo activo (sigue viendo el
+  motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
+  de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
   `LlmConfigView` refresca la config al cambiar el estado de cuenta (`onAccountStatusChanged`).
   En `AccountPanel`, si hay sesión sin entitlement `ai` y `LEMONSQUEEZY_CHECKOUT_URLS.ai` no está
   vacía, botón "Subscribe to NoteFlow AI" → IPC `account:open-checkout` (main construye la URL con
@@ -178,7 +179,18 @@ es **un preset más**, no una implementación nueva.
   entitlement antes de este proceso (y se loguea después de que la cuenta A, sin entitlement,
   cierre sesión) heredaría la baseline `false` de A y se auto-switchearía indebidamente al
   reflejar por primera vez su propia entitlement `true`. Nunca se auto-switchea al revés (perder
-  la entitlement no cambia de proveedor).
+  la entitlement **no** cambia de proveedor: la suscripción caducada sigue viéndose con su motivo
+  en la UI y el usuario decide).
+- **Al cerrar sesión, el asistente vuelve a BYO/local:** sin sesión el preset `noteflow` está roto
+  (el proxy responde 401), así que el sign-out revierte `settings.aiLlm.active` al **último
+  proveedor NO-`noteflow`** que el usuario tuviera activo — persistido en
+  `settings.aiLlm.lastByoProvider` por `withActiveProvider()` (`ai/llm/index.ts`) en los DOS sitios
+  que activan el plan gestionado (el auto-switch de `main.ts` y el `ai:llm-set-config` de la UI) —
+  o a `DEFAULT_LLM_CONFIG.active` (`'anthropic'`) si no hay tal dato (`byoFallbackProvider()`). Las
+  keys BYO no se tocan (viven en `byPreset`), así que volver es inmediato. Al volver a iniciar
+  sesión **la misma** cuenta, si la entitlement `ai` sigue viva se re-activa `noteflow`
+  automáticamente (registro `accountRestore` — ver § 4 "Cerrar sesión", donde está el mecanismo
+  completo; es un camino **aparte** del auto-switch por entitlement de arriba, e idempotente).
 - **Pendiente del operador (cuota ponderada):** correr la **migración 0007** (`supabase db push`)
   y **redesplegar `ai-proxy`** (`supabase functions deploy ai-proxy`) para que el nuevo catálogo,
   los multiplicadores y el endpoint `/usage` entren en vigor. Sin redeploy, el proxy sigue
@@ -236,9 +248,11 @@ diferencial de privacidad, no como peaje.
   notas van cifradas en tránsito y en reposo, pero NoteFlow **técnicamente podría** leerlas.
   - `POST cloud-keys/setup` `{dek}` → envuelve e inserta la fila `user_keys` con `mode='managed'`
     (409 si ya hay fila, mismo contrato que el setup e2ee). `POST cloud-keys/unlock` → devuelve
-    `{dek}` al dueño de la sesión (404 sin fila; 409 si la fila es e2ee). **Sin gating por
-    entitlement** (las claves siempre se pueden crear/leer, espejo de la RLS de `user_keys`).
-    Se despliega CON verify JWT (default).
+    `{dek}` al dueño de la sesión (404 sin fila; 409 si la fila es e2ee).
+    `POST cloud-keys/downgrade` `{dek}` → cambio e2ee → managed (ver bullet de abajo): envuelve
+    la DEK que envía el cliente con la KEK del operador y reescribe la fila (404 sin fila; 409
+    `already_managed` si ya es managed). **Sin gating por entitlement** (las claves siempre se
+    pueden crear/leer, espejo de la RLS de `user_keys`). Se despliega CON verify JWT (default).
   - **Auto-unlock** (`autoUnlockManaged`, single-flight, nunca lanza): se intenta en el boot,
     al pasar a signed-in, desde el tick del autosync y desde la UI (IPC `cloud:auto-unlock`,
     polling de 10 s del panel mientras esté `locked`+managed). **Requisito duro: un usuario
@@ -254,15 +268,29 @@ diferencial de privacidad, no como peaje.
   `dek_managed_ct`; e2ee exige el juego completo passphrase+recovery). RLS sin cambios;
   `dek_managed_ct` lo escribe solo el service role **por convención** (un write directo del
   cliente es inocuo: no conoce la KEK del operador).
-- **Upgrade managed → e2ee, ONE-WAY** (`upgradeCloudKeysToE2ee`, IPC `cloud:upgrade-e2ee`, botón
+- **Upgrade managed → e2ee** (`upgradeCloudKeysToE2ee`, IPC `cloud:upgrade-e2ee`, botón
   "Switch to private mode" del panel): requiere `unlocked`; envuelve la DEK vigente con la nueva
   passphrase + recovery code nuevo y hace PATCH de la fila (`mode='e2ee'`, `dek_managed_ct=NULL`)
   — lo permite la RLS de ownership. La **DEK no cambia** (no se recifra el corpus): las notas ya
   subidas pudieron ser técnicamente accesibles durante el modo managed — se avisa en la UI, no se
   resuelve (rotar la DEK cambiaría todos los `path_key` HMAC → re-upload completo, fuera de
-  alcance). **No hay downgrade** e2ee → managed (debilitaría el cifrado en silencio).
+  alcance).
+- **Downgrade e2ee → managed** (`downgradeCloudKeysToManaged`, IPC `cloud:downgrade-managed`,
+  botón "Switch to standard mode" del panel; decisión de producto 2026-07 — antes no existía
+  para no debilitar el cifrado en silencio, ahora existe pero **explícito y confirmado, nunca
+  silencioso**): requiere `unlocked` (el cliente envía su DEK vigente a
+  `POST cloud-keys/downgrade`, misma confianza que el setup managed); la Edge Function la
+  envuelve con la KEK del operador y reescribe la fila vía service role (`mode='managed'`,
+  `dek_managed_ct` puesto, y **todas las columnas passphrase/recovery a NULL** — la passphrase y
+  el recovery code **dejan de funcionar**, intencionado; el CHECK `user_keys_mode_coherent` de
+  la 0005 ya permite ese estado). La DEK tampoco cambia. La UI (CloudPanel) despliega una
+  confirmación con un aviso ámbar que lleva las dos advertencias: NoteFlow pasa a poder leer
+  técnicamente las notas (incluidas las ya subidas) y los secretos actuales quedan invalidados.
 - El estado público (`CloudSyncStatus`) lleva `keysMode: 'managed' | 'e2ee' | null` (null = sin
   fila o aún desconocido); persiste en `settings.cloudSync.keysMode` como cache de arranque.
+- **Pendiente del operador (downgrade):** **redesplegar la Edge Function `cloud-keys`**
+  (`supabase functions deploy cloud-keys`) para que la ruta `/downgrade` exista en producción;
+  sin redeploy el botón del panel devuelve 404 (`not_found`). No hace falta migración nueva.
 
 ### Jerarquía de claves (implementada en `electron/cloudCrypto.ts`)
 - **Master key (DEK)** aleatoria de 256 bits, generada en cliente al activar la nube.
@@ -390,11 +418,72 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   (`CLOUD_AUTO_SYNC_INTERVAL_MS`: cubre WS caído y drena el journal offline). El estado público
   expone `realtimeConnected` (informativo, aún sin UI).
 
+### Cerrar sesión (sign-out) — implementado
+
+**Principio: sin sesión, la app vuelve a su estado gratuito/local.** Lo de pago se presenta como
+oferta, no como posesión rota — pero **no se destruye ni configuración ni datos**. La decisión
+(qué apagar/restaurar dados el status previo, el nuevo y el registro) es una **función pura**,
+`electron/accountTransition.ts` (`planAccountTransition`, testeada en
+`tests/electron/accountTransition.test.ts`); `main.ts` la ejecuta en **cada**
+`account:status-changed` (`handleAccountStatusChanged` → `applyAccountTransition`) y aplica el plan.
+
+- **En la transición real `signedIn` true→false** (sign-out explícito **y** refresh token revocado,
+  que ya hace `clearSession()` + `notifyStatusChanged()`):
+  - **Cloud:** `disableCloudSync()` (`enabled = false`, conserva `lastSync`/`pullCursor`/journal) →
+    libera la exclusión mutua y GitHub Sync se reanuda solo si estaba conectado.
+  - **Claves:** `resetCloudKeysSession()` (`cloudKeys.ts`) — **borra toda la sesión de claves**: la
+    DEK de memoria + la cache `settings.cloudSync.encryptedDek` **y** el estado aprendido
+    (`remoteKeysKnown` y `keysMode`, incluido el `keysMode` **persistido**). Cerrar sesión significa
+    "esta máquina ya no puede descifrar mis notas". Los tres son **estado de la cuenta que se va**, no
+    del dispositivo: heredarlos envenena a la siguiente cuenta que entre en esa máquina — con la DEK
+    (`autoUnlockManaged` corta en `if (dek) return false`) leería notas ajenas; con `keysMode='e2ee'`
+    heredado, una cuenta managed quedaría **atascada para siempre** en un formulario de passphrase
+    (`doAutoUnlockManaged` corta en `keysMode === 'e2ee'` y `unlockCloudKeys` responde "this account
+    uses standard encryption") **y reiniciar no lo cura** porque está en disco; con
+    `remoteKeysKnown === false` heredado vería el formulario de setup y se comería un 409. Todo se
+    re-aprende en el primer auto-unlock de la cuenta nueva.
+  - **IA:** si el activo era `noteflow`, vuelve al proveedor BYO/local (ver § 3, "Al cerrar sesión").
+  - **Memoria de restauración:** `settings.json` → `accountRestore` =
+    `{identity: <email de la sesión que se cierra>, cloudEnabled, aiManaged}`. **Nunca** tokens ni
+    secretos: un email y dos booleanos (`parseAccountRestore` lo valida al leerlo).
+- **Al volver a iniciar sesión:** si hay registro y la **identidad coincide** (case-insensitive), se
+  restaura lo que estaba **condicionado a la entitlement viva** (`cloudEnabled && entitlements.cloud`
+  → `enableCloudSync()`; `aiManaged && entitlements.ai` → `aiLlm.active = 'noteflow'`) y el registro
+  se **consume**. Si la identidad NO coincide (otra cuenta) el registro se borra sin aplicar nada
+  (arranque limpio). ⚠️ Las entitlements llegan **asíncronas** (`initAccount` difiere el refresh 5 s;
+  `verifyOtp` las trae al vuelo), así que el registro **se evalúa en cada cambio de status** mientras
+  la identidad coincida y solo se consume cuando ya se conocen (`entitlementsFetchedAt`) — evaluar
+  contra el placeholder `NO_ENTITLEMENTS` lo tiraría a la basura. Si la entitlement caducó, no se
+  restaura nada: la feature simplemente se vuelve a ofrecer.
+  - **El pull inicial NO se lanza desde la restauración:** en ese instante la DEK es `null` por
+    construcción (el sign-out la soltó), así que un `pullNotes()` inmediato solo dejaría
+    `syncError = "Cloud keys are locked"`. Se habilita + `startCloudAutoSync()` y se dispara
+    `runCloudSyncCycle()`, que hace el orden correcto: auto-unlock managed → drenar journal → pull.
+  - **Corte anti-sorpresa (`clearRestoreSurface`):** una acción **explícita** del usuario logueado
+    sobre una de las dos superficies gana sobre el registro y borra **esa mitad** (IPC `cloud:enable`
+    / `cloud:disable` → mitad Cloud; `ai:llm-set-config` con `active` → mitad IA). Sin este corte, un
+    usuario que entra con el fetch de entitlements caído (el de `verifyOtp` es best-effort y
+    `entitlementsFetchedAt` solo vive en memoria), decide dejar Cloud apagado, y ve cómo un
+    `refreshEntitlements` posterior (o el diferido de 5 s del siguiente arranque) se lo re-enciende
+    por detrás. Por mitades y no todo-o-nada: tocar el asistente no debe tirar la restauración de
+    Cloud que sigue esperando a que lleguen las entitlements.
+- **UI:** el badge de la tarjeta Cloud (`SyncPanel.tsx`) se deriva de `enabled && signedIn` — con lo
+  anterior ese caso ya no debería darse, pero el badge no puede mentir. No hizo falta copy nuevo: los
+  estados existentes (`t.settings.cloud.signInFirst`, aviso ámbar `noteflowSignIn` de `LlmConfigView`)
+  ya cubren el "sin sesión".
+
 ### Settings UI (tramo 4 — implementado)
-- **Ubicación:** la página **Settings → Sync** contiene DOS secciones —
-  `src/components/Settings/CloudPanel.tsx` (NoteFlow Cloud, arriba) y la sección GitHub debajo
-  (mismo `SyncPanel.tsx`, cuerpo extraído a un componente interno `GitHubSyncSection`). Textos
-  vía i18n `t.settings.cloud.*` (+ `t.settings.sync.githubTitle`/`pausedByCloud`).
+- **Ubicación:** la página **Settings → Sync** (`SyncPanel.tsx`) empieza por un **selector de
+  backend de dos tarjetas** (NoteFlow Cloud / GitHub Sync, patrón visual de las cards de modo de
+  cifrado: `aria-pressed` + `border-accent bg-accent/[0.08]`), cada una con un **badge de estado**
+  derivado del estado real (Active / Paused / Inactive / Not connected). Debajo se renderiza SOLO
+  el panel del backend seleccionado: `src/components/Settings/CloudPanel.tsx` o el componente
+  interno `GitHubSyncSection` de `SyncPanel.tsx`. La preselección resuelve **una sola vez** cuando
+  llegan ambos status (Cloud enabled → Cloud; si no, GitHub conectado → GitHub; si ninguno →
+  Cloud) y nunca vuelve a pisar la elección del usuario. `CloudPanel` no repite su título (lo dice
+  la tarjeta): solo su párrafo `desc`. Textos vía i18n `t.settings.cloud.*` +
+  `t.settings.sync.*` (`chooseBackendDesc`, `cloudCardDesc`, `githubTitle`, `githubCardDesc`,
+  `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
 - **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Account";
   `no-keys` → formulario de passphrase (input + confirmación, mínimo 8 chars) → `cloudSetup` →
   el **recovery code se muestra UNA vez** en un bloque ámbar que oculta el resto del panel hasta
@@ -410,12 +499,49 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
   NO se gatean (RLS solo bloquea escrituras; un suscriptor caducado puede bajar sus datos). El
   IPC `account:open-checkout` acepta ahora `'ai' | 'cloud'` y `AccountStatus` expone
   `cloudCheckoutConfigured` junto a `aiCheckoutConfigured`.
-- **Exclusión mutua (visual):** con Cloud enabled, la sección GitHub muestra un aviso ámbar
-  "paused while NoteFlow Cloud is enabled" (la config de GitHub se conserva); a la inversa, con
-  GitHub conectado y Cloud desbloqueado pero no habilitado, aviso de que activar Cloud pausará
-  GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
+- **Exclusión mutua (visual):** el selector de dos tarjetas ya la comunica (solo un backend
+  activo; badge "Paused" en GitHub mientras Cloud esté enabled). Además, dentro del panel de
+  GitHub sigue el aviso ámbar "paused while NoteFlow Cloud is enabled" (la config se conserva) y,
+  a la inversa, con GitHub conectado y Cloud desbloqueado pero no habilitado, aviso de que activar
+  Cloud pausará GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
 - **Reactividad:** `CloudPanel` se suscribe a `onCloudStatusChanged` + `onAccountStatusChanged`;
-  la sección GitHub a `onCloudStatusChanged` (para el aviso de pausa).
+  `SyncPanel` a `onCloudStatusChanged` (badges + aviso de pausa). El estado *connected* de GitHub
+  lo sube `GitHubSyncSection` al padre vía callback: `sync:status-changed` solo se emite para el
+  initial pull (`githubSync.onStatusChanged`), no en connect/disconnect.
+
+### Cliente CLI (headless) — implementado
+
+`cli/noteflow.js` incluye su propio cliente Cloud (grupo `noteflow cloud
+login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de Node ≥18):
+
+- **Sesión propia:** `settings.cliAccount = {email, userId, refreshToken}` (base64 plano, mismo
+  trade-off que el token de GitHub del CLI; `chmod 0600` best-effort en POSIX). **Nunca comparte
+  `settings.account`** con la app: GoTrue rota el refresh token en cada uso y compartir sesión los
+  deslogearía mutuamente. El token rotado se persiste **antes** de usar el access token; un 400/401
+  del refresh borra `cliAccount` ("Session expired"). Un access token por invocación (proceso
+  one-shot, sin single-flight).
+- **Estado propio:** `settings.cliCloud = {enabled, pullCursor, lastSync}` — cursor/lastSync del
+  CLI, independientes de `settings.cloudSync` (cada cliente reconcilia por su cuenta). `logout`
+  conserva cursor/lastSync (re-login retoma incremental).
+- **DEK por invocación, jamás cacheada en disco** (ni la passphrase): managed → `cloud-keys/unlock`
+  en cada run; e2ee → passphrase de `NOTEFLOW_CLOUD_PASSPHRASE` o prompt interactivo con eco oculto
+  (un input de 30 chars normalizados del alfabeto se trata como recovery code). En e2ee la máquina
+  no debe custodiar la clave — ese es el contrato del modo privado en una caja headless.
+- **`cloud setup` = solo managed** (deposita la DEK en la Edge Function; 409 si ya hay claves); el
+  setup e2ee (recovery code una vez) es exclusivo de la app de escritorio.
+- **Crypto y mapeo = puertos 1:1 de `cloudCrypto.ts`/`cloudSyncLogic.ts`** (params idénticos;
+  espejo `CLOUD_METADATA_FILES` con los **6** json de raíz — el `METADATA_FILES` de GitHub del CLI
+  tiene 5, sin `templates.json`). Interop verificada por round-trip contra los módulos compilados
+  de `dist-electron/`. Cuando se importa como módulo (`require`), el CLI exporta esas funciones
+  puras para tests.
+- **Prioridad Cloud sobre GitHub** (espejo de `syncProvider.ts`): con `cliCloud.enabled` + sesión,
+  `noteflow push/pull/status` y el sync automático por comando (`syncPushNoteFiles`, borrados)
+  van a Cloud y NO tocan GitHub. Borrados = tombstones `PATCH deleted=true` con fallback a `DELETE`
+  físico en 403; un 403 en un upsert corta el push completo con el mensaje de suscripción.
+- **Gate de pull inicial:** sin `pullCursor` ni `lastSync` (nunca reconciliado), el primer push
+  ejecuta antes un pull automático ("First Cloud reconcile…") — un disco viejo no machaca un
+  remoto más nuevo. Pull incremental idéntico al de la app (paginado `Range`, ancla decide,
+  regla de borrado `updated <= lastSync`, cursor = max `updated_at` visto).
 
 ### Futuro (no-foco, solo dejar la puerta abierta)
 - **Historial de versiones:** tabla `file_versions` (insert del cliente en cada push; blobs
@@ -429,7 +555,7 @@ files(user_id, path_key, path_ct, content_ct, key_ct, updated_at, deleted,
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + card dedicada en `LlmConfigView` — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×6), endpoint `/usage` + **barra de consumo en la UI** (la card premium ya la muestra vía IPC `ai:llm-usage`) |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×6), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). Pendiente del operador: crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto; mientras tanto hay una suscripción manual de pruebas, ver § 4) |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 

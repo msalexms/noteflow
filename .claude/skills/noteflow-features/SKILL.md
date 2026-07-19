@@ -62,12 +62,19 @@ Iconos del TitleBar:
   de descarga y luego un spinner "Installing…").
 - **☁ sync**: estado de GitHub Sync (conectado verde / subiendo girando / error ámbar / off).
 - **⚙ settings**: abre la **ventana de Ajustes** (overlay tipo app de settings) con nav izquierda
-  + panel derecho. Secciones: **General** (idioma de la interfaz: System/English/Español),
-  **Appearance** (tema/fuente/acento/headings/escala), **Editor**
-  (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Startup** (autostart + stickies),
-  **Sync** (NoteFlow Cloud + GitHub), **Data** (export/import + carpeta de notas), **AI**, **Account** (cuenta
-  NoteFlow), **Keyboard shortcuts** y **About** (versión + updates + repo). Tamaño fijo
-  proporcional a la ventana de la app.
+  + panel derecho, **en General** (la primera de la nav). Secciones, **en el orden en que aparecen
+  en la nav**: **General** (idioma de la
+  interfaz: System/English/Español; debajo, la sección **Activity**: gráfica monocroma de línea con
+  montículos suaves sobre una baseline con la actividad de notas de las últimas 16 semanas
+  (cuadrícula tenue con marca semanal, encabezado y leyendas de ejes en HTML —"16 weeks ago"/"Today"—
+  porque el SVG se estira; solo lee timestamps, nunca contenido; el gráfico en sí no tiene texto ni
+  números); `ActivityPulse.tsx` + `src/lib/activityPulse.ts`), **AI**, **Sync** (NoteFlow Cloud + GitHub), **Account** (cuenta
+  NoteFlow), **Appearance** (tema/fuente/acento/colores del editor/escala), **Editor**
+  (fuente/tamaño/ancho), **Templates** (plantillas de nota), **Data** (export/import + carpeta de
+  notas), **Startup** (autostart + stickies), **Keyboard shortcuts** y **About** (versión + updates +
+  repo). Tamaño fijo proporcional a la ventana de la app. El orden vive en el array `NAV` de
+  `SettingsModal.tsx`; las labels vienen del diccionario i18n por id. La paleta de comandos y los
+  atajos pueden abrirla directamente en otra sección (p. ej. shortcuts, startup, sync).
 - Controles de ventana: minimizar / maximizar / cerrar (cerrar = ocultar al tray).
 
 ---
@@ -165,7 +172,8 @@ click derecho en la cabecera del grupo → **"View group"**.
 cabecera. Seleccionar cualquier nota —también desde el sidebar— cierra la vista.
 
 **Disposición** (estética mono-minimalista, acento fino del color del grupo):
-- Cabecera: punto de color + nombre + contadores (`N notas · M carpetas`) + acciones.
+- Cabecera: punto de color (clicable → paleta) + nombre + contadores (`N notas · M carpetas`) +
+  acciones.
 - Una **banda por carpeta** (con su contador), una banda **"No folder"** para las notas sueltas
   del grupo, y una banda **"Archived"** al final con las notas archivadas del grupo.
 - Dentro de cada banda, las notas en **cuadrícula responsiva** de tarjetas.
@@ -180,6 +188,12 @@ Acento del color del grupo a la izquierda.
 - **Reorganizar** → arrastrar una tarjeta a otra banda mueve la nota de carpeta (la banda
   "Archived" no es zona de drop).
 - **Crear** → botones "New note" / "New folder" en la cabecera.
+- **Renombrar el grupo** → doble clic en el nombre de la cabecera (o el lápiz al hacer hover).
+- **Cambiar el color del grupo** → click en el punto de color de la cabecera: abre un popover con la
+  paleta (la misma del menú contextual del grupo en el sidebar); el color actual va marcado. Se
+  cierra al elegir, con click fuera o con `Esc` (que en ese caso no cierra la vista).
+- **Renombrar / eliminar una carpeta** → botones lápiz/papelera en la cabecera de su banda (aparecen
+  al hover; borrar pide confirmación y devuelve sus notas a la raíz del grupo).
 - **Ancho de tarjeta** → slider discreto en la cabecera (atenuado, se realza al hover); ensanchar
   las tarjetas revela más secciones a la vez. El valor se persiste en `localStorage`.
 - Solo se listan notas **no archivadas** en las bandas de carpetas/"No folder"; las archivadas van
@@ -196,7 +210,8 @@ Acento del color del grupo a la izquierda.
   todas ya lo tienen, lo quitan; si no, lo ponen), **Move to group** (cualquier grupo o "No group"),
   **Move to folder** (carpetas del grupo actual o "Group root"), **Delete** (con confirmación; "N
   notes will be permanently deleted") y **✕** para limpiar la selección.
-- `Esc` limpia la selección si hay alguna; si no, cierra la group overview.
+- `Esc` cierra el popover de color si está abierto; si no, limpia la selección si hay alguna; si no,
+  cierra la group overview.
 
 ---
 
@@ -220,8 +235,9 @@ sección en el editor).
 **Disposición** (misma estética mono-minimalista que la group overview):
 - Cabecera: candado si está cifrada + **título de la nota editable inline** (click o lápiz al hacer
   hover → input; commit en blur/Enter, `Esc` revierte; no editable si está bloqueada) + estrella de
-  favorito (toggle) + contador (`N sections · fecha`) + botón **"Add section"** + botón **borrar nota**
-  (papelera roja, con confirmación) + `✕`.
+  favorito (toggle) + contador (`N sections · fecha`) + botón **"Select all" / "Deselect all"** (solo
+  si hay secciones) + botón **"Add section"** + botón **borrar nota** (papelera roja, con
+  confirmación) + `✕`.
 - Cuadrícula de **tarjetas de ancho fijo**, una por sección.
 
 **Tarjeta de sección** — replica lo que verías al pinchar esa sección (de las pestañas hacia abajo):
@@ -241,9 +257,13 @@ sección en el editor).
 - **Favorito** → toggle de la estrella en la cabecera.
 - **Selección múltiple de secciones** (igual que en la group overview): un **checkbox** aparece en la
   esquina superior derecha de cada tarjeta al hacer hover; **click** en el checkbox lo marca,
-  **Ctrl/Cmd-click** sobre la tarjeta togglea, **Shift-click** selecciona el rango. Con ≥1 marcada
-  aparece una **barra de acciones flotante** anclada abajo: **Hide from AI / Show to AI** (oculta o
-  vuelve a indexar las secciones para la IA; solo en notas no cifradas), **Delete** (borra las
+  **Ctrl/Cmd-click** sobre la tarjeta togglea, **Shift-click** selecciona el rango. El botón
+  **"Select all"** de la cabecera (y `Ctrl/Cmd+A`) marca todas las secciones; si ya lo están, pasa a
+  **"Deselect all"** y limpia la selección. Con ≥1 marcada aparece una **barra de acciones flotante**
+  anclada abajo: **Hide from AI / Show to AI** (oculta o vuelve a indexar las secciones para la IA;
+  solo en notas no cifradas), **Raw mode / Editor mode** (cambia de golpe el modo de todas las
+  seleccionadas — el mismo flag persistido que el menú `⋯` de la sección en el editor; si todas ya
+  están en raw, el botón las devuelve al editor; nunca toca el contenido), **Delete** (borra las
   seleccionadas con confirmación — deshabilitado si están todas marcadas, para no dejar la nota
   vacía) y **Clear**. `Esc` limpia la selección antes de cerrar la vista.
 - Notas **cifradas y bloqueadas** muestran un estado "encrypted" (sin previews) hasta desbloquear
@@ -543,8 +563,10 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
     listar pero el agente no lee ni edita su contenido. (Implementación: tool-calling nativo, no el CLI.)
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
-- **Profile:** cuestionario del **segundo cerebro** — aparece automáticamente la primera vez que
-  entras al cerebro (si hay proveedor y no se completó). Pensado para **cualquier persona** (no solo
+- **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro
+  siempre aterrizas en el chat (o en el proveedor, si aún no configuraste ninguno) y el cuestionario
+  se abre cuando pulsas la pestaña **Profile** (o desde la paleta / Ajustes → IA). Pensado para
+  **cualquier persona** (no solo
   perfiles técnicos) y para **mínimo esfuerzo**, organizado en **secciones**: *Professional* (a qué
   te dedicas, herramientas, en qué te enfocas), *Personal*, *Your style* y *Working with the AI*
   (**cómo quieres que te hable la IA** — el chip que más ajusta sus respuestas). **Filosofía:
@@ -564,17 +586,23 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   quedan en una sección final de baja relevancia y la IA tiene **prohibido sacarlos a colación** en
   conversaciones que no vienen a cuento (te recomienda directo, sin "como te gusta tal película…").
   La app nunca procesa los documentos: se los pasa directamente al modelo.
-- **⚙ Settings (proveedor):** elige proveedor (Anthropic/Claude, OpenAI, DeepSeek, MiniMax, Moonshot,
-  OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API key** (BYO; gratis y privado),
-  ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia key/modelo** —
-  cambiar de proveedor no las mezcla. Las claves se guardan cifradas y nunca salen de tu máquina.
-  - **NoteFlow AI (suscripción):** si tienes la suscripción activa, encima del selector aparece una
-    **card dedicada** con acento de marca — sin API key ni Base URL (usa tu cuenta NoteFlow) y con
-    modelos curados. Botón "Use NoteFlow AI" para activarlo, o check "Active" si ya lo es. No sale
-    en el desplegable de proveedores, y la card no se muestra sin suscripción (salvo que sea el
-    proveedor activo y hayas perdido la suscripción: entonces muestra el aviso para que entiendas
-    el fallo y puedas cambiar de proveedor). **Al suscribirte** (Subscribe → pagar → Refresh en
-    Settings → Account), NoteFlow AI **se activa como proveedor automáticamente**.
+- **⚙ Settings (proveedor):** el asistente se alimenta de **una de dos fuentes, excluyentes**, y se
+  eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
+  Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
+  - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
+    modelos curados (algunos con sufijo "6× cuota") y **barra de consumo mensual**. Botón "Use NoteFlow
+    AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
+    visible pero en vez del botón muestra el aviso que te lleva a Ajustes → Cuenta — igual que si la
+    suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
+    **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Account), NoteFlow AI **se activa
+    como proveedor automáticamente**.
+  - **Tu proveedor / IA local (BYO; gratis y privado):** elige proveedor (Anthropic/Claude, OpenAI,
+    DeepSeek, MiniMax, Moonshot, OpenRouter, Ollama local, o Custom OpenAI-compatible), pega tu **API
+    key**, ajusta Base URL y modelo, y prueba la conexión. **Cada proveedor recuerda su propia
+    key/modelo** — cambiar de proveedor no las mezcla. Las claves se guardan cifradas y nunca salen de
+    tu máquina. Si el activo es NoteFlow AI, esta sección solo muestra el desplegable + un botón
+    **"Use this provider"**: los campos (key, Base URL, modelo) aparecen al activarlo, porque siempre
+    editan la config del **proveedor activo**.
 
 > **Dos interruptores independientes:** la **IA local** (embeddings, se activa en el cerebro) da
 > contexto RAG y conexiones de contenido; el **proveedor LLM** (Ajustes) da el chat. El chat funciona
@@ -638,7 +666,19 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
 | Dark (11) | NoteFlow Dark, Tokyo Night, Midnight Blue, Carbon, VS Code Dark, Dracula, True Godot, GruvBox Dark, Obsidian, Emerald Forest, Synthwave |
 | Light (3) | NoteFlow Light, Arctic Day, Parchment |
 
-Persisten entre sesiones (`settings.json`). Definidos en `src/lib/themes.ts` como sets de CSS vars.
+Persisten entre sesiones y definidos en `src/lib/themes.ts` como sets de CSS vars.
+
+**Personalización sobre el tema** (misma pantalla, todo con presets + selector de color libre y
+reset por control): **fuente** de la app, **color de acento** y **colores del editor** — H1, H2, H3,
+**cursiva**, **código inline** y un color compartido para el **borde izquierdo de bloques de código y
+citas**. Cada control sin tocar sigue al tema (y cambia con él); el panel muestra un **preview en
+vivo** de todo.
+
+**Sync entre dispositivos:** el tema y toda esta personalización (más los ajustes del editor:
+tamaño/familia de fuente y ancho legible) viajan en `ui-settings.json` dentro del dir de notas,
+así que con cualquier sync activo (GitHub o Cloud) la apariencia sigue al usuario a cada máquina
+y se aplica en caliente al recibir un pull. La **escala de UI** y el **idioma** quedan fuera
+a propósito (por dispositivo).
 
 ---
 
@@ -763,12 +803,20 @@ Settings → Startup:
 
 ---
 
-## NoteFlow Cloud (Settings → Sync, sección superior)
+## Settings → Sync: elegir backend
+
+La página **Sync** empieza con un **selector de dos tarjetas** — **NoteFlow Cloud** y **GitHub
+Sync** — porque son **mutuamente excluyentes**: solo un backend puede estar activo a la vez. Cada
+tarjeta lleva un **badge de estado** (Active / Paused / Inactive / Not connected) y, al pulsarla,
+debajo se muestra **solo el panel de ese backend**. Al abrir la página viene preseleccionado el
+backend que esté realmente en uso (Cloud activado → Cloud; si no, GitHub conectado → GitHub; si
+ninguno → Cloud); a partir de ahí manda la elección del usuario. Con Cloud activado, GitHub queda
+**en pausa** (badge amarillo + aviso ámbar en su panel; la config de GitHub se conserva).
+
+## NoteFlow Cloud (Settings → Sync)
 
 Nube de notas **cifrada** de pago (suscripción) con **dos modos de cifrado a elegir** (modelo
-Obsidian Sync). Convive en la página **Sync** con GitHub Sync (debajo) — son **mutuamente
-excluyentes**: con Cloud activado, GitHub Sync queda en pausa (aviso ámbar en su sección; la
-config de GitHub se conserva).
+Obsidian Sync).
 
 Los dos modos (se eligen al configurar, con dos cards):
 - **Standard (managed, DEFAULT y recomendado):** el usuario no guarda NINGÚN secreto — la clave
@@ -792,9 +840,14 @@ Flujo del panel según estado:
 - **Desbloqueado:** badge del modo activo (Standard / Private E2EE), badge Sync enabled/disabled,
   "Last sync", botones **Enable/Disable sync**, **Sync now** (pull manual con resultado tipo
   GitHub) y **Lock** (solo en modo private — en managed se re-desbloquearía solo). En managed,
-  botón **"Switch to private mode"**: upgrade ONE-WAY a E2EE (pide passphrase, muestra el
+  botón **"Switch to private mode"**: upgrade a E2EE (pide passphrase, muestra el
   recovery code una vez y borra la copia del servidor), con aviso de que las notas ya
-  sincronizadas pudieron ser técnicamente accesibles hasta ese momento. No hay vuelta a Standard.
+  sincronizadas pudieron ser técnicamente accesibles hasta ese momento. En private, botón
+  **"Switch to standard mode"**: downgrade a managed con confirmación explícita y un aviso
+  ámbar con las dos advertencias (NoteFlow pasa a custodiar la clave y técnicamente podría leer las notas, incluidas las
+  ya subidas; la passphrase y el recovery code actuales dejan de funcionar — el desbloqueo pasa
+  a ser automático con la sesión). Nunca silencioso; requiere estar desbloqueado (sin pedir
+  ningún secreto).
 - **Gating por suscripción:** solo el botón **Enable sync** exige la entitlement `cloud` (sin
   ella: mensaje "requires subscription" + botón de checkout si la build trae URL). Crear claves,
   unlock, pull y disable funcionan sin suscripción (un suscriptor caducado puede seguir bajando
@@ -808,7 +861,7 @@ Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 
 ## GitHub Sync
 
-Settings → Sync (sección inferior, bajo NoteFlow Cloud).
+Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 
 ### Conectar
 1. Introduce el nombre del repositorio privado donde se guardarán las notas.
@@ -822,7 +875,7 @@ Settings → Sync (sección inferior, bajo NoteFlow Cloud).
 - **Al guardar**: push automático con debounce (~5s). El icono ☁ indica cuándo está subiendo.
 - **Al borrar**: el archivo se elimina también del repo remoto.
 - Se sincronizan notas + `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
-  `templates.json`.
+  `templates.json`, `ui-settings.json` (apariencia y ajustes del editor).
 - El repositorio se crea como **privado** automáticamente si no existe.
 
 ### Panel de sync
@@ -919,6 +972,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+W` | Eliminar sección |
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
+| `Ctrl+A` | Seleccionar/deseleccionar todas las secciones (en la vista de nota) |
 | `Delete` | Borrar nota seleccionada (cuando no se edita) |
 
 ### Sticky notes
@@ -944,8 +998,11 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 
 - Notas en `~/noteflow-notes/` (Windows/macOS) / `~/.local/share/noteflow-notes/` (Linux).
 - Junto a ellas: `groups.json`, `folders.json`, `section-colors.json`, `note-order.json`,
-  `templates.json` (todo sincronizable).
+  `templates.json`, `ui-settings.json` (todo sincronizable).
 - Auto-save con debounce tras cada cambio.
 - Formato v2 (carpeta por nota): `note.md` con el frontmatter YAML + un `.md` por sección.
 - Carpeta configurable desde Settings → Data → "Choose notes directory".
-- Ajustes locales (tema, autostart, estado de UI, token de sync) en `settings.json` del userData.
+- Ajustes locales (idioma, autostart, estado de UI, token de sync) en `settings.json` del userData.
+  La apariencia (tema, fuente, acento, colores del editor) y los ajustes del editor (tamaño/familia
+  de fuente, ancho legible) se sincronizan vía `ui-settings.json`; la escala de UI y el idioma
+  siguen siendo por dispositivo.

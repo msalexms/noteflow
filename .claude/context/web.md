@@ -117,16 +117,39 @@ Cuando cambie algo en la app, este mapa dice qué tocar en la web. Editar siempr
 `.en.ts` + `.es.ts` (el tipo obliga).
 
 ### Landing `/` (`src/i18n/{en,es}.ts`)
-Features del mock de notas, chat mock, mockup de perfil, botones de descarga (Windows/Linux →
-GitHub Releases), CTAs a `/cli`, `/ai` y `/features` (+ footer, que enlaza también a `/pricing`,
+Features del mock de notas, chat mock, mockup de perfil, botones de descarga (ver
+"Descargas del landing" abajo), CTAs a `/cli`, `/ai` y `/features` (+ footer, que enlaza también a `/pricing`,
 `/privacy` y `/terms` **sin `data-nav`** — el script de sinapsis de la home no los conoce). Vídeos/capturas por tema en
 `public/video/` y `public/screenshots/`. Actualizar al cambiar UX visible o al hacer release con
 features nuevas destacables.
 
+**Descargas del landing (`#get`)** — fila flex con los **dos botones de descarga** (Windows `nf-lift`
+primario + Linux `nf-ghost` con `dlGhost`, 14px), ambos a `/releases/latest` y con su `data-dl`
+(`win`/`linux`) → rótulo de versión → disclaimer. Los dos botones pesan **igual** a propósito: los dos
+son descargas, ninguno debe leerse como la opción menor. **Nada se hornea en build time** y no hay dependencia del `package.json` raíz: la web solo se redespliega con
+cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuanto salga un release.
+
+- **HTML de partida**: los dos botones de descarga apuntan a `https://github.com/yagoid/noteflow/releases/latest`
+  — la **página** del último release, con `target="_blank"`. Es a propósito: los assets **llevan la
+  versión en el nombre**, así que **no existe URL estable a un binario concreto** (no hay
+  `releases/latest/download/…`). Alguien intentará "arreglarlo" fijando una URL de asset: se
+  quedaría desfasada. `/releases/latest` nunca caduca ni da 404, y es lo que ve quien no tiene JS.
+- **Cliente** (script `data-dl` de `Home.astro`, al cargar): pide
+  `api.github.com/repos/yagoid/noteflow/releases/latest` (ya excluye prereleases) y, por cada
+  botón, mete el `browser_download_url` **que devuelve la API** para el asset que casa
+  `/-Setup\.exe$/` o `/_amd64\.deb$/` sobre `assets[].name` (el `$` excluye los `.blockmap`). Los
+  nombres **no se reconstruyen por patrón** → cambiar los `artifactName` no rompe la web. Al pasar a
+  binario directo se le quita el `target` (una descarga no abre pestaña en blanco). Asset ausente →
+  ese botón se queda en `/releases/latest`, que es un fallback correcto.
+- **Rótulo de versión** (`[data-dl-version-row]` / `[data-dl-version]`): sale con
+  `visibility:hidden` (hueco reservado, sin salto de layout) y solo aparece cuando el script resuelve
+  el `tag_name`. Fallo/403/JSON raro → silencioso: sin rótulo y con los `href` a `/releases/latest`.
+
 ### `/cli` — fuente de verdad: **`cli/noteflow-cli/SKILL.md`** (skill `noteflow-cli`)
-Documenta el CLI **v1.8.0**. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
+Documenta el CLI **v1.10.0**. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
 `#agents` `#caveats` `#troubleshooting`.
-- Tabla de comandos/flags/ejemplos (27 comandos en 5 grupos): **`src/data/cli.ts`** (estructural,
+- Tabla de comandos/flags/ejemplos (38 comandos en 6 grupos, incluido el grupo **NoteFlow Cloud**
+  `cloud login/logout/setup/push/pull/status`): **`src/data/cli.ts`** (estructural,
   con `desc: {en,es}` inline por fila).
 - Prosa (instalación, formato v2, avisos PowerShell/app-abierta, troubleshooting): `cli.{en,es}.ts`.
 - **Si cambia el CLI** (`cli/noteflow.js` + su SKILL.md): reflejar comandos/flags nuevos en

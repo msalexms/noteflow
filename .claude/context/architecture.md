@@ -31,6 +31,8 @@ noteflow/
 │   ├── syncProvider.ts  # Interfaz SyncProvider + getActiveSyncProvider() (GitHub ⟂ Cloud) — ver sync.md
 │   ├── account.ts       # Cuenta NoteFlow (Supabase Auth email+OTP vía REST, sesión en main,
 │   │                    #   refresh token cifrado, entitlements) — ver monetization.md
+│   ├── accountTransition.ts # Lógica pura del sign-out/sign-in: qué apagar (Cloud, DEK, IA gestionada)
+│   │                    #   y qué restaurar (registro accountRestore) — testeada; ver monetization.md § 4
 │   ├── cloudConfig.ts   # URL + anon key del proyecto Supabase real (la anon key es pública por diseño)
 │   ├── cloudCrypto.ts   # Capa criptográfica pura de NoteFlow Cloud (DEK/KEK/recovery, AES-GCM, path_key)
 │   ├── cloudKeys.ts     # Sesión de claves E2EE en main (setup/unlock/lock, DEK solo en memoria,
@@ -65,9 +67,9 @@ noteflow/
 │   │   ├── notesStore.ts             # Estado de notas (Zustand) — loadNotes (batch), CRUD
 │   │   ├── groupsStore.ts            # Grupos — persistidos en groups.json (IPC)
 │   │   ├── templatesStore.ts         # Plantillas de nota — persistidas en templates.json (IPC)
-│   │   ├── themeStore.ts             # Tema — lee/escribe settings.json vía IPC (sendSync)
+│   │   ├── themeStore.ts             # Tema/fuente/acento/colores editor — SINCRONIZADO en ui-settings.json (IPC sendSync); escala de UI en localStorage (por dispositivo)
 │   │   ├── languageStore.ts          # Idioma UI (i18n) — settings.json vía IPC; dict de src/i18n; cambio en caliente vía broadcast
-│   │   ├── editorSettingsStore.ts    # Tamaño de fuente del editor (localStorage)
+│   │   ├── editorSettingsStore.ts    # Fuente/tamaño/ancho legible del editor — SINCRONIZADO en ui-settings.json (IPC)
 │   │   ├── sectionTagColorsStore.ts  # Color por nombre de sección — section-colors.json
 │   │   ├── aiStore.ts                # Estado del índice IA (enabled, related, grafo, progreso) vía IPC ai:*
 │   │   └── aiChatStore.ts            # Estado del chat/LLM (config por proveedor, modelos, mensajes, sesiones) vía IPC ai:llm-*/ai:chat*/ai:chats-*
@@ -110,7 +112,7 @@ noteflow/
 │   │   │   ├── AiPanel.tsx              #   Contenedor con pestañas Chat / Related / Profile / ⚙ Settings
 │   │   │   ├── ChatView.tsx             #   Chat streaming + selector de modelo + historial + citas
 │   │   │   ├── RelatedView.tsx          #   "Related notes" por sección (movido aquí del cerebro)
-│   │   │   ├── LlmConfigView.tsx        #   Config del proveedor (preset, baseUrl, key, modelo, test)
+│   │   │   ├── LlmConfigView.tsx        #   Fuente del asistente: selector NoteFlow AI | proveedor propio/IA local (+ baseUrl, key, modelo, test)
 │   │   │   ├── ProfileFlow.tsx          #   Cuestionario por secciones (chips/tags/text/choice + archivos + enlaces) → genera nota de perfil
 │   │   │   └── profileQuestions.ts      #   Esquema data-driven (PROFILE_SECTIONS: Professional/Personal/Your style/AI; proxy + binarias Big Five) + PROFILE_FIELDS + detectLocale()
 │   │   ├── Brain/                       # Vista cerebro ("El Cerebro" Fase 2 — grafo de notas)
@@ -133,11 +135,12 @@ noteflow/
 │   │   │                                #   el ⚙ abre la ventana de Ajustes (SettingsModal)
 │   │   ├── Settings/                    # Ventana de Ajustes unificada (overlay split nav+contenido)
 │   │   │   ├── SettingsModal.tsx        #   Contenedor: nav izquierda + panel derecho según sección
-│   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/headings/escala + preview
+│   │   │   ├── AppearancePanel.tsx      #   Tema/fuente/acento/colores del editor/escala + preview
 │   │   │   ├── EditorPanel.tsx          #   Font size / fuente / ancho
 │   │   │   ├── TemplatesPanel.tsx       #   Plantillas de nota (listar/usar/renombrar/borrar)
 │   │   │   ├── StartupPanel.tsx         #   Autostart + stickies al arrancar
-│   │   │   ├── SyncPanel.tsx            #   Conectar/desconectar GitHub, status, pull
+│   │   │   ├── SyncPanel.tsx            #   Selector de backend (Cloud/GitHub, excluyentes) + sección GitHub
+│   │   │   ├── CloudPanel.tsx           #   NoteFlow Cloud (cifrado, suscripción) — ver monetization.md
 │   │   │   ├── AccountPanel.tsx         #   Cuenta NoteFlow (OTP, entitlements) — ver monetization.md
 │   │   │   ├── AiPanel.tsx              #   Toggle "Local AI" + reindex + skill del CLI para agentes
 │   │   │   ├── DataPanel.tsx            #   Export/Import (lanza ExportImportModal) + dir de notas
@@ -210,7 +213,8 @@ Renderer (React)
 | `app:check-update` | handle | Consulta la última release en la API de GitHub |
 | `app:download-and-install` | handle | Descarga el instalador (allowlist de hosts) e instala; emite progreso |
 | `app:open-url` | handle | Abre URL externa (solo https, validada) |
-| `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) |
+| `settings:get-theme` / `settings:set-theme` | on (sync/async) | Tema en settings.json (sendSync para leer) — hoy es dual-write legacy: la fuente sincronizada del tema es `ui-settings.json` |
+| `ui-settings:get` / `ui-settings:set` | on (sync) / handle | Apariencia + ajustes del editor SINCRONIZADOS → `ui-settings.json` (dir de notas). `get` es sendSync (initTheme lo necesita antes del primer paint); `set` recibe un patch PARCIAL que main mergea sobre el fichero (saneador puro en `electron/uiSettings.ts`, con tests), hace broadcast `notes-updated` y `schedulePush`. La escala de UI y el idioma quedan fuera (por dispositivo) |
 | `settings:get-language` / `settings:set-language` | on (sync/async) | Idioma UI (`'system'\|'en'\|'es'`) en settings.json; el setter persiste, refresca el tray y hace broadcast `language-changed` a todas las ventanas (cambio en caliente) |
 | `settings:get-ui-state` / `settings:set-ui-state` | handle | Estado UI (nota/sección activa, grupos y carpetas colapsados) |
 | `settings:get-startup-stickies` / `settings:set-startup-stickies` | handle | Stickies que se abren al arrancar |
@@ -236,15 +240,19 @@ Renderer (React)
 | `sync:disconnect` | handle | Desconecta GitHub, para autosync, limpia settings |
 | `sync:pull` | handle | Pull manual desde el remoto **GitHub** (lo usa Settings → Sync) |
 | `sync:pull-active` | handle | Pull manual enrutado al backend **activo** (Cloud si `enabled`, GitHub si no) — lo usa el botón de la titlebar |
-| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt, aiCheckoutConfigured}`) — **nunca** tokens |
+| `account:get-status` | handle | Estado público de la cuenta NoteFlow (`{configured, signedIn, email, entitlements: {ai, cloud}, entitlementsFetchedAt, aiCheckoutConfigured, cloudCheckoutConfigured}`) — **nunca** tokens |
 | `account:request-otp` | handle | Envía el código OTP de 6 dígitos por email (Supabase GoTrue, `create_user: true`) |
 | `account:verify-otp` | handle | Verifica `(email, code)` → guarda sesión (refresh token cifrado en `settings.account`) + primer fetch de entitlements |
-| `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado |
+| `account:sign-out` | handle | Logout best-effort en el servidor + limpia la sección `account` y el estado. La app vuelve a su estado gratuito: Cloud `enabled=false`, **sesión de claves borrada** (DEK + cache + `keysMode`/`remoteKeysKnown`), IA gestionada → proveedor BYO/local, y se guarda `accountRestore` (ver `monetization.md` § 4 "Cerrar sesión") |
 | `account:refresh-entitlements` | handle | Relee `subscriptions` vía PostgREST/RLS y re-deriva `{ai, cloud}` |
 | `account:open-checkout` | handle | Abre el checkout de Lemon Squeezy en el navegador con `checkout[custom][user_id]` (URL construida en main — el userId no cruza al renderer) |
-| `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', lastSync, error, initialPullStatus}`) — **nunca** material de claves |
-| `cloud:setup` | handle | Passphrase → genera DEK + recovery code, sube `user_keys` y desbloquea; **devuelve el recovery code UNA vez** (no se persiste) |
-| `cloud:unlock` | handle | Desbloquea la sesión de claves con passphrase o recovery code (DEK solo en memoria del main + cache safeStorage) |
+| `cloud:get-status` | handle | Estado público de NoteFlow Cloud (`{configured, enabled, signedIn, keysState: 'unlocked'\|'locked'\|'no-keys', keysMode: 'managed'\|'e2ee'\|null, lastSync, error, initialPullStatus, realtimeConnected}`) — **nunca** material de claves |
+| `cloud:setup` | handle | Passphrase → genera DEK + recovery code, sube `user_keys` y desbloquea; **devuelve el recovery code UNA vez** (no se persiste) — setup en modo e2ee (privado) |
+| `cloud:setup-managed` | handle | Setup en modo managed (estándar, el default): genera la DEK y la deposita en la Edge Function `cloud-keys`, que la envuelve con la KEK del operador — sin passphrase ni recovery |
+| `cloud:unlock` | handle | Desbloquea la sesión de claves e2ee con passphrase o recovery code (DEK solo en memoria del main + cache safeStorage) |
+| `cloud:auto-unlock` | handle | Dispara el unlock silencioso managed (`autoUnlockManaged`, single-flight, nunca lanza) — lo pollea el panel mientras esté `locked`+managed |
+| `cloud:upgrade-e2ee` | handle | Upgrade managed → e2ee: re-envuelve la DEK vigente con passphrase + recovery nuevos y anula `dek_managed_ct`; **devuelve el recovery code UNA vez** |
+| `cloud:downgrade-managed` | handle | Downgrade e2ee → managed: envía la DEK vigente (requiere `unlocked`) a `cloud-keys/downgrade`, que la envuelve con la KEK del operador y anula las columnas passphrase/recovery (dejan de funcionar). Confirmado y avisado en la UI (ver `monetization.md` § 4) |
 | `cloud:lock` | handle | Descarta la DEK en memoria y su cache cifrada |
 | `cloud:enable` / `cloud:disable` | handle | Activa/desactiva el motor Cloud (activarlo toma prioridad sobre GitHub Sync — mutuamente excluyentes — y lanza pull inicial + polling); desactivar conserva journal y marcas |
 | `cloud:pull` | handle | Pull manual incremental desde la nube (mismo contrato de broadcast que `sync:pull`) |
@@ -299,10 +307,19 @@ Contenido del dir de notas:
 - `section-colors.json` — mapa `nombreSección(normalizado) → color CSS var`.
 - `note-order.json` — orden manual de notas por contexto (`Record<contextKey, string[]>`); contextKey: `'ungrouped'`, `'group:<id>'`, `'folder:<id>'`, `'favorites'`. Gestionado desde `groupsStore` (`noteOrder`, `setContextNoteOrder`).
 - `templates.json` — array de plantillas de nota (`NoteTemplate[]`: `{id,name,title,sections,createdAt}`). Gestionado desde `templatesStore`. Crear nota desde plantilla regenera ids de sección y usa `createPopulatedNote`; "Save as template" en el menú ⋯ del editor captura título + secciones (oculto si la nota está cifrada y bloqueada). UI en Settings → Templates.
+- `ui-settings.json` — apariencia (tema, fuente de app, acento, colores del editor) + ajustes del
+  editor (tamaño/familia de fuente, ancho legible) sincronizados entre dispositivos. Formato y
+  saneado/merge en `electron/uiSettings.ts` (módulo puro, tests en `tests/electron/uiSettings.test.ts`).
+  Claves de override tri-estado: AUSENTE = nunca escrita (los stores caen a las fuentes legacy
+  locales y hacen seed una vez), `null` = override borrado explícitamente ("sigue al tema"),
+  string = valor. Los stores (`themeStore`, `editorSettingsStore`) siguen dual-escribiendo las
+  fuentes legacy (settings.json / localStorage) por compatibilidad con downgrade. NO se
+  sincronizan: escala de UI (`noteflow-ui-scale`, localStorage) ni idioma (por dispositivo).
 
 > El dir es configurable desde Settings → "Choose notes directory".
 
-**Ajustes locales (NO se sincronizan)** en `settings.json`:
+**Ajustes locales (NO se sincronizan)** en `settings.json` (nota: `theme` sigue aquí como
+dual-write legacy — la fuente sincronizada es `ui-settings.json` del dir de notas):
 - **Windows:** `%APPDATA%\noteflow\settings.json`
 - **Linux:** `~/.config/noteflow/settings.json`
 - **macOS:** `~/Library/Application Support/NoteFlow/settings.json`
@@ -339,11 +356,18 @@ Estructura de `settings.json`:
     "enabled": true,
     "lastSync": "2026-07-10T12:00:00.000Z",
     "pullCursor": "2026-07-10T11:58:03.214Z",
-    "encryptedDek": "safe:<solo si safeStorage está disponible — NUNCA base64 fallback>"
+    "encryptedDek": "safe:<solo si safeStorage está disponible — NUNCA base64 fallback>",
+    "keysMode": "managed"
+  },
+  "accountRestore": {
+    "identity": "user@example.com",
+    "cloudEnabled": true,
+    "aiManaged": true
   },
   "ai": { "enabled": false, "modelId": "..." },
   "aiLlm": {
     "active": "anthropic",
+    "lastByoProvider": "ollama",
     "byPreset": {
       "anthropic": { "model": "claude-opus-4-8", "encryptedApiKey": "<safe:...>" },
       "ollama":    { "baseUrl": "http://localhost:11434/v1", "model": "..." }
@@ -359,4 +383,6 @@ Estructura de `settings.json`:
 > cifran por proveedor en `settings.aiLlm.byPreset[*].encryptedApiKey` (nunca cruzan al renderer).
 > Los **journals de sync** viven en `userData/sync-state.json` (GitHub) y
 > `userData/cloud-sync-state.json` (NoteFlow Cloud) — estado LOCAL del dispositivo, nunca en el dir
-> de notas.
+> de notas. `accountRestore` recuerda, **sin secretos** (email + dos booleanos), qué features de
+> pago tenía activas la sesión que cerró, para volver a activarlas si vuelve a entrar la MISMA
+> cuenta con la entitlement viva (ver `monetization.md` § 4 "Cerrar sesión").

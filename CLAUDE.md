@@ -69,12 +69,31 @@ npm run test:watch     # vitest en modo watch
 
 ## Flujo para editar código
 
-Para cualquier tarea que **edite código** del proyecto, el hilo principal delega en dos subagentes:
+Para cualquier tarea que **edite código** del proyecto, el hilo principal delega en el subagente
+**`implementer`**, que hace el cambio completo y se autoverifica (`npm run lint` + `npm run build` +
+`npm test` + el smoke script relevante si aplica).
 
-1. **`implementer`** — hace el cambio completo y se autoverifica (`npm run lint` + `npm run build` +
-   `npm test` + el smoke script relevante si aplica).
-2. **`reviewer`** — revisa el `git diff` contra las convenciones de NoteFlow y emite veredicto.
-3. Si el reviewer responde `CHANGES_REQUESTED`, aplicar/relanzar hasta que quede limpio.
+El subagente **`reviewer`** (revisa el `git diff` contra las convenciones y emite veredicto) **no es
+obligatorio en todo cambio**: se lanza según el riesgo de la tarea.
+
+**Lanzar `reviewer` si se cumple cualquiera de estas:**
+
+- Toca una **zona delicada**: `electron/` (IPC, main), formato de nota / migración / cifrado (los 3
+  espejos), sync con GitHub, IA (embeddings, grafo, chat, tools del agente), monetización (cuenta,
+  entitlements, proxy LLM, nube), o build/release/CI.
+- Es un cambio **amplio o estructural**: varios módulos, refactor transversal, nueva feature, nuevo
+  canal IPC, cambio de esquema de datos o de ajustes.
+- Puede **romper o perder datos del usuario**, o cambia comportamiento ya documentado.
+- La **autoverificación no quedó limpia o no es concluyente**, o el implementer reporta dudas, riesgos
+  o desviaciones de lo pedido.
+- El usuario lo **pide explícitamente**.
+
+**Se puede cerrar sin `reviewer`** cuando el cambio es pequeño, local y de bajo riesgo, y la
+autoverificación quedó en verde: claves i18n y copy, estilos/CSS, ajustes visuales en un componente
+aislado, typos, cambios solo en `docs/`, README o `.claude/`. En ese caso el hilo principal **lee el
+`git diff` él mismo** antes de dar la tarea por buena. **En la duda, lanzar `reviewer`.**
+
+Si el reviewer responde `CHANGES_REQUESTED`, aplicar/relanzar hasta que quede limpio.
 
 Las **preguntas, exploración o lectura pura** y las **tareas operativas/git** (commit, push, releases,
 correr scripts) se hacen directas, **sin** lanzar agentes. No se documenta el trabajo en ficheros:

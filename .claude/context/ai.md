@@ -67,13 +67,17 @@ consumidores** (related ✅, grafo ✅, chat ✅).
     carga del preload vía `ipcRenderer.sendSync('app:get-hardware')` (el handler en `main.ts` calcula
     `os.cpus()` + `os.totalmem()`). Debe venir del proceso principal porque el preload corre
     **sandboxed** (default de Electron 35) y ahí `node:os` no existe. La lógica pura vive en `src/lib/hardware.ts`
-    (`isLowEndHardware`, testeada en `tests/lib/hardware.test.ts`): marca gama baja si RAM ≤ 4.5 GiB, o
-    ≤ 4 núcleos lógicos, o clock base < 2.0 GHz (parseado del modelo `@ x.xxGHz`; NO se usa
-    `cpus().speed` porque en Linux reporta la frecuencia actual fluctuante, no el clock base), o el
-    modelo es un chip ULV de portátil (sufijo Intel U/Y o AMD serie U). Esto captura portátiles ULV
-    tipo i5-8250U (8 hilos, ~7,7 GiB) que la vieja heurística `navigator` (`hardwareConcurrency`/
-    `deviceMemory`) no detectaba. Si no hay `window.noteflow.hardware` (contexto sin bridge/tests), cae
-    al fallback `navigator` anterior.
+    (`isLowEndHardware`, testeada en `tests/lib/hardware.test.ts`) y combina **señales duras** con
+    **señales débiles**: son duras (marcan gama baja por sí solas) RAM ≤ 4,5 GiB y ≤ 4 núcleos lógicos;
+    son débiles el clock base < 2,0 GHz (parseado del modelo `@ x.xxGHz`; NO se usa `cpus().speed`
+    porque en Linux reporta la frecuencia actual fluctuante, no el clock base) y que el modelo sea un
+    chip ULV de portátil (sufijo Intel U/Y o AMD serie U). Las débiles solo cuentan dentro del **gate
+    de máquina modesta** (≤ 8 núcleos lógicos **y** ≤ 8,5 GiB de RAM): así se sigue cazando el portátil
+    ULV tipo i5-8250U (8 hilos, ~7,7 GiB) que la vieja heurística `navigator` (`hardwareConcurrency`/
+    `deviceMemory`) no detectaba, pero **sin** marcar como gama baja a portátiles modernos que mueven
+    el 3D de sobra (un Ryzen 7 7840U con 16 hilos/16 GiB, o un i7-1355U anunciado como "@ 1.70GHz" que
+    turbea muy por encima). Si no hay `window.noteflow.hardware` (contexto sin bridge/tests), cae al
+    fallback `navigator` anterior.
   - **`BrainCanvas.tsx` (2D, FALLBACK sin WebGL):** `<canvas>` 2D propio + `d3-force`
     (`useForceLayout.ts`) con pan/zoom/drag/hover.
   Ambos comparten el modelo (`useBrainGraph.ts`) con dos capas de aristas: estructura sólida (color de
@@ -116,10 +120,28 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   credenciales. `baseUrl` editable salvo Anthropic y NoteFlow AI. El preset `noteflow` no usa API
   key: su credencial es un access token fresco de la cuenta por request (`resolveConfigAsync`;
   detalle en `.claude/context/monetization.md` § 3). `presetOf()` con id desconocido cae en
-  `anthropic`, no en `PRESETS[0]`. **En la UI** (`LlmConfigView`), NoteFlow AI **ya no aparece en
-  el `<select>` de proveedores** — tiene su propia card "premium" fuera de la lista, condicionada a
-  la entitlement `ai` (o a ser ya el activo); el `<select>` solo lista el resto de presets
-  (`PRESETS` filtrado por id, no la lista general).
+  `anthropic`, no en `PRESETS[0]`.
+- **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
+  del cerebro):** **selector de dos cards mutuamente excluyentes** (mismo patrón que Settings → Sync,
+  con badge Activo/Inactivo) — **NoteFlow AI** (gestionado) vs **proveedor propio / IA local** (BYO key
+  u Ollama). Las cards van **sin borde**: la elección se lee solo del relleno de acento
+  (`bg-accent/[0.08]`, el tono de Settings → Sync). **Radios:** manda el lenguaje del panel del cerebro
+  (`Card` de `AiPanel/ui.tsx`: `rounded-xl` en cajas, `rounded-lg` en controles) — se usa igual en
+  Ajustes, y **Settings → Sync/Cloud se alinearon a él** (2026-07). Las **dos cards se ven siempre**
+  (también sin entitlement); debajo, tras un `border-t`, se pinta **solo** la sección del modo elegido.
+  NoteFlow AI **no aparece en el `<select>`** (que solo lista el resto de presets); su sección es la
+  barra de consumo mensual + el gate (aviso ámbar → Ajustes → Cuenta) o el botón "Use NoteFlow AI"
+  (solo con entitlement `ai`).
+  - `mode` (`'noteflow' | 'byo'`) es **estado de vista**, no el proveedor activo: se resuelve **una
+    vez** desde `llmConfig.active` cuando la config está disponible (lazy init desde
+    `useAiChatStore.getState()`, o una suscripción al store si aún no ha cargado) y **no se mueve solo**
+    — que main active NoteFlow AI tras suscribirse no debe sacar al usuario de la vista en la que está
+    (mismo contrato que `backend` en `SyncPanel`).
+  - En modo BYO hay un `byoId` local al que se enlaza el `<select>` (si el activo es `noteflow`, cae en
+    `anthropic`). **baseUrl / API key / modelo / test solo se muestran cuando `byoId === llmConfig.active`**:
+    esos campos escriben sobre la config del **proveedor activo**, así que editarlos sin activar el
+    proveedor elegido corrompería la config del otro. Mientras no coincidan, solo se ofrece el `<select>`
+    + botón "Use this provider" (`setLlmConfig({ active })`).
 - **RAG (`ai:chat` en main):** embebe la pregunta vía `aiIndex.search` (híbrido) → expande vecinos
   con `aiIndex.graph` → lee secciones de disco (`noteFormat.parseNoteDir`) → monta system prompt con
   contexto → stream. Emite `ai:chat-sources` (notas usadas) antes de los deltas. **Privacidad:** solo
@@ -152,11 +174,15 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   + `openAiPanel(tab, prompt?)` (tipo `PanelTab = 'chat'|'related'|'profile'|'settings'`). La
   `CommandPalette` abre la brain view (`setBrainView(true)`) y llama `openAiPanel` para que el
   `AiPanel` cambie de pestaña reactivamente (un `useEffect` consume `panelTab` y gana sobre el
-  auto-routing de primera vez). El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
+  auto-routing de primera vez). **Auto-routing de primera vez (`AiPanel`):** solo enruta a
+  `settings` cuando **no hay proveedor configurado** (onboarding); con proveedor el panel aterriza
+  **siempre en `chat`**. La pestaña `profile` **nunca se abre sola** — se llega pulsándola, desde la
+  paleta o desde Settings → AI. El comando inline **"Ask AI"** pasa un `prompt`: `openAiPanel`
   arranca un chat nuevo y deja `pendingPrompt`, que `ChatView` auto-envía en cuanto hay proveedor
   configurado (si no, queda en cola). Sin IPC nuevo — es routing in-renderer vía store.
-- **Segundo cerebro (cuestionario de baja fricción):** al entrar al cerebro la 1ª vez (si hay
-  proveedor y `!aiProfile.completedAt`) sale `ProfileFlow`. La UI es **data-driven** desde
+- **Segundo cerebro (cuestionario de baja fricción):** el `ProfileFlow` vive en la pestaña
+  **Profile** del panel de IA y **solo se abre a petición del usuario** (pestaña, paleta de comandos
+  o Settings → AI); no hay auto-apertura al entrar al cerebro. La UI es **data-driven** desde
   `profileQuestions.ts` (`PROFILE_SECTIONS` → secciones **Professional / Personal / Your style /
   Working with the AI**; campos tipo `chips`/`tags`/`text`/**`choice`** — `PROFILE_FIELDS` los aplana).
   **Diseño indirecto > directo:** la mayor señal viene de **preguntas-proxy de baja fricción**

@@ -90,4 +90,11 @@ Devuelve un **resumen breve en chat** (no escribas ficheros de proceso):
 - Archivos tocados (con una frase de qué cambió en cada uno).
 - Resultado de `lint` / `build` / `test` / smoke (o los pasos manuales de prueba).
 - Qué `.claude/context/*.md` (o skill) **actualizaste o corregiste**, o por qué el cambio no necesitaba doc.
+- **Señal de revisión** (una línea, siempre): `REVIEW: sí — <motivo>` o `REVIEW: no necesaria — <motivo>`.
+  El revisor **no se lanza en todo cambio**: el hilo principal decide con tu señal. Pide revisión si el
+  cambio toca zona delicada (`electron/`/IPC, formato de nota, migración, cifrado, sync, IA,
+  monetización, build/release), si es amplio o estructural (varios módulos, refactor, nueva feature,
+  nuevo canal IPC, cambio de esquema), si puede romper o perder datos del usuario, o si la
+  autoverificación no quedó limpia o tienes dudas. Un cambio pequeño, local y en verde (i18n, copy,
+  estilos, typos, docs) no la necesita. **En la duda, pide revisión.**
 - Cualquier decisión o riesgo que el revisor deba mirar.
