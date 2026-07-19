@@ -1,5 +1,6 @@
 export const overview = {
   doubleClickRename: 'Doble clic para renombrar',
+  groupColor: 'Color del grupo',
   archivedBadge: 'Archivado',
   cardWidth: 'Ancho de tarjeta',
   newNoteInGroup: 'Nueva nota en este grupo',
@@ -31,9 +32,19 @@ export const overview = {
     other: '{count} secciones',
   },
 
+  selectAll: 'Seleccionar todo',
+  deselectAll: 'Deseleccionar todo',
+  selectAllTooltip: 'Seleccionar todas las secciones (Ctrl/Cmd+A)',
+  deselectAllTooltip: 'Limpiar la selección (Ctrl/Cmd+A)',
+
   aiShowTooltip: 'La IA volverá a indexar y usar estas secciones',
   aiHideTooltip: 'La IA nunca indexará, leerá ni citará estas secciones',
   cantDeleteAllSections: 'No puedes eliminar todas las secciones — elimina la nota',
+
+  modeEditor: 'Modo editor',
+  modeRaw: 'Modo markdown en crudo',
+  modeEditorTooltip: 'Abrir estas secciones en el editor de texto enriquecido',
+  modeRawTooltip: 'Abrir estas secciones como markdown en crudo',
 
   deleteSections: 'Eliminar secciones',
   deleteSectionsMessage: {

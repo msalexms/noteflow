@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, FolderOpen, Upload } from 'lucide-react'
 import { useT } from '../../i18n/useT'
+import { SectionTitle, settingsButtonClass } from './ui'
 
 interface DataPanelProps {
   onOpenExportImport: (mode: 'export' | 'import') => void
@@ -15,21 +16,21 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
   }, [])
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Export / Import */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.data.backup}</div>
+        <SectionTitle>{t.settings.data.backup}</SectionTitle>
         <div className="flex flex-col gap-2">
           <button
             onClick={() => onOpenExportImport('export')}
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
+            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
           >
             <Download size={13} className="text-text-muted flex-shrink-0" />
             <span className="flex-1">{t.settings.data.exportNotes}</span>
           </button>
           <button
             onClick={() => onOpenExportImport('import')}
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
+            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
           >
             <Upload size={13} className="text-text-muted flex-shrink-0" />
             <span className="flex-1">{t.settings.data.importNotes}</span>
@@ -39,11 +40,11 @@ export function DataPanel({ onOpenExportImport }: DataPanelProps) {
 
       {/* Notes location */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.data.notesLocation}</div>
+        <SectionTitle>{t.settings.data.notesLocation}</SectionTitle>
         <p className="text-[11px] font-mono text-text-muted break-all mb-2">{notesDir || '…'}</p>
         <button
           onClick={() => window.noteflow.openNotesFolder()}
-          className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
+          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
         >
           <FolderOpen size={13} className="text-text-muted flex-shrink-0" />
           <span className="flex-1">{t.settings.data.openNotesFolder}</span>

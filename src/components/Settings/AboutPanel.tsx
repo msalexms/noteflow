@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, Download, ExternalLink, Github, RefreshCw } from 'lucide-react'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { SectionTitle, settingsButtonClass } from './ui'
 
 export function AboutPanel() {
   const t = useT()
@@ -50,12 +51,12 @@ export function AboutPanel() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Version */}
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">NoteFlow</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">{t.settings.about.tagline}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.about.tagline}</p>
         </div>
         <span className="text-xs font-mono text-text-muted tabular-nums flex-shrink-0">
           {version ? `v${version}` : '…'}
@@ -64,12 +65,12 @@ export function AboutPanel() {
 
       {/* Updates */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.about.updates}</div>
+        <SectionTitle>{t.settings.about.updates}</SectionTitle>
         <div className="flex items-center gap-2">
           <button
             onClick={handleCheck}
             disabled={checking}
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono ${settingsButtonClass}`}
           >
             {checking
               ? <RefreshCw size={13} className="animate-spin text-text-muted" />
@@ -107,10 +108,10 @@ export function AboutPanel() {
 
       {/* Links */}
       <section>
-        <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">{t.settings.about.links}</div>
+        <SectionTitle>{t.settings.about.links}</SectionTitle>
         <button
           onClick={() => window.noteflow.openUrl('https://github.com/yagoid/noteflow')}
-          className="flex items-center gap-2 px-3 py-2 rounded-md border border-border text-xs font-mono text-text hover:bg-surface-2 transition-colors text-left"
+          className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs font-mono text-left ${settingsButtonClass}`}
         >
           <Github size={13} className="text-text-muted flex-shrink-0" />
           <span className="flex-1">{t.settings.about.githubRepo}</span>

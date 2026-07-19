@@ -13,6 +13,7 @@ interface GroupsState {
   loadGroups: () => Promise<void>
   createGroup: (name: string, color: GroupColor) => Promise<NoteGroup>
   renameGroup: (id: string, name: string) => Promise<void>
+  setGroupColor: (id: string, color: GroupColor) => Promise<void>
   toggleGroupArchived: (id: string) => Promise<void>
   deleteGroup: (id: string) => Promise<void>
   reorderGroups: (orderedIds: string[]) => Promise<void>
@@ -73,6 +74,12 @@ export const useGroupsStore = create<GroupsState>((set, get) => ({
 
   renameGroup: async (id, name) => {
     const updated = get().groups.map((g) => (g.id === id ? { ...g, name } : g))
+    set({ groups: updated })
+    await window.noteflow.setGroups(updated)
+  },
+
+  setGroupColor: async (id, color) => {
+    const updated = get().groups.map((g) => (g.id === id ? { ...g, color } : g))
     set({ groups: updated })
     await window.noteflow.setGroups(updated)
   },

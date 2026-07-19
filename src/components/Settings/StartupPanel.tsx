@@ -5,6 +5,7 @@ import { getTagColor } from '../../lib/tagColors'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
 import { plural } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { SectionTitle } from './ui'
 
 interface StartupSticky {
   noteId: string
@@ -58,12 +59,12 @@ export function StartupPanel() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Open at login toggle */}
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.startup.launchOnStartup}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">
+          <p className="text-[11px] font-mono text-text-muted mt-1">
             {t.settings.startup.launchOnStartupHint}
           </p>
         </div>
@@ -84,12 +85,9 @@ export function StartupPanel() {
 
       {/* Sticky notes section */}
       <div>
-        <div className="flex items-center gap-1.5 mb-1">
-          <Bookmark size={11} className="text-text-muted" />
-          <span className="text-[11px] font-mono font-medium text-text-muted uppercase tracking-widest">
-            {t.settings.startup.openAsSticky}
-          </span>
-        </div>
+        <SectionTitle icon={<Bookmark size={11} className="text-text-muted flex-shrink-0" />}>
+          {t.settings.startup.openAsSticky}
+        </SectionTitle>
         {!openAtLogin && (
           <p className="text-[11px] font-mono text-text-muted/60 mb-2">
             {t.settings.startup.enableToUse}

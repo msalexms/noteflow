@@ -201,6 +201,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
   const collapsedFolderIds = useGroupsStore((s) => s.collapsedFolderIds)
   const createGroup = useGroupsStore((s) => s.createGroup)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
+  const setGroupColor = useGroupsStore((s) => s.setGroupColor)
   const toggleGroupArchived = useGroupsStore((s) => s.toggleGroupArchived)
   const deleteGroup = useGroupsStore((s) => s.deleteGroup)
   const reorderGroups = useGroupsStore((s) => s.reorderGroups)
@@ -1231,9 +1232,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     title={color.replace('--', '')}
                     onClick={(e) => {
                       e.stopPropagation()
-                      const updated = groups.map(g => g.id === group.id ? { ...g, color } : g)
-                      window.noteflow.setGroups(updated)
-                      useGroupsStore.setState({ groups: updated })
+                      void setGroupColor(group.id, color)
                       setGroupContextMenu(null)
                     }}
                     className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${group.color === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}

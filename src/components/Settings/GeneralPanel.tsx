@@ -3,6 +3,7 @@ import { resolveLang } from '../../i18n'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import type { LanguageSetting } from '../../i18n'
+import { ActivityPulse } from './ActivityPulse'
 
 const OPTIONS: LanguageSetting[] = ['system', 'en', 'es']
 
@@ -20,11 +21,11 @@ export function GeneralPanel() {
   const detectedName = resolveLang('system') === 'es' ? t.settings.general.spanish : t.settings.general.english
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <section className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-mono font-medium text-text">{t.settings.general.language}</p>
-          <p className="text-[11px] font-mono text-text-muted mt-0.5">{t.settings.general.languageHint}</p>
+          <p className="text-[11px] font-mono text-text-muted mt-1">{t.settings.general.languageHint}</p>
           {setting === 'system' && (
             <p className="text-[11px] font-mono text-text-muted/70 mt-0.5">
               {tf(t.settings.general.detected, { lang: detectedName })}
@@ -45,6 +46,8 @@ export function GeneralPanel() {
           ))}
         </div>
       </section>
+      {/* Decorative chart of note activity over the last 16 weeks (header + axis legends included) */}
+      <ActivityPulse />
     </div>
   )
 }

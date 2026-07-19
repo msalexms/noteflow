@@ -29,14 +29,14 @@ import { TemplatesPanel } from './TemplatesPanel'
 
 export type SettingsSection =
   | 'general'
+  | 'ai'
+  | 'sync'
+  | 'account'
   | 'appearance'
   | 'editor'
   | 'templates'
-  | 'startup'
-  | 'sync'
   | 'data'
-  | 'ai'
-  | 'account'
+  | 'startup'
   | 'shortcuts'
   | 'about'
 
@@ -49,14 +49,14 @@ interface NavEntry {
 // switches language live.
 const NAV: NavEntry[] = [
   { id: 'general', icon: Globe },
+  { id: 'ai', icon: Sparkles },
+  { id: 'sync', icon: RefreshCw },
+  { id: 'account', icon: UserCircle },
   { id: 'appearance', icon: Palette },
   { id: 'editor', icon: Pencil },
   { id: 'templates', icon: LayoutTemplate },
-  { id: 'startup', icon: Monitor },
-  { id: 'sync', icon: RefreshCw },
   { id: 'data', icon: Database },
-  { id: 'ai', icon: Sparkles },
-  { id: 'account', icon: UserCircle },
+  { id: 'startup', icon: Monitor },
   { id: 'shortcuts', icon: Keyboard },
   { id: 'about', icon: Info },
 ]
@@ -67,7 +67,7 @@ interface SettingsModalProps {
   onOpenExportImport: (mode: 'export' | 'import') => void
 }
 
-export function SettingsModal({ initialSection = 'appearance', onClose, onOpenExportImport }: SettingsModalProps) {
+export function SettingsModal({ initialSection = 'general', onClose, onOpenExportImport }: SettingsModalProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
   const t = useT()
 
@@ -129,19 +129,21 @@ export function SettingsModal({ initialSection = 'appearance', onClose, onOpenEx
 
           {/* ── Content ──────────────────────────────────────────────────── */}
           <div className="flex-1 min-w-0 flex flex-col">
-            <div className="px-5 pt-4 pb-2">
-              <h2 className="text-xs font-mono text-text-muted/70 uppercase tracking-widest">{activeLabel}</h2>
+            {/* Title of the section being viewed: the top of the hierarchy inside the
+                window (subsection headers below use the smaller uppercase SectionTitle). */}
+            <div className="px-5 pt-4 pb-3 border-b border-border">
+              <h2 className="text-sm font-mono font-semibold text-text">{activeLabel}</h2>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 pb-5">
+            <div className="flex-1 overflow-y-auto px-5 py-5">
               {section === 'general' && <GeneralPanel />}
+              {section === 'ai' && <AiPanel onClose={onClose} />}
+              {section === 'sync' && <SyncPanel />}
+              {section === 'account' && <AccountPanel />}
               {section === 'appearance' && <AppearancePanel />}
               {section === 'editor' && <EditorPanel />}
               {section === 'templates' && <TemplatesPanel onClose={onClose} />}
-              {section === 'startup' && <StartupPanel />}
-              {section === 'sync' && <SyncPanel />}
               {section === 'data' && <DataPanel onOpenExportImport={onOpenExportImport} />}
-              {section === 'ai' && <AiPanel onClose={onClose} />}
-              {section === 'account' && <AccountPanel />}
+              {section === 'startup' && <StartupPanel />}
               {section === 'shortcuts' && <ShortcutsPanel />}
               {section === 'about' && <AboutPanel />}
             </div>

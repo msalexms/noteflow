@@ -2,6 +2,7 @@
 export const overview = {
   // ── Group overview ──────────────────────────────────────────────────────────
   doubleClickRename: 'Double-click to rename',
+  groupColor: 'Group color',
   archivedBadge: 'Archived',
   cardWidth: 'Card width',
   newNoteInGroup: 'New note in this group',
@@ -36,10 +37,22 @@ export const overview = {
     other: '{count} sections',
   },
 
+  // Select-all toggle (header) — mirrors the Ctrl/Cmd+A shortcut.
+  selectAll: 'Select all',
+  deselectAll: 'Deselect all',
+  selectAllTooltip: 'Select every section (Ctrl/Cmd+A)',
+  deselectAllTooltip: 'Clear the selection (Ctrl/Cmd+A)',
+
   // AI visibility tooltips for a multi-section selection.
   aiShowTooltip: 'The AI will index and use these sections again',
   aiHideTooltip: 'The AI will never index, read or reference these sections',
   cantDeleteAllSections: "Can't delete every section — delete the note instead",
+
+  // Editor ↔ raw markdown mode for a multi-section selection.
+  modeEditor: 'Editor mode',
+  modeRaw: 'Raw mode',
+  modeEditorTooltip: 'Open these sections in the rich text editor',
+  modeRawTooltip: 'Open these sections as raw markdown',
 
   // Note-overview delete-sections confirmation.
   deleteSections: 'Delete sections',

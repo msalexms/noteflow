@@ -7,6 +7,7 @@ import type { NoteTemplate } from '../../types'
 import { ConfirmModal } from '../ConfirmModal'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { settingsRaisedButtonClass } from './ui'
 
 export function TemplatesPanel({ onClose }: { onClose: () => void }) {
   const t = useT()
@@ -44,7 +45,7 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
     <div className="space-y-6">
       <section>
         <p className="text-xs font-mono font-medium text-text">{t.settings.templates.title}</p>
-        <p className="text-[11px] font-mono text-text-muted mt-0.5 max-w-md leading-relaxed">
+        <p className="text-[11px] font-mono text-text-muted mt-1 max-w-md leading-relaxed">
           {t.settings.templates.desc}
         </p>
 
@@ -98,8 +99,7 @@ export function TemplatesPanel({ onClose }: { onClose: () => void }) {
                     <button
                       onClick={() => void createFromTemplate(tpl)}
                       title={t.settings.templates.newNoteFromTemplate}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono
-                                 text-text-muted border border-border hover:text-text hover:border-text/25 transition-colors"
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono ${settingsRaisedButtonClass}`}
                     >
                       <FilePlus2 size={12} />
                       {t.settings.templates.newNote}

@@ -6,6 +6,7 @@ import {
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
+import { TAG_COLOR_VARS } from '../../lib/tagColors'
 import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
@@ -48,6 +49,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
   const renameFolder = useGroupsStore((s) => s.renameFolder)
   const deleteFolder = useGroupsStore((s) => s.deleteFolder)
   const renameGroup = useGroupsStore((s) => s.renameGroup)
+  const setGroupColor = useGroupsStore((s) => s.setGroupColor)
   const toggleGroupArchived = useGroupsStore((s) => s.toggleGroupArchived)
   const noteOrder = useGroupsStore((s) => s.noteOrder)
   const setContextNoteOrder = useGroupsStore((s) => s.setContextNoteOrder)
@@ -68,6 +70,8 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
   // Inline rename state for the group title and folder bands.
   const [editingGroup, setEditingGroup] = useState(false)
   const [groupNameDraft, setGroupNameDraft] = useState('')
+  // Color palette popover hanging off the group dot in the header.
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
   const [editingFolderName, setEditingFolderName] = useState('')
   const [folderToDelete, setFolderToDelete] = useState<NoteFolder | null>(null)
@@ -115,19 +119,28 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
     if (!groupItem) onClose()
   }, [groupItem, onClose])
 
-  // Escape clears an active selection first; otherwise closes the overview.
+  // Escape closes the color popover first, then clears an active selection, then the overview.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       // Let inline-edit inputs handle their own Escape (cancel) without closing.
       if (editingGroup || editingFolderId !== null || showNewFolder) return
       e.preventDefault()
-      if (selectedIds.size > 0) setSelectedIds(new Set())
+      if (colorPickerOpen) setColorPickerOpen(false)
+      else if (selectedIds.size > 0) setSelectedIds(new Set())
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, selectedIds, editingGroup, editingFolderId, showNewFolder])
+  }, [onClose, selectedIds, editingGroup, editingFolderId, showNewFolder, colorPickerOpen])
+
+  // Close the color popover on outside click (the popover itself stops propagation).
+  useEffect(() => {
+    if (!colorPickerOpen) return
+    const close = () => setColorPickerOpen(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [colorPickerOpen])
 
   if (!groupItem) return null
 
@@ -360,10 +373,33 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         className="flex-shrink-0 z-10 flex items-center gap-3 px-6 py-4 border-b border-border"
         style={{ background: 'rgb(var(--bg-1) / 0.85)' }}
       >
-        <span
-          className="w-3 h-3 rounded-full flex-shrink-0"
-          style={{ background: `rgb(var(${color}))` }}
-        />
+        {/* Group dot — click to recolor the group (same palette as the sidebar menu) */}
+        <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setColorPickerOpen((open) => !open)}
+            title={t.overview.groupColor}
+            aria-label={t.overview.groupColor}
+            className="flex items-center justify-center w-5 h-5 rounded hover:bg-text/10 transition-colors"
+          >
+            <span
+              className="w-3 h-3 rounded-full transition-transform hover:scale-110"
+              style={{ background: `rgb(var(${color}))` }}
+            />
+          </button>
+          {colorPickerOpen && (
+            <div className="absolute top-full left-0 mt-1.5 z-20 flex gap-1 bg-surface-2 border border-border rounded shadow-xl px-2 py-1.5 animate-in fade-in zoom-in duration-100">
+              {TAG_COLOR_VARS.map((c) => (
+                <button
+                  key={c}
+                  title={c.replace('--', '')}
+                  onClick={() => { void setGroupColor(groupId, c); setColorPickerOpen(false) }}
+                  className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${color === c ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
+                  style={{ background: `rgb(var(${c}))` }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
         {editingGroup ? (
           <input
             autoFocus

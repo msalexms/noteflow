@@ -1,5 +1,6 @@
 import { keyLabel } from '../../lib/platform'
 import { useT } from '../../i18n/useT'
+import { SectionTitle } from './ui'
 import type { Messages } from '../../i18n'
 
 interface ShortcutEntry {
@@ -36,6 +37,7 @@ function buildSections(t: Messages): ShortcutSection[] {
         { keys: ['Ctrl', 'W'], description: s.deleteSectionShortcut },
         { keys: ['Control', 'Tab'], description: s.nextSection },
         { keys: ['Control', 'Shift', 'Tab'], description: s.prevSection },
+        { keys: ['Ctrl', 'A'], description: s.selectAllSections },
         { keys: ['Delete'], description: s.deleteSelectedNote },
       ],
     },
@@ -76,12 +78,10 @@ export function ShortcutsPanel() {
   const sections = buildSections(t)
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {sections.map((section) => (
         <div key={section.title}>
-          <div className="text-[11px] font-mono text-text-muted/70 uppercase tracking-widest mb-2">
-            {section.title}
-          </div>
+          <SectionTitle>{section.title}</SectionTitle>
           <div className="space-y-0.5">
             {section.shortcuts.map((s) => (
               <div key={s.description} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-surface-2 transition-colors">

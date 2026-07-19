@@ -23,7 +23,7 @@ export function TitleBar() {
   const [syncing, setSyncing] = useState(false)
   const [pushing, setPushing] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
 
   const refreshSyncStatus = () => window.noteflow.getActiveSyncStatus().then(setSyncStatus)
 
@@ -214,7 +214,7 @@ export function TitleBar() {
           </button>
         )}
         <button
-          onClick={() => openSettings('appearance')}
+          onClick={() => openSettings('general')}
           className="w-10 h-7 flex items-center justify-center text-text-muted hover:bg-surface-2 transition-colors"
           title={t.titleBar.settings}
         >

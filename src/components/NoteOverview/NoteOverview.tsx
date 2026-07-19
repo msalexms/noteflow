@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import { X, Star, FileText, Lock, Plus, EyeOff, Eye, Trash2, Check, Pencil } from 'lucide-react'
+import {
+  X, Star, FileText, Lock, Plus, EyeOff, Eye, Trash2, Check, Pencil, Edit3,
+  CheckSquare, Square,
+} from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useSectionTagColorsStore, type SectionTagColorMap } from '../../stores/sectionTagColorsStore'
 import { SectionPreviewCard, CARD_WIDTH } from '../SectionPreview/SectionPreviewCard'
@@ -51,19 +54,48 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   // Note: `App.tsx` keys this view by noteId, so switching notes remounts the
   // component — selection/title/anchor state resets for free, no effect needed.
 
-  // Close on Escape — clear an active selection first, then exit title edit, else close.
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    anchorIdRef.current = null
+  }, [])
+
+  // Select-all toggle (header button + Ctrl/Cmd+A): if every section is already
+  // selected → clear the selection; otherwise select them all.
+  const toggleSelectAll = useCallback(() => {
+    if (!note || locked || note.sections.length === 0) return
+    if (note.sections.every((s) => selectedIds.has(s.id))) clearSelection()
+    else setSelectedIds(new Set(note.sections.map((s) => s.id)))
+  }, [note, locked, selectedIds, clearSelection])
+
+  // Keyboard: Escape clears an active selection first, then closes; Ctrl/Cmd+A selects
+  // every section. Both no-op while the title input is focused (it keeps its own Escape
+  // revert and its native select-all).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // Title input handles its own Escape (revert) without closing the overview.
       if (editingTitle) return
-      e.preventDefault()
-      if (selectedIds.size > 0) setSelectedIds(new Set())
-      else onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        if (selectedIds.size > 0) clearSelection()
+        else onClose()
+        return
+      }
+      // This view only replaces the <main> pane — the sidebar, the AI panel, the settings
+      // modal and the command palette stay mounted, so never steal Ctrl/Cmd+A from a field
+      // that has its own select-all. Alt is excluded too (AltGr = Ctrl+Alt on ES/LatAm layouts).
+      const target = e.target as HTMLElement
+      const isEditing =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      if (isEditing) return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        toggleSelectAll()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, selectedIds, editingTitle])
+  }, [onClose, selectedIds, editingTitle, clearSelection, toggleSelectAll])
 
   // Navigate straight to a clicked section. Stash it in pendingInitialSectionId so the editor
   // (which mounts fresh once the overview closes) opens on the right section with no flash, and
@@ -120,11 +152,6 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
     })
   }
 
-  const clearSelection = () => {
-    setSelectedIds(new Set())
-    anchorIdRef.current = null
-  }
-
   // ── Inline title edit ─────────────────────────────────────────────────────────
   const startTitleEdit = () => {
     if (!note || locked) return
@@ -157,11 +184,13 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
   const selectedSections = note.sections.filter((s) => selectedIds.has(s.id))
   const selectedCount = selectedSections.length
   const selectionActive = selectedCount > 0
-  // Can't wipe out every section (would leave the note empty — delete the note instead).
+  // Drives the select-all toggle in the header, and blocks the delete action: wiping out
+  // every section would leave the note empty (delete the note instead).
   const selectingAll = sectionCount > 0 && selectedCount === sectionCount
   // Mirror the context menu: AI visibility is unavailable on encrypted notes.
   const aiActionAvailable = !note.encryption && selectedCount > 0
   const allHidden = selectedCount > 0 && selectedSections.every((s) => s.aiHidden)
+  const allRaw = selectedCount > 0 && selectedSections.every((s) => s.isRawMode)
 
   const deleteSelectedSections = () => {
     setConfirm(null)
@@ -175,6 +204,17 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
     void updateNote(note.id, {
       sections: note.sections.map((s) =>
         selectedIds.has(s.id) ? { ...s, aiHidden: hide } : s,
+      ),
+    })
+  }
+
+  const toggleSelectedRawMode = () => {
+    // If every selected section is already raw → back to the editor; otherwise raw for all.
+    // Only the flag moves here: the content stays exactly as it is.
+    const raw = !allRaw
+    void updateNote(note.id, {
+      sections: note.sections.map((s) =>
+        selectedIds.has(s.id) ? { ...s, isRawMode: raw } : s,
       ),
     })
   }
@@ -254,6 +294,16 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
 
         <div className="flex-1" />
 
+        {!locked && sectionCount > 0 && (
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
+            title={selectingAll ? t.overview.deselectAllTooltip : t.overview.selectAllTooltip}
+          >
+            {selectingAll ? <CheckSquare size={12} /> : <Square size={12} />}
+            {selectingAll ? t.overview.deselectAll : t.overview.selectAll}
+          </button>
+        )}
         {!locked && (
           <button
             onClick={() => void addSection()}
@@ -338,6 +388,15 @@ export function NoteOverview({ noteId, onClose }: NoteOverviewProps) {
                 {allHidden ? t.common.showToAI : t.common.hideFromAI}
               </button>
             )}
+
+            <button
+              onClick={toggleSelectedRawMode}
+              title={allRaw ? t.overview.modeEditorTooltip : t.overview.modeRawTooltip}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-mono text-text-muted hover:text-text hover:bg-text/10 transition-colors"
+            >
+              {allRaw ? <Edit3 size={13} /> : <Eye size={13} />}
+              {allRaw ? t.overview.modeEditor : t.overview.modeRaw}
+            </button>
 
             <button
               onClick={() => setConfirm('delete-sections')}

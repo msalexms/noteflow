@@ -264,15 +264,16 @@ button {
 
 /* Bold = solo negrita, hereda el color de texto normal del cuerpo (sin acento). */
 .prose-editor .ProseMirror strong { color: inherit; font-weight: 700; }
-.prose-editor .ProseMirror em    { color: rgb(var(--purple)); font-style: italic; }
+.prose-editor .ProseMirror em    { color: rgb(var(--em-color, var(--purple))); font-style: italic; }
 .prose-editor .ProseMirror s     { color: rgb(var(--text-muted)); text-decoration: line-through; }
 /* Highlight (`==texto==`): texto en color de acento, sin fondo. */
 .prose-editor .ProseMirror mark  { color: rgb(var(--accent)); background: transparent; font-weight: inherit; }
 
 /* Cita / blockquote (`> texto`): borde izquierdo de acento + texto atenuado,
-   al estilo de las citas markdown de VSCode. Comparte el acento de borde con `pre`. */
+   al estilo de las citas markdown de VSCode. Comparte el color del borde con `pre`
+   (`--code-accent`, personalizable en Ajustes → Apariencia; por defecto `--accent`). */
 .prose-editor .ProseMirror blockquote {
-  border-left: 3px solid rgb(var(--accent-2));
+  border-left: 3px solid rgb(var(--code-accent, var(--accent)));
   padding-left: 1rem;
   margin: 0.75rem 0;
   color: rgb(var(--text-muted));
@@ -283,7 +284,7 @@ button {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85em;
   background: rgb(var(--bg-0));
-  color: rgb(var(--red));
+  color: rgb(var(--code-inline, var(--red)));
   border: 1px solid rgb(var(--border));
   border-radius: 3px;
   padding: 0.1em 0.35em;
@@ -292,7 +293,7 @@ button {
 .prose-editor .ProseMirror pre {
   background: rgb(var(--bg-0));
   border: 1px solid rgb(var(--border));
-  border-left: 3px solid rgb(var(--accent-2));
+  border-left: 3px solid rgb(var(--code-accent, var(--accent)));
   border-radius: 4px;
   padding: 1rem;
   /* Reserve top room so neither the language label (has-language, always shown)

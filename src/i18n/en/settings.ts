@@ -30,23 +30,37 @@ export const settings = {
     spanish: 'Español',
     // Secondary line under the "System" option showing the detected language.
     detected: 'Detected: {lang}',
+    // Decorative activity chart (ActivityPulse): header + axis legends. The chart
+    // itself has no text; these labels live in HTML around the SVG.
+    activity: {
+      title: 'Activity',
+      hint: 'Notes created or edited over the last 16 weeks',
+      yAxis: 'Activity',
+      xStart: '16 weeks ago',
+      xEnd: 'Today',
+    },
   },
 
   appearance: {
     theme: 'Theme',
     font: 'Font',
     accent: 'Accent',
-    headings: 'Headings',
+    editorColors: 'Editor colours',
     textSize: 'Text size',
     brainView: 'Brain view',
     preview: 'Preview',
-    // Reset-to-theme link shown next to Font / Accent / Headings.
+    // Reset-to-theme link shown next to Font / Accent / Editor colours.
     themeDefault: 'Theme default',
     fewerThemes: 'Fewer themes',
     moreThemes: 'More themes ({count})',
     fontSelected: 'Selected',
     customColour: 'Custom colour',
     resetToThemeDefault: 'Reset to theme default',
+    // Editor colour rows (H1/H2/H3 need no label — they show as "H1"…).
+    colorItalic: 'Italic',
+    colorInlineCode: 'Inline code',
+    colorCodeAccent: 'Code & quote',
+    colorCodeAccentHint: 'Left border of code blocks and quotes',
     smaller: 'Smaller',
     larger: 'Larger',
     immersive: 'Immersive',
@@ -59,6 +73,8 @@ export const settings = {
     previewHeading: 'Heading',
     previewSubheading: 'Subheading',
     previewParagraph: 'The quick brown fox jumps over the lazy dog.',
+    previewItalic: 'in italics',
+    previewQuote: 'Quoted line',
     previewInlineCode: 'inline code',
     // Selection summary suffixes.
     summaryTheme: 'theme',
@@ -95,12 +111,20 @@ export const settings = {
   },
 
   sync: {
-    // Header of the GitHub subsection (the Sync page also hosts NoteFlow Cloud).
+    // Backend selector (the two sync backends are mutually exclusive).
+    chooseBackendDesc: 'Choose how your notes sync across devices. Only one backend can be active at a time.',
+    cloudCardDesc: 'Encrypted sync through NoteFlow servers. Nothing to set up — requires a subscription.',
     githubTitle: 'GitHub Sync',
+    githubCardDesc: 'Sync through a private GitHub repository of your own. Free, needs a GitHub account.',
+    // Backend status badges.
+    badgeActive: 'Active',
+    badgePaused: 'Paused',
+    badgeInactive: 'Inactive',
     // Shown in the GitHub subsection while NoteFlow Cloud is enabled — the
     // sync router gives Cloud priority (see electron/syncProvider.ts).
     pausedByCloud: 'GitHub Sync is paused while NoteFlow Cloud is enabled. Your GitHub configuration is kept — disable NoteFlow Cloud to resume syncing through GitHub.',
     connected: 'Connected',
+    // Also used as the GitHub badge in the backend selector.
     notConnected: 'Not connected',
     lastSync: 'Last sync: {time}',
     authFailed: 'Authorization failed',
@@ -135,7 +159,7 @@ export const settings = {
     subscribe: 'Subscribe to NoteFlow Cloud',
     subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh in Settings → Account if it does not show up.',
     // Encryption mode choice (state: no-keys) — two cards, Standard preselected.
-    chooseModeDesc: 'Choose how your encryption keys are managed. You can switch from Standard to Private later — never the other way around.',
+    chooseModeDesc: 'Choose how your encryption keys are managed. You can switch modes later from this panel.',
     modeStandardTitle: 'Standard',
     modeStandardBadge: 'Recommended',
     modeStandardDesc: 'Your notes are encrypted in transit and on our servers. NoteFlow manages the key for you — nothing to remember. We could technically access your notes; choose Private if that matters to you.',
@@ -175,12 +199,19 @@ export const settings = {
     // Encryption-mode badge (state: unlocked).
     badgeStandard: 'Standard encryption',
     badgePrivate: 'Private E2EE',
-    // One-way Standard → Private upgrade (state: unlocked + managed).
+    // Standard → Private upgrade (state: unlocked + managed).
     switchToPrivate: 'Switch to private mode',
     upgradeDesc: 'Create a passphrase to switch to end-to-end encryption. From then on only you can read your notes — NoteFlow cannot reset the passphrase or recover them for you.',
     upgradeNotice: 'Note: while in Standard mode, notes synced so far were technically accessible to NoteFlow. Switching does not rewrite them, but everything stays encrypted and only you hold the key from now on.',
     upgradeSubmit: 'Create passphrase & switch',
     upgradeFailed: 'Could not switch to private mode.',
+    // Private → Standard downgrade (state: unlocked + e2ee). Explicit and
+    // confirmed — never silent: it weakens the privacy guarantee.
+    switchToStandard: 'Switch to standard mode',
+    downgradeDesc: 'Switch back to standard encryption. NoteFlow will manage your encryption key for you — nothing to remember, and unlocking becomes automatic on every device where you are signed in.',
+    downgradeNotice: 'Warning: in Standard mode NoteFlow holds your key and could technically read your notes — including the ones already synced. Your current passphrase and recovery code will stop working.',
+    downgradeSubmit: 'Switch to standard encryption',
+    downgradeFailed: 'Could not switch to standard mode.',
     // Mutual exclusion warning shown BEFORE enabling, when GitHub Sync is connected.
     willPauseGitHub: 'GitHub Sync is connected. While NoteFlow Cloud is enabled it takes over, and GitHub Sync stays paused (your GitHub configuration is kept).',
   },
@@ -203,7 +234,7 @@ export const settings = {
     downloadingModel: 'Downloading model…',
     assistant: 'Assistant (LLM)',
     assistantHint:
-      "Configure the chat provider, endpoint, API key and model. Each provider keeps its own credentials; switching providers won't mix keys.",
+      "Power the chat with the managed NoteFlow AI plan or with a provider of your own (API key or a local model) — one or the other. Each provider keeps its own credentials; switching providers won't mix keys.",
     profile: 'Profile',
     openProfileSetup: 'Open profile setup',
     profileHint: 'Re-run the questionnaire to refresh the profile note the assistant uses for context.',
@@ -267,6 +298,7 @@ export const settings = {
     deleteSectionShortcut: 'Delete section',
     nextSection: 'Next section',
     prevSection: 'Previous section',
+    selectAllSections: 'Select all sections (in the note overview)',
     deleteSelectedNote: 'Delete selected note (when not editing)',
     openSectionSticky: 'Open current section as sticky',
     openAllSticky: 'Open all sections as sticky',
