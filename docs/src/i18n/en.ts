@@ -190,13 +190,10 @@ export const en = {
       tagline: 'Fast notes, with a brain.',
       // Column headings of the grouped footer.
       groups: {
-        explore: 'Explore',
         docs: 'Docs',
         project: 'Project',
         legal: 'Legal',
       },
-      theBrain: 'The Brain',
-      notes: 'Notes',
       // Links to the long-form docs pages (/cli, /ai, /features, /pricing).
       cliDocs: 'CLI docs',
       aiDocs: 'How the AI works',

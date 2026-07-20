@@ -178,13 +178,10 @@ export const es: Content = {
       brand: 'NoteFlow',
       tagline: 'Notas rápidas, con cerebro.',
       groups: {
-        explore: 'Explorar',
         docs: 'Docs',
         project: 'Proyecto',
         legal: 'Legal',
       },
-      theBrain: 'El Cerebro',
-      notes: 'Notas',
       cliDocs: 'Docs del CLI',
       aiDocs: 'Cómo funciona la IA',
       featuresDocs: 'Funcionalidades',

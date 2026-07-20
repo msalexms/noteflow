@@ -486,7 +486,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
 
     <!-- Download -->
     <footer id="get" style="position:relative;background:transparent;overflow:hidden;border-top:1px solid var(--line);">
-      <noteflow-brain data-ambient data-transparent data-content-edges="true" data-cam="2.6" data-rotate-speed="0.3" data-shift-x="0.12" data-target-y="0.24" style="position:absolute;inset:0;width:100%;height:100%;opacity:.6;"></noteflow-brain>
+      <noteflow-brain data-ambient data-transparent data-content-edges="true" data-cam="2.6" data-rotate-speed="0.3" data-shift-x="0" data-target-y="-0.05" style="position:absolute;inset:0;width:100%;height:100%;opacity:.6;"></noteflow-brain>
       <div style="position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 0%,transparent 45%,rgba(0,0,0,0) 100%);pointer-events:none;"></div>
       <div style="position:relative;z-index:2;max-width:900px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);text-align:center;">
         <div data-reveal>
@@ -502,7 +502,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           <p data-dl-version-row style="visibility:hidden;margin:16px 0 0;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
           <p style="margin:30px auto 0;max-width:460px;font-size:17px;line-height:1.6;color:var(--ink-faint);" set:html={t.download.disclaimer}></p>
         </div>
-        {/* Grouped footer: brand block + four link columns (Explore / Docs / Project / Legal),
+        {/* Grouped footer: brand block + three link columns (Docs / Project / Legal),
             then the copyright row. Docs and legal links carry no data-nav — the synapse script
             only knows the in-page anchors. */}
         <div class="nf-footer" style="margin-top:clamp(60px,9vw,110px);padding-top:34px;border-top:1px solid var(--line);text-align:left;">
@@ -510,11 +510,6 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
             <div class="nf-footer-brand">
               <div style="display:flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink-dim);"><span style="width:9px;height:9px;border-radius:50%;background:var(--detail);flex:none;"></span>{t.download.footer.brand}</div>
               <p style="margin:12px 0 0;max-width:220px;font-size:14px;line-height:1.55;color:var(--ink-faint);">{t.download.footer.tagline}</p>
-            </div>
-            <div class="nf-footer-col">
-              <div class="nf-footer-head">{t.download.footer.groups.explore}</div>
-              <a href="#brain" data-nav="brain">{t.download.footer.theBrain}</a>
-              <a href="#notes" data-nav="notes">{t.download.footer.notes}</a>
             </div>
             <div class="nf-footer-col">
               <div class="nf-footer-head">{t.download.footer.groups.docs}</div>
@@ -861,7 +856,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
     /* Brand block takes the leftover space; the four link columns size to content. */
     .nf-footer-grid {
       display: grid;
-      grid-template-columns: 1fr repeat(4, auto);
+      grid-template-columns: 1fr repeat(3, auto);
       column-gap: clamp(24px, 4.5vw, 60px);
       row-gap: 34px;
       align-items: start;
