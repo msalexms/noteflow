@@ -153,7 +153,9 @@ export const settings = {
     title: 'NoteFlow Cloud',
     desc: 'Encrypted sync through NoteFlow servers. Notes are encrypted on this device before upload — the server only ever stores ciphertext.',
     notAvailable: "NoteFlow Cloud isn't available in this build yet.",
-    signInFirst: 'Sign in to your NoteFlow account (Settings → Account) to use NoteFlow Cloud.',
+    paidLabel: 'Paid',
+    signInFirst: 'Sign in to your NoteFlow account to use it.',
+    goToAccount: 'Go to Account',
     // Entitlement gate (enable only — unlock/pull/disable stay available).
     requiresSubscription: 'Enabling NoteFlow Cloud sync requires an active subscription.',
     subscribe: 'Subscribe to NoteFlow Cloud',

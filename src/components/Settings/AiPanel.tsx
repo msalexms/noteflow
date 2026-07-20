@@ -6,8 +6,15 @@ import { useAiChatStore } from '../../stores/aiChatStore'
 import { LlmConfigView } from '../AiPanel/LlmConfigView'
 import { useT } from '../../i18n/useT'
 import { SectionTitle, settingsButtonClass } from './ui'
+import type { SettingsSection } from './SettingsModal'
 
-export function AiPanel({ onClose }: { onClose: () => void }) {
+export function AiPanel({
+  onClose,
+  onNavigate,
+}: {
+  onClose: () => void
+  onNavigate?: (section: SettingsSection) => void
+}) {
   const t = useT()
   const enabled = useAiStore((s) => s.enabled)
   const setEnabled = useAiStore((s) => s.setEnabled)
@@ -51,7 +58,7 @@ export function AiPanel({ onClose }: { onClose: () => void }) {
         <p className="text-[11px] font-mono text-text-muted mb-3 max-w-md leading-relaxed">
           {t.settings.ai.assistantHint}
         </p>
-        <LlmConfigView embedded />
+        <LlmConfigView embedded onNavigate={onNavigate} />
       </section>
 
       {/* ── Local AI (embeddings index) ─────────────────────────────── */}

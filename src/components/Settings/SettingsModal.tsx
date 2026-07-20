@@ -136,8 +136,8 @@ export function SettingsModal({ initialSection = 'general', onClose, onOpenExpor
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-5">
               {section === 'general' && <GeneralPanel />}
-              {section === 'ai' && <AiPanel onClose={onClose} />}
-              {section === 'sync' && <SyncPanel />}
+              {section === 'ai' && <AiPanel onClose={onClose} onNavigate={setSection} />}
+              {section === 'sync' && <SyncPanel onNavigate={setSection} />}
               {section === 'account' && <AccountPanel />}
               {section === 'appearance' && <AppearancePanel />}
               {section === 'editor' && <EditorPanel />}

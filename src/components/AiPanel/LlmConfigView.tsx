@@ -4,7 +4,9 @@ import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { AccountStatus, LlmConfigPublic } from '../../types'
+import type { SettingsSection } from '../Settings/SettingsModal'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
+import { settingsButtonClass } from '../Settings/ui'
 
 // The two mutually exclusive ways of powering the assistant. Kept as VIEW state
 // (see below) — the source of truth for what is actually in use is llmConfig.active.
@@ -33,7 +35,13 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {}) {
+export function LlmConfigView({
+  embedded = false,
+  onNavigate,
+}: {
+  embedded?: boolean
+  onNavigate?: (section: SettingsSection) => void
+} = {}) {
   const t = useT()
   const llmConfig = useAiChatStore((s) => s.llmConfig)
   const presets = useAiChatStore((s) => s.presets)
@@ -271,8 +279,21 @@ export function LlmConfigView({ embedded = false }: { embedded?: boolean } = {})
                 {/* Gate: without a session or the 'ai' entitlement there is nothing to activate —
                     point at Settings → Account instead of offering a button that would fail. */}
                 {!account.signedIn || !entitled ? (
-                  <div className="px-2.5 py-2 rounded-lg border border-solid border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-300 normal-case leading-relaxed">
-                    {!account.signedIn ? t.aiPanel.provider.noteflowSignIn : t.aiPanel.provider.noteflowNeedsSubscription}
+                  <div className="flex flex-col gap-2 items-start">
+                    <p className="text-[11px] text-text-muted normal-case leading-relaxed">
+                      {!account.signedIn ? t.aiPanel.provider.noteflowSignIn : t.aiPanel.provider.noteflowNeedsSubscription}
+                      <span className="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded-md border border-solid border-border text-text-muted">
+                        {t.aiPanel.provider.paidLabel}
+                      </span>
+                    </p>
+                    {onNavigate && (
+                      <button
+                        onClick={() => onNavigate('account')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+                      >
+                        {t.aiPanel.provider.goToAccount}
+                      </button>
+                    )}
                   </div>
                 ) : managedActive ? (
                   <span className="flex items-center gap-1 text-[12px] font-bold text-accent">

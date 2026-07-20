@@ -99,8 +99,10 @@ export const aiPanel = {
     hintAnthropic: 'Claude via the official API (BYO key).',
     hintOpenAiCompat: 'OpenAI-compatible endpoint (BYO key).',
     hintLocal: 'Local / no API key required.',
-    noteflowSignIn: 'Sign in to your NoteFlow account in Settings → Account to use NoteFlow AI.',
+    paidLabel: 'Paid',
+    noteflowSignIn: 'Sign in to your NoteFlow account to use it.',
     noteflowNeedsSubscription: 'Requires a NoteFlow AI subscription — manage your plan in Settings → Account.',
+    goToAccount: 'Go to Account',
     // Two-card selector: the assistant runs on EITHER the managed plan OR a provider of
     // your own (API key / local model). Badges tell which one is actually in use.
     chooseSourceDesc: 'Pick one source for the assistant: the managed NoteFlow AI plan, or a provider of your own.',

@@ -4,6 +4,7 @@ import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import { CloudPanel } from './CloudPanel'
+import type { SettingsSection } from './SettingsModal'
 import { settingsButtonClass } from './ui'
 
 interface SyncStatus {
@@ -23,7 +24,7 @@ type Backend = 'cloud' | 'github'
 // Sync (free) — and configure it below. The two are mutually exclusive: Cloud
 // takes priority in electron/syncProvider.ts and pauses GitHub while enabled;
 // here we surface that choice as a two-card selector.
-export function SyncPanel() {
+export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSection) => void }) {
   const t = useT()
   const [cloudEnabled, setCloudEnabled] = useState(false)
   const [cloudSignedIn, setCloudSignedIn] = useState(false)
@@ -109,7 +110,7 @@ export function SyncPanel() {
 
       <section>
         {backend === 'cloud' ? (
-          <CloudPanel />
+          <CloudPanel onNavigate={onNavigate} />
         ) : (
           <div className="space-y-4">
             {/* Paused while NoteFlow Cloud owns the sync loop (config is kept). */}

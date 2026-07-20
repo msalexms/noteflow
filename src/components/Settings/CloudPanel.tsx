@@ -5,6 +5,7 @@ import { SUBSCRIPTION_PRICES } from '../../lib/subscriptionPlans'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import type { SettingsSection } from './SettingsModal'
 import { settingsButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
@@ -24,7 +25,7 @@ type Busy = 'idle' | 'setup' | 'unlock' | 'pull' | 'toggle' | 'upgrade' | 'downg
 // private mode" (managed → e2ee) and "switch to standard mode" (e2ee →
 // managed, which invalidates the passphrase and recovery code — warned before
 // confirming, never silent).
-export function CloudPanel() {
+export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSection) => void }) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
@@ -287,9 +288,22 @@ export function CloudPanel() {
     return (
       <div className="space-y-4">
         {header}
-        <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-          {t.settings.cloud.signInFirst}
-        </p>
+        <div className="space-y-2">
+          <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+            {t.settings.cloud.signInFirst}
+            <span className="ml-1.5 align-middle inline-block text-[10px] font-mono px-1.5 py-0.5 rounded-md border border-border text-text-muted">
+              {t.settings.cloud.paidLabel}
+            </span>
+          </p>
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('account')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
+            >
+              {t.settings.cloud.goToAccount}
+            </button>
+          )}
+        </div>
       </div>
     )
   }
