@@ -22,8 +22,9 @@ exports.AI_PROXY_URL = `${exports.SUPABASE_URL}/functions/v1/ai-proxy`;
 exports.CLOUD_KEYS_URL = `${exports.SUPABASE_URL}/functions/v1/cloud-keys`;
 /**
  * Lemon Squeezy checkout URLs per product. Filled in once the products exist
- * in the LS store (see supabase/README.md § 6). While a URL is empty, the
- * corresponding "Subscribe" button in Settings stays hidden.
+ * in the LS store (see supabase/README.md § 6). While a URL is empty, its
+ * `<product>CheckoutConfigured` flag is false and the plan card in the UI shows
+ * "Coming soon" instead of the "Subscribe" button.
  */
 exports.LEMONSQUEEZY_CHECKOUT_URLS = {
     ai: 'https://noteflow-app.lemonsqueezy.com/checkout/buy/67c8e588-e83e-4657-822a-0ecb6a71a980',

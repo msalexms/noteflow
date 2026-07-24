@@ -155,11 +155,9 @@ export const settings = {
     notAvailable: "NoteFlow Cloud isn't available in this build yet.",
     paidLabel: 'Paid',
     signInFirst: 'Sign in to your NoteFlow account to use it.',
-    goToAccount: 'Go to Account',
-    // Entitlement gate (enable only — unlock/pull/disable stay available).
+    // Entitlement gate (enable only — unlock/pull/disable stay available). The
+    // plans and their prices come from the shared PlanOffers block (settings.account.*).
     requiresSubscription: 'Enabling NoteFlow Cloud sync requires an active subscription.',
-    subscribe: 'Subscribe to NoteFlow Cloud',
-    subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh in Settings → Account if it does not show up.',
     // Encryption mode choice (state: no-keys) — two cards, Standard preselected.
     chooseModeDesc: 'Choose how your encryption keys are managed. You can switch modes later from this panel.',
     modeStandardTitle: 'Standard',
@@ -255,15 +253,23 @@ export const settings = {
     couldNotRefresh: 'Could not refresh subscription status.',
     active: 'Active',
     lastChecked: 'Last checked: {time}',
-    subscriptionsSoon: 'Subscriptions are coming soon.',
     // Plans block (signed in, entitlements missing). Price figures are NOT in
     // the dicts — they live in src/lib/subscriptionPlans.ts; only the pattern
     // is translated and filled with tf().
     planBundleSubtitle: 'AI + Cloud',
+    planBestValue: 'Best value',
     planPrice: '{monthly}/month · {yearly}/year',
+    // Suffixes for the split price on the plan cards: the monthly figure is the
+    // hero, the yearly one a small line under it (mirrors the /pricing web cards).
+    planPerMonth: '/month',
+    planPerYear: '/year',
     subscribe: 'Subscribe',
     comingSoon: 'Coming soon',
     subscribeHint: 'Opens the checkout in your browser. The plan activates automatically after payment — hit Refresh if it does not show up.',
+    // Shown instead of subscribeHint when the plans block renders without a
+    // session (AI / Cloud gates), next to the shortcut into Settings → Account.
+    signInToSubscribe: 'Sign in to your NoteFlow account to subscribe.',
+    goToAccount: 'Go to Account',
     couldNotOpenCheckout: 'Could not open the checkout.',
     refresh: 'Refresh',
     signOut: 'Sign out',

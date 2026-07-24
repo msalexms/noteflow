@@ -271,7 +271,9 @@ proporcional** `w-[min(940px,92vw)] h-[min(680px,90vh)]`. Cada panel gestiona su
 estado/efectos. El `CommandPalette` dispara los mismos eventos de siempre
 (`noteflow:open-shortcuts/-startup/-github-sync/check-for-update/-export/-import`) y el TitleBar
 los reinterpreta para abrir la ventana en la sección correcta (export/import siguen abriendo el
-flujo `ExportImportModal` directo).
+flujo `ExportImportModal` directo). Mismo bus para cualquier superficie **sin navegación propia**
+que necesite llevar a Ajustes: el panel de IA del Cerebro emite `noteflow:open-account` para abrir
+Ajustes → Cuenta (los paneles que ya viven dentro de Ajustes usan su prop `onNavigate`).
 
 **Lenguaje visual compartido (`src/components/Settings/ui.tsx`) — úsalo en cualquier panel nuevo.**
 Los 13 paneles repetían a mano el estilo de sus encabezados y botones, y la jerarquía se había

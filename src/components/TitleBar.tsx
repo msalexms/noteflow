@@ -67,6 +67,8 @@ export function TitleBar() {
     const openGithubSync = () => openSettings('sync')
     const openStartup = () => openSettings('startup')
     const openUpdates = () => openSettings('about')
+    // Emitted by surfaces with no navigation of their own (the brain's AI panel gate).
+    const openAccount = () => openSettings('account')
     const doSync = () => {
       setSyncing(true)
       window.noteflow.pullActiveNotes().then(() => {
@@ -80,6 +82,7 @@ export function TitleBar() {
     window.addEventListener('noteflow:open-github-sync', openGithubSync)
     window.addEventListener('noteflow:open-startup', openStartup)
     window.addEventListener('noteflow:check-for-update', openUpdates)
+    window.addEventListener('noteflow:open-account', openAccount)
     window.addEventListener('noteflow:sync-notes', doSync)
     return () => {
       window.removeEventListener('noteflow:open-export', openExport)
@@ -88,6 +91,7 @@ export function TitleBar() {
       window.removeEventListener('noteflow:open-github-sync', openGithubSync)
       window.removeEventListener('noteflow:open-startup', openStartup)
       window.removeEventListener('noteflow:check-for-update', openUpdates)
+      window.removeEventListener('noteflow:open-account', openAccount)
       window.removeEventListener('noteflow:sync-notes', doSync)
     }
   }, [])

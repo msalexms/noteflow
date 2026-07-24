@@ -4,9 +4,10 @@ import { useAiChatStore } from '../../stores/aiChatStore'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import type { AccountStatus, LlmConfigPublic } from '../../types'
+import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import type { SettingsSection } from '../Settings/SettingsModal'
 import { Card, FieldLabel, FIELD_INPUT } from './ui'
-import { settingsButtonClass } from '../Settings/ui'
+import { PlanOffers } from '../Settings/PlanOffers'
 
 // The two mutually exclusive ways of powering the assistant. Kept as VIEW state
 // (see below) — the source of truth for what is actually in use is llmConfig.active.
@@ -67,6 +68,7 @@ export function LlmConfigView({
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null)
   const lastActive = useRef<string | null>(null)
   // `mode` is VIEW state, not the active provider: it is resolved ONCE, from the provider in use
@@ -148,6 +150,21 @@ export function LlmConfigView({
     setModelsError(null)
     const res = await refreshModels()
     if (!res.ok) setModelsError(res.error ?? t.aiPanel.provider.error)
+  }
+
+  // Checkout for the plans advertised in the gate below — opens in the browser;
+  // the entitlement lands on its own via onAccountStatusChanged.
+  const openCheckout = async (product: SubscriptionProduct) => {
+    setCheckoutError(null)
+    const result = await window.noteflow.accountOpenCheckout(product)
+    if (!result.ok) setCheckoutError(result.error ?? t.settings.account.couldNotOpenCheckout)
+  }
+
+  // Settings → AI can switch section in place; the brain panel has no navigation
+  // of its own, so it asks TitleBar to open Settings → Account via the event bus.
+  const goToAccount = () => {
+    if (onNavigate) onNavigate('account')
+    else window.dispatchEvent(new Event('noteflow:open-account'))
   }
 
   const runTest = async () => {
@@ -277,7 +294,8 @@ export function LlmConfigView({
                 )}
 
                 {/* Gate: without a session or the 'ai' entitlement there is nothing to activate —
-                    point at Settings → Account instead of offering a button that would fail. */}
+                    show what the plans cost (AI, or the Bundle when Cloud is missing too) and,
+                    below them, the way into Settings → Account. */}
                 {!account.signedIn || !entitled ? (
                   <div className="flex flex-col gap-2 items-start">
                     <p className="text-[11px] text-text-muted normal-case leading-relaxed">
@@ -286,14 +304,15 @@ export function LlmConfigView({
                         {t.aiPanel.provider.paidLabel}
                       </span>
                     </p>
-                    {onNavigate && (
-                      <button
-                        onClick={() => onNavigate('account')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-                      >
-                        {t.aiPanel.provider.goToAccount}
-                      </button>
-                    )}
+                    {/* Sign-in hint off: noteflowSignIn above already says it. */}
+                    <PlanOffers
+                      products={['ai', 'bundle']}
+                      account={account}
+                      showSignInHint={false}
+                      onSubscribe={openCheckout}
+                      onGoToAccount={goToAccount}
+                    />
+                    {checkoutError && <span className="text-[11px] text-red-400 normal-case">{checkoutError}</span>}
                   </div>
                 ) : managedActive ? (
                   <span className="flex items-center gap-1 text-[12px] font-bold text-accent">

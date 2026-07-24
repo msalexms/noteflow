@@ -592,7 +592,13 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
     modelos curados (algunos con sufijo "6× cuota") y **barra de consumo mensual**. Botón "Use NoteFlow
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
-    visible pero en vez del botón muestra el aviso que te lleva a Ajustes → Cuenta — igual que si la
+    visible pero en vez del botón muestra el aviso del motivo ("sign in" / "requires subscription")
+    **+ el bloque de planes con precios**: NoteFlow AI y, si tampoco tienes Cloud, el Bundle (con
+    badge "Best value"). **La card entera es clickable**: con sesión y checkout configurado abre la
+    pasarela de pago de ESE plan (antes había un botón "Subscribe" dentro; ahora la card muestra un CTA
+    "Subscribe"); sin sesión, clicar la card lleva a Ajustes → Cuenta (CTA "Go to Account" con flecha);
+    con sesión pero sin checkout en el build muestra "coming soon" y queda inerte. Esto vale tanto en
+    Ajustes → IA como en el **panel de IA del Cerebro** (antes solo en Ajustes). Lo mismo si la
     suscripción caduca teniéndolo activo, para que entiendas el fallo y puedas cambiar de fuente.
     **Al suscribirte** (Subscribe → pagar → Refresh en Settings → Account), NoteFlow AI **se activa
     como proveedor automáticamente**.
@@ -849,10 +855,12 @@ Flujo del panel según estado:
   a ser automático con la sesión). Nunca silencioso; requiere estar desbloqueado (sin pedir
   ningún secreto).
 - **Gating por suscripción:** solo el botón **Enable sync** exige la entitlement `cloud` (sin
-  ella: mensaje "requires subscription" + la línea de precio del plan Cloud — "€3.99/month ·
-  €39.99/year", de `src/lib/subscriptionPlans.ts` — + botón de checkout si la build trae URL).
-  Crear claves, unlock, pull y disable funcionan sin suscripción (un suscriptor caducado puede
-  seguir bajando sus datos).
+  ella: mensaje "requires subscription" + el **mismo bloque de planes** que Ajustes → Cuenta —
+  NoteFlow Cloud y, si tampoco tienes AI, el Bundle con badge "Best value" —, cada card clickable
+  para abrir su checkout). Crear claves, unlock, pull y disable funcionan sin suscripción
+  (un suscriptor caducado puede seguir bajando sus datos).
+- **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
+  precios, y clicar cualquier card lleva a Ajustes → Cuenta para crear la cuenta sin salir de Ajustes.
 - Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa".
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
@@ -891,10 +899,10 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 
 ## Cuenta NoteFlow (Settings → Account)
 
-Cuenta opcional para las suscripciones (**NoteFlow AI**, ya comprable — €5.99/mes · €49.99/año;
-**NoteFlow Cloud**, con panel en Settings → Sync — €3.99/mes · €39.99/año; **NoteFlow Bundle**,
-AI + Cloud juntos — €7.99/mes · €79.99/año; Cloud y Bundle con checkout pendiente de producto en
-la tienda — precios en `.claude/context/monetization.md` § visión, cifras de display en
+Cuenta opcional para las suscripciones (**NoteFlow AI** — €5.99/mes · €49.99/año; **NoteFlow
+Cloud**, con panel en Settings → Sync — €3.99/mes · €39.99/año; **NoteFlow Bundle**, AI + Cloud
+juntos — €7.99/mes · €79.99/año). Los tres son comprables: las tres URLs de checkout están
+pobladas en la build (precios en `.claude/context/monetization.md` § visión, cifras de display en
 `src/lib/subscriptionPlans.ts`). Todo lo gratuito sigue funcionando sin cuenta.
 
 - **Sign-in sin contraseña:** email → "Send code" → código de 6 dígitos por email → "Verify &
@@ -902,15 +910,17 @@ la tienda — precios en `.claude/context/monetization.md` § visión, cifras de
 - **Con sesión:** muestra el email, badges de plan ("NoteFlow AI" / "NoteFlow Cloud" con estado
   Active/—), la sección de **planes**, botón "Refresh" (relee las suscripciones) y "Sign out".
 - **Sección de planes:** cards en orden **Bundle → AI → Cloud**, cada una con nombre y precio
-  ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" —, €5.99/€49.99 para AI,
-  €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan solo aparece
-  mientras falte su entitlement (AI si falta `ai`, Cloud si falta `cloud`, Bundle solo si faltan
-  **ambas** — evita pagar dos veces lo mismo); con todo contratado la sección desaparece. Cada
-  plan lleva botón **"Subscribe"** si su checkout está configurado en la build (hoy solo AI) →
-  abre el checkout de Lemon Squeezy en el navegador; si no, la card indica "Coming soon". Debajo,
-  un único hint genérico: el checkout se abre en el navegador y el plan se activa solo tras el
-  pago ("Refresh" si no aparece). Tras pagar AI, **el proveedor NoteFlow AI se activa solo** en
+  ("€7.99/month · €79.99/year" para Bundle — con subtítulo "AI + Cloud" y badge **"Best value"** —,
+  €5.99/€49.99 para AI, €3.99/€39.99 para Cloud; cifras de `src/lib/subscriptionPlans.ts`). Un plan
+  solo aparece mientras falte su entitlement (AI si falta `ai`, Cloud si falta `cloud`, Bundle solo
+  si faltan **ambas** — evita pagar dos veces lo mismo); con todo contratado la sección desaparece.
+  **Cada card es clickable** (CTA "Subscribe" con estrella) → abre el checkout de Lemon Squeezy en el
+  navegador; si una build no trae URL para ese producto, la card indica "Coming soon" y queda inerte.
+  Debajo, un único hint genérico: el checkout se abre en el navegador y el plan se activa solo tras el pago
+  ("Refresh" si no aparece). Tras pagar AI, **el proveedor NoteFlow AI se activa solo** en
   Settings → AI.
+  Es **el mismo bloque** (`PlanOffers`) que ves en los gates de Ajustes → IA, del panel de IA del
+  Cerebro y de Settings → Sync → NoteFlow Cloud: allí solo cambia qué planes se ofrecen.
 - **Builds sin backend configurado** (`cloudConfig.ts` vacío — no es el caso de las builds
   actuales): el panel solo muestra "NoteFlow account services aren't available in this build yet."
 - Privacidad: la sesión (refresh token cifrado con `safeStorage`) vive en el proceso main y nunca

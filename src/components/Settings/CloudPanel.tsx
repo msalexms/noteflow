@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck, Sparkles } from 'lucide-react'
+import { Check, Cloud, CloudOff, Copy, KeyRound, Loader, Lock, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { AccountStatus, CloudSyncStatus } from '../../types'
-import { SUBSCRIPTION_PRICES } from '../../lib/subscriptionPlans'
+import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
 import type { SettingsSection } from './SettingsModal'
+import { PlanOffers } from './PlanOffers'
 import { settingsButtonClass } from './ui'
 
 // UI-only floor (the backend imposes no minimum); the passphrase only wraps
@@ -193,9 +194,9 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
     await window.noteflow.cloudLock()
   }
 
-  async function handleSubscribe() {
+  async function handleSubscribe(product: SubscriptionProduct) {
     setError(null)
-    const result = await window.noteflow.accountOpenCheckout('cloud')
+    const result = await window.noteflow.accountOpenCheckout(product)
     if (!result.ok) setError(result.error ?? t.settings.account.couldNotOpenCheckout)
   }
 
@@ -295,14 +296,15 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
               {t.settings.cloud.paidLabel}
             </span>
           </p>
-          {onNavigate && (
-            <button
-              onClick={() => onNavigate('account')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono ${settingsButtonClass}`}
-            >
-              {t.settings.cloud.goToAccount}
-            </button>
-          )}
+          {/* What Cloud costs, before asking for a sign-in (the Bundle joins in
+              while the AI plan is missing too). Carries its own way into Account;
+              the sign-in hint is off because signInFirst above already says it. */}
+          <PlanOffers
+            products={['cloud', 'bundle']}
+            account={account}
+            showSignInHint={false}
+            onGoToAccount={onNavigate ? () => onNavigate('account') : undefined}
+          />
         </div>
       </div>
     )
@@ -523,33 +525,14 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
               <p className="text-[11px] font-mono text-text-muted leading-relaxed">
                 {t.settings.cloud.requiresSubscription}
               </p>
-              {/* Display price — the authoritative figure is the checkout's
-                  (see src/lib/subscriptionPlans.ts). */}
-              <p className="text-[11px] font-mono text-text-muted">
-                {tf(t.settings.account.planPrice, {
-                  monthly: SUBSCRIPTION_PRICES.cloud.monthly,
-                  yearly: SUBSCRIPTION_PRICES.cloud.yearly,
-                })}
-              </p>
-              {account.cloudCheckoutConfigured ? (
-                <>
-                  <button
-                    onClick={handleSubscribe}
-                    disabled={isLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text border border-text/20 transition-colors disabled:opacity-40"
-                  >
-                    <Sparkles size={11} />
-                    {t.settings.cloud.subscribe}
-                  </button>
-                  <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
-                    {t.settings.cloud.subscribeHint}
-                  </p>
-                </>
-              ) : (
-                <p className="text-[11px] font-mono text-text-muted/60 leading-relaxed">
-                  {t.settings.account.subscriptionsSoon}
-                </p>
-              )}
+              {/* Cloud, plus the Bundle while the AI plan is missing too. Display
+                  prices — the authoritative figure is the checkout's. */}
+              <PlanOffers
+                products={['cloud', 'bundle']}
+                account={account}
+                busy={isLoading}
+                onSubscribe={handleSubscribe}
+              />
             </div>
           )}
 

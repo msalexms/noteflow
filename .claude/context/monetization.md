@@ -37,9 +37,11 @@ Dos áreas de suscripción (mensual/anual), pensadas para el usuario que "no qui
 El **Bundle** es el tercer producto (resuelve la vieja duda "un paquete vs dos planes": hay ambos):
 una fila `product='bundle'` activa las dos entitlements (`electron/entitlements.ts` ya lo soporta).
 Las cifras de display viven en `src/lib/subscriptionPlans.ts` (la autoritativa es siempre la del
-checkout de Lemon Squeezy — mantener en sync con las variantes de LS y con la web). En LS solo
-existe el producto AI: los productos **Cloud y Bundle están pendientes de crearse** (URLs vacías en
-`LEMONSQUEEZY_CHECKOUT_URLS` → su plan muestra "Coming soon" en vez del botón Subscribe).
+checkout de Lemon Squeezy — mantener en sync con las variantes de LS y con la web). Los **tres
+productos existen en LS** y sus tres URLs están pobladas en `LEMONSQUEEZY_CHECKOUT_URLS`
+(`electron/cloudConfig.ts`), así que los tres planes ofrecen botón Subscribe. Ese es el único
+interruptor: una URL vacía deja `<product>CheckoutConfigured` en `false` y esa card pasa a mostrar
+"Coming soon" en vez del botón.
 
 ## 1. Backend: Supabase (veredicto y caveats)
 
@@ -171,13 +173,28 @@ es **un preset más**, no una implementación nueva.
   motivo y puede pasarse a BYO con la otra card). Detalle del selector, del estado de vista `mode` y
   de por qué los campos BYO se ocultan hasta activar el proveedor: `.claude/context/ai.md` § LLM.
   `LlmConfigView` refresca la config al cambiar el estado de cuenta (`onAccountStatusChanged`).
-  En `AccountPanel`, con sesión iniciada se muestra la sección de **planes** (Bundle → AI → Cloud,
-  cada uno con nombre y precio de `src/lib/subscriptionPlans.ts`; un plan solo aparece mientras
-  falte su entitlement, y Bundle exige que falten AMBAS — para no facilitar doble facturación).
-  Cada plan con checkout configurado lleva botón "Subscribe" → IPC `account:open-checkout`
-  (`'ai' | 'cloud' | 'bundle'`; main construye la URL con
+- **Bloque de planes (`src/components/Settings/PlanOffers.tsx`):** componente **compartido** por los
+  cuatro sitios donde un gate puede acabar en compra, para que precio, reglas de visibilidad y copy
+  no se separen entre superficies:
+  1. **Ajustes → Cuenta** (`AccountPanel`, con sesión): `['bundle', 'ai', 'cloud']`.
+  2. **Ajustes → IA** y 3. **panel de IA del Cerebro** (`LlmConfigView`, mismo componente en ambas):
+     `['ai', 'bundle']` dentro del gate.
+  4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
+     estado sin sesión como en el gate de entitlement.
+  Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
+  que no se puede comprar. Un plan solo aparece mientras falte su entitlement, y **Bundle exige que
+  falten AMBAS** (para no facilitar doble facturación); si no queda ninguno, no renderiza. Nombre y
+  precio salen de `src/lib/subscriptionPlans.ts` (`SUBSCRIPTION_PRICES`, display-only) y el Bundle
+  lleva badge "Best value". **La card entera es el call-to-action** (`<button>` cuando es clickable,
+  para foco + teclado; el CTA de dentro es un `<span>` porque un button no puede anidar otro button).
+  Con sesión y checkout configurado, clicar la card dispara `onSubscribe(product)` → IPC
+  `account:open-checkout` (`'ai' | 'cloud' | 'bundle'`; main construye la URL con
   `checkout%5Bcustom%5D%5Buser_id%5D=<uuid>` y la abre con `shell.openExternal`; el userId
-  **no cruza al renderer**). URL vacía = nota "Coming soon" en ese plan.
+  **no cruza al renderer**). URL vacía = card inerte con nota "Coming soon". Sin sesión, clicar la card
+  dispara `onGoToAccount` (lleva a Ajustes → Cuenta), y debajo se muestra la línea "sign in to
+  subscribe". Ese acceso a Cuenta lo resuelve `onNavigate('account')` donde existe (paneles de Ajustes)
+  y, desde el panel del Cerebro —que no tiene navegación propia—, el evento `window`
+  **`noteflow:open-account`**, escuchado en `TitleBar` junto al resto de `noteflow:open-*`.
 - **Auto-activación al suscribirse:** `electron/main.ts` (junto a `account.onStatusChanged`)
   detecta la transición real `entitlements.ai` `false→true` **dentro de la misma sesión de
   cuenta del proceso en curso** y cambia `settings.aiLlm.active` a `'noteflow'` automáticamente
@@ -509,13 +526,13 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   `syncError` (rojo, accionable) + botones Enable/Disable, Sync now (`cloudPull`, resultado tipo
   GitHub) y Lock.
 - **Gating (decisión):** solo **Enable sync** exige la entitlement `cloud` — sin ella, mensaje
-  "requires subscription" + la línea de precio del plan Cloud (de `subscriptionPlans.ts`) + botón
-  "Subscribe to NoteFlow Cloud" si `LEMONSQUEEZY_CHECKOUT_URLS.cloud` no está vacía (hoy LO ESTÁ —
-  no existe el producto en LS; el botón queda oculto y se muestra "Subscriptions are coming
-  soon"). Setup/unlock/pull/disable NO se gatean (RLS solo bloquea escrituras; un suscriptor
-  caducado puede bajar sus datos). El IPC `account:open-checkout` acepta `'ai' | 'cloud' |
-  'bundle'` y `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
-  `bundleCheckoutConfigured`.
+  "requires subscription" + el bloque compartido `PlanOffers` con Cloud (y Bundle si falta también
+  la entitlement `ai`); un plan sin URL en `LEMONSQUEEZY_CHECKOUT_URLS` se queda en "Coming soon".
+  El estado sin sesión del panel muestra ese mismo bloque (precios + acceso a Ajustes → Cuenta) en
+  vez de solo el "sign in first". Setup/unlock/pull/disable NO se gatean (RLS solo bloquea
+  escrituras; un suscriptor caducado puede bajar sus datos). El IPC `account:open-checkout` acepta
+  `'ai' | 'cloud' | 'bundle'` y `AccountStatus` expone `aiCheckoutConfigured` /
+  `cloudCheckoutConfigured` / `bundleCheckoutConfigured`.
 - **Exclusión mutua (visual):** el selector de dos tarjetas ya la comunica (solo un backend
   activo; badge "Paused" en GitHub mientras Cloud esté enabled). Además, dentro del panel de
   GitHub sigue el aviso ámbar "paused while NoteFlow Cloud is enabled" (la config se conserva) y,
@@ -573,7 +590,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
 | **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×6), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
-| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). Pendiente del operador: crear el producto Cloud en Lemon Squeezy (checkout URL vacía → botón Subscribe oculto; mientras tanto hay una suscripción manual de pruebas, ver § 4) |
+| **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe; lo que sigue pendiente del operador es el **paso a live mode de la store** (ver § 3, "Pendiente del operador (billing)") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 
 ## 6. Fase 4.0 — implementación (parte cliente/repo)
@@ -619,5 +636,6 @@ puro vía `fetch` desde el proceso main.
   `AccountEntitlements` en `src/types/index.ts`.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
-  email → código de 6 dígitos; signed in → email + badges de plan + sección de **planes con
-  precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión "Precios") + Refresh + Sign out.
+  email → código de 6 dígitos; signed in → email + badges de plan + el bloque compartido
+  `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
+  "Precios") + Refresh + Sign out.
