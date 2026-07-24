@@ -26,7 +26,7 @@ export const commonEn = {
     terms: 'Terms',
     cookies: 'Cookies',
     source: 'GitHub',
-    copyright: '© 2026 · Made for people with taste',
+    copyright: '© 2026 · Technical notes app',
   },
   copy: { idle: 'copy', done: 'copied', aria: 'Copy to clipboard' },
 };

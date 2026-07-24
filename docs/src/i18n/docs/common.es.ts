@@ -23,7 +23,7 @@ export const commonEs: DocsCommon = {
     terms: 'Términos',
     cookies: 'Cookies',
     source: 'GitHub',
-    copyright: '© 2026 · Hecho para gente con buen gusto',
+    copyright: '© 2026 · App de notas técnicas',
   },
   copy: { idle: 'copiar', done: 'copiado', aria: 'Copiar al portapapeles' },
 };

@@ -205,7 +205,7 @@ export const en = {
       terms: 'Terms',
       // Reopens the cookie consent banner (data-cookie-settings, handled in Base.astro).
       cookies: 'Cookies',
-      copyright: '© 2026 · Made for people with taste',
+      copyright: '© 2026 · Technical notes app',
     },
   },
 

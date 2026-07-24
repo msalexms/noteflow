@@ -41,9 +41,9 @@ function addNote(spec: NoteSpec, colorVar: GroupColor, parentId?: string): strin
   return id;
 }
 
-function addGroup(gid: string, name: string, color: GroupColor): string {
+function addGroup(gid: string, name: string, color: GroupColor, centered = false): string {
   const id = `g:${gid}`;
-  nodes.push({ id, kind: 'group', label: name, colorVar: color, refId: gid });
+  nodes.push({ id, kind: 'group', label: name, colorVar: color, refId: gid, centered });
   return id;
 }
 
@@ -53,6 +53,13 @@ function addFolder(fid: string, name: string, color: GroupColor, groupId: string
   structureEdges.push({ source: groupId, target: id });
   return id;
 }
+
+// ── Second brain: the AI-generated profile ("IA Generated" group) ─────────────
+// In the app this is a fixed group holding one note that captures who you are.
+// Here it sits at the CORE of the brain — synapses radiate out to every topic,
+// since the profile is inferred from them all.
+const aiGen = addGroup('ai-generated', 'IA Generated', '--text', true)
+addNote({ id: 'profile', label: 'Your profile' }, '--text', aiGen)
 
 // ── Engineering ───────────────────────────────────────────────────────────────
 const eng = addGroup('eng', 'Engineering', '--accent');
@@ -107,6 +114,13 @@ const rel: Array<[string, string, number]> = [
   ['reading', 'quotes', 0.5],
   ['daily', 'ideas', 0.46],
   ['eval', 'embeddings', 0.58],
+  // Profile at the core → one fibre out to a representative note of each lobe.
+  ['profile', 'rag', 0.66],
+  ['profile', 'blog-brain', 0.62],
+  ['profile', 'react-patterns', 0.6],
+  ['profile', 'roadmap', 0.58],
+  ['profile', 'reading', 0.5],
+  ['profile', 'daily', 0.48],
 ];
 for (const [a, b, score] of rel) contentEdges.push({ source: `n:${a}`, target: `n:${b}`, score });
 

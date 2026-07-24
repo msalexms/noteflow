@@ -61,6 +61,15 @@ Extras servidos: `public/cli.html` (meta-refresh legacy → `/cli`, ver gotchas)
   componente (patrón Home.astro).
 - **Fondo "cerebro tech"**: web components vanilla en `public/brain/` — `<nf-netbg>` (malla 2D
   canvas, reacciona a `data-theme`) y `<noteflow-brain>` (wireframe 3D three.js, solo en la home).
+  OJO — el wireframe visible lo renderizan **solo** los assets servidos `public/brain/*.js`
+  (`nf-brain.js` define el custom element; `nf-mesh.js` la malla; `nf-graph.js` el grafo de ejemplo
+  + asignación de vértices). Esos `.js` son un **port vanilla mantenido a mano** de `src/brain/*.ts`
+  (`mesh.ts`, `graph.ts`, `sampleGraph.ts`, `assign.ts`) — que son la **fuente/espejo** pero NO se
+  bundlean en ninguna página (`BrainHero.tsx`/`BrainScene.tsx` son un tuner de dev sin importadores).
+  Al tocar el grafo (nodos, sinapsis, colocación) hay que **sincronizar ambos lados**: editar el
+  `.ts` correspondiente Y su port en `public/brain/*.js`, o el cambio no se ve en la web.
+  Ej.: el grupo central "IA Generated" (perfil del segundo cerebro) se ancla al núcleo vía el flag
+  `centered` en `graph.ts`/`sampleGraph.ts`/`assign.ts` y su espejo `nf-graph.js`.
 - **i18n**: `src/i18n/{en,es}.ts` (landing) y
   `src/i18n/docs/{common,cli,ai,features,pricing,privacy,terms}.{en,es}.ts` (docs). Patrón: el
   `.en.ts` define la forma (`type X = typeof xEn`) y el `.es.ts` la satisface → TypeScript fuerza
@@ -201,7 +210,7 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
 | `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; las cifras van también al JSON-LD (`offers`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
 | `#ai` | Plan NoteFlow AI: **modelos curados literales** (gpt-4o-mini, gpt-4.1-mini, claude-haiku-4.5, gemini-2.5-flash), **cuota 3M tokens/mes**, mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `AI_MONTHLY_TOKENS`) + § visión "Precios" |
-| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; nota: el producto en Lemon Squeezy aún no existe → botón Subscribe oculto en la app) + § visión "Precios" |
+| `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
 | `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |
 

@@ -190,7 +190,7 @@ export const es: Content = {
       privacy: 'Privacidad',
       terms: 'Términos',
       cookies: 'Cookies',
-      copyright: '© 2026 · Hecho para gente con buen gusto',
+      copyright: '© 2026 · App de notas técnicas',
     },
   },
 

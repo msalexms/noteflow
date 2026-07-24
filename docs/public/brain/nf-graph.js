@@ -7,7 +7,7 @@
   // ── sample brain graph (a believable developer's second brain) ──
   function buildSampleGraph() {
     const nodes = [], structureEdges = [], contentEdges = [];
-    function addGroup(gid, name, color) { const id = 'g:' + gid; nodes.push({ id, kind: 'group', label: name, colorVar: color, refId: gid }); return id; }
+    function addGroup(gid, name, color, centered) { const id = 'g:' + gid; nodes.push({ id, kind: 'group', label: name, colorVar: color, refId: gid, centered: !!centered }); return id; }
     function addFolder(fid, name, color, groupId) { const id = 'f:' + fid; nodes.push({ id, kind: 'folder', label: name, colorVar: color, refId: fid }); structureEdges.push({ source: groupId, target: id }); return id; }
     function addNote(spec, colorVar, parentId) {
       const id = 'n:' + spec.id;
@@ -23,6 +23,11 @@
       }
       return id;
     }
+
+    // Second brain: the AI-generated profile ("IA Generated" group) — pinned to the brain's CORE,
+    // one note that captures who you are, with synapses radiating out to every topic.
+    const aiGen = addGroup('ai-generated', 'IA Generated', '--text', true);
+    addNote({ id: 'profile', label: 'Your profile' }, '--text', aiGen);
 
     const eng = addGroup('eng', 'Engineering', '--accent');
     const feFolder = addFolder('eng-fe', 'Frontend', '--accent', eng);
@@ -60,6 +65,9 @@
       ['roadmap', 'pricing', 0.7], ['roadmap', 'agents', 0.52], ['feedback', 'roadmap', 0.64],
       ['blog-brain', 'newsletter', 0.72], ['ideas', 'blog-brain', 0.6], ['reading', 'quotes', 0.5],
       ['daily', 'ideas', 0.46], ['eval', 'embeddings', 0.58],
+      // Profile at the core → one fibre out to a representative note of each lobe.
+      ['profile', 'rag', 0.66], ['profile', 'blog-brain', 0.62], ['profile', 'react-patterns', 0.6],
+      ['profile', 'roadmap', 0.58], ['profile', 'reading', 0.5], ['profile', 'daily', 0.48],
     ];
     for (const r of rel) contentEdges.push({ source: 'n:' + r[0], target: 'n:' + r[1], score: r[2] });
 
@@ -109,6 +117,23 @@
       return fallback >= 0 ? fallback : anyFreeIn(allowed);
     };
     const freeNeighbor = (v, allowed) => { for (const nb of mesh.adjacency[v]) if (free.has(nb) && allowed.has(mesh.regionOf[nb])) return nb; return -1; };
+    // Free vertex closest to the brain's geometric core — pins `centered` groups (the "IA Generated"
+    // profile) at the centre instead of a lobe. Prefers the interior-fill points.
+    const seedAtCore = () => {
+      let pool = mesh.interiorVertices.filter((v) => free.has(v));
+      if (!pool.length) pool = [...free];
+      if (!pool.length) return anyFreeIn(CEREBRUM);
+      let cx = 0, cy = 0, cz = 0;
+      for (const v of pool) { cx += pos[v * 3]; cy += pos[v * 3 + 1]; cz += pos[v * 3 + 2]; }
+      cx /= pool.length; cy /= pool.length; cz /= pool.length;
+      let best = -1, bestD = Infinity;
+      for (const v of pool) {
+        const d = (pos[v * 3] - cx) ** 2 + (pos[v * 3 + 1] - cy) ** 2 + (pos[v * 3 + 2] - cz) ** 2;
+        if (d < bestD) { bestD = d; best = v; }
+      }
+      return best >= 0 ? best : anyFreeIn(CEREBRUM);
+    };
+    const centeredGroups = new Set();
 
     const parentOf = new Map();
     for (const e of model.structureEdges) parentOf.set(e.target, e.source);
@@ -119,8 +144,10 @@
 
     for (const node of model.nodes) {
       if (node.kind === 'group') {
-        const region = GROUP_LOBES[lobeIdx++ % GROUP_LOBES.length];
-        const v = seedInRegion(region, CEREBRUM);
+        // Centered groups pin to the core (no lobe, no round-robin advance); the rest spread across lobes.
+        const region = node.centered ? 'parietal' : GROUP_LOBES[lobeIdx++ % GROUP_LOBES.length];
+        const v = node.centered ? seedAtCore() : seedInRegion(region, CEREBRUM);
+        if (node.centered) centeredGroups.add(node.id);
         if (v >= 0) { claim(node.id, v); anchorOf.set(node.id, v); }
         regionByNode.set(node.id, region); allowedOf.set(node.id, CEREBRUM);
       } else if (node.kind === 'folder') {
@@ -132,11 +159,13 @@
         regionByNode.set(node.id, region); allowedOf.set(node.id, CEREBRUM);
       } else if (node.kind === 'note') {
         const coloured = node.colorVar !== '--text';
+        const parent = parentOf.get(node.id);
+        const parentCentered = parent !== undefined && centeredGroups.has(parent);
         let region, anchor, allowed;
-        if (coloured) {
-          const p = parentOf.get(node.id);
-          region = (p !== undefined ? regionByNode.get(p) : undefined) || 'parietal';
-          anchor = (p !== undefined ? anchorOf.get(p) : undefined);
+        if (coloured || parentCentered) {
+          // grouped (or the profile note of a centered group) → follow its parent's anchor
+          region = (parent !== undefined ? regionByNode.get(parent) : undefined) || 'parietal';
+          anchor = (parent !== undefined ? anchorOf.get(parent) : undefined);
           if (anchor == null) anchor = seedInRegion(region, CEREBRUM);
           allowed = CEREBRUM;
         } else if (node.favorited) {

@@ -24,6 +24,9 @@ export interface BrainNode {
   noteId?: string;
   sectionId?: string;
   favorited?: boolean;
+  // Web-only: pin this node to the brain's core instead of a lobe. Used for the "IA Generated"
+  // group (the AI-authored profile note of the second brain), which lives at the centre.
+  centered?: boolean;
 }
 
 export interface BrainStructureEdge {

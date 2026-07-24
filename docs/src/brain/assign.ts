@@ -70,6 +70,25 @@ export function assignVertices(mesh: BrainMesh, model: BrainGraphModel): Map<str
     return -1
   }
 
+  // Free vertex closest to the brain's geometric core — used to pin `centered` groups (the web's
+  // "IA Generated" profile) at the centre instead of a lobe. Prefers the interior-fill points.
+  const seedAtCore = (): number => {
+    let pool = mesh.interiorVertices.filter((v) => free.has(v))
+    if (!pool.length) pool = [...free]
+    if (!pool.length) return anyFreeIn(CEREBRUM)
+    let cx = 0, cy = 0, cz = 0
+    for (const v of pool) { cx += pos[v * 3]; cy += pos[v * 3 + 1]; cz += pos[v * 3 + 2] }
+    cx /= pool.length; cy /= pool.length; cz /= pool.length
+    let best = -1, bestD = Infinity
+    for (const v of pool) {
+      const d = (pos[v * 3] - cx) ** 2 + (pos[v * 3 + 1] - cy) ** 2 + (pos[v * 3 + 2] - cz) ** 2
+      if (d < bestD) { bestD = d; best = v }
+    }
+    return best >= 0 ? best : anyFreeIn(CEREBRUM)
+  }
+
+  const centeredGroups = new Set<string>()
+
   const parentOf = new Map<string, string>()
   for (const e of model.structureEdges) parentOf.set(e.target, e.source)
 
@@ -81,8 +100,10 @@ export function assignVertices(mesh: BrainMesh, model: BrainGraphModel): Map<str
   // model.nodes is in stable sidebar order, parents before children, so a single pass works.
   for (const node of model.nodes) {
     if (node.kind === 'group') {
-      const region = GROUP_LOBES[lobeIdx++ % GROUP_LOBES.length]
-      const v = seedInRegion(region, CEREBRUM)
+      // Centered groups pin to the core (no lobe, no round-robin advance); the rest spread across lobes.
+      const region: Region = node.centered ? 'parietal' : GROUP_LOBES[lobeIdx++ % GROUP_LOBES.length]
+      const v = node.centered ? seedAtCore() : seedInRegion(region, CEREBRUM)
+      if (node.centered) centeredGroups.add(node.id)
       if (v >= 0) { claim(node.id, v); anchorOf.set(node.id, v) }
       regionByNode.set(node.id, region); allowedOf.set(node.id, CEREBRUM)
     } else if (node.kind === 'folder') {
@@ -94,12 +115,13 @@ export function assignVertices(mesh: BrainMesh, model: BrainGraphModel): Map<str
       regionByNode.set(node.id, region); allowedOf.set(node.id, CEREBRUM)
     } else if (node.kind === 'note') {
       const coloured = node.colorVar !== '--text'
+      const parent = parentOf.get(node.id)
+      const parentCentered = parent !== undefined && centeredGroups.has(parent)
       let region: Region, anchor: number, allowed: Set<number>
-      if (coloured) {
-        // grouped → always its group's cerebrum lobe
-        const p = parentOf.get(node.id)
-        region = (p !== undefined ? regionByNode.get(p) : undefined) || 'parietal'
-        anchor = (p !== undefined ? anchorOf.get(p) : undefined) ?? seedInRegion(region, CEREBRUM)
+      if (coloured || parentCentered) {
+        // grouped (or the profile note of a centered group) → follow its parent's anchor
+        region = (parent !== undefined ? regionByNode.get(parent) : undefined) || 'parietal'
+        anchor = (parent !== undefined ? anchorOf.get(parent) : undefined) ?? seedInRegion(region, CEREBRUM)
         allowed = CEREBRUM
       } else if (node.favorited) {
         region = 'cerebellum'; anchor = seedInRegion(region, CEREBELLUM); allowed = CEREBELLUM
