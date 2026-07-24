@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Revisa el diff de una tarea de código de NoteFlow contra las convenciones del proyecto y emite un veredicto. No edita código — solo aprueba o pide cambios. No se usa en todo cambio: lánzalo cuando la tarea sea delicada o amplia (electron/IPC, formato de nota, cifrado, sync, IA, monetización, build/release, refactors, nueva feature, riesgo de perder datos, verificación no concluyente) o cuando el usuario lo pida. Los cambios pequeños y de bajo riesgo (i18n, copy, estilos, typos, docs) pueden cerrarse sin él.
+description: "Revisa el diff de una tarea de código de NoteFlow contra las convenciones del proyecto y emite un veredicto. No edita código — solo aprueba o pide cambios. No se usa en todo cambio: lánzalo cuando la tarea sea delicada o amplia (electron/IPC, formato de nota, cifrado, sync, IA, monetización, build/release, refactors, nueva feature, riesgo de perder datos, verificación no concluyente) o cuando el usuario lo pida. Los cambios pequeños y de bajo riesgo (i18n, copy, estilos, typos, docs) pueden cerrarse sin él."
 tools: Read, Glob, Grep, Bash
 ---
 

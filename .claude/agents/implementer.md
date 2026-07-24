@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implementa una tarea de código (feature o fix) en NoteFlow de principio a fin y se autoverifica. Úsalo para cualquier tarea que edite código del proyecto.
+description: "Implementa una tarea de código (feature o fix) en NoteFlow de principio a fin y se autoverifica. Úsalo para cualquier tarea que edite código del proyecto."
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
