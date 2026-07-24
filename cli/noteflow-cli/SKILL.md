@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.10.0
+version: 1.11.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -17,6 +17,13 @@ curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cl
 
 ### Linux desktop / Windows
 Se instala automáticamente con el `.deb` o `.exe` de NoteFlow. No requiere pasos adicionales.
+
+> **Windows — shims:** en PATH van dos wrappers: `noteflow.cmd` (cmd.exe) y
+> `noteflow.ps1` (PowerShell lo prefiere sobre el `.cmd`; pasa argumentos
+> multilínea y Unicode intactos, cosa que el `.cmd` no — ver la nota en `set`).
+> Si la ExecutionPolicy de PowerShell es `Restricted`, el `.ps1` falla con
+> "running scripts is disabled": ejecuta `noteflow.cmd` explícitamente o ajusta
+> la política (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
 
 ### Requisito
 Node.js ≥ 18. Sin dependencias npm.
@@ -82,28 +89,48 @@ sections:
 ### `add` — Añadir texto a una nota
 
 ```bash
-noteflow add <texto> [opciones]
+noteflow add [<texto>] [fuente de contenido] [opciones]
 ```
 
-Añade texto a la nota diaria de hoy (título `DD-MM-YYYY`). Si no existe, la crea.
+Añade texto a la nota diaria de hoy (título `DD-MM-YYYY`; se auto-crea si no
+existe), o a la nota indicada con `--title`. **Con `--title`, la nota debe
+existir**: si no hay match el comando **falla con exit 1** salvo que pases
+`--create` (evita crear notas fantasma por un typo en el título).
+
+**Fuente del contenido** — elige UNA (posicional o flag, no ambas a la vez):
+
+| Fuente | Descripción |
+|---|---|
+| `<texto>` posicional | Texto inline como argumento |
+| `--text "<contenido>"` | Texto inline como flag |
+| `--file <ruta>` | Lee el contenido de un archivo |
+| `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
 
 | Opción | Descripción |
 |---|---|
 | `--title <título>` | Escribir en una nota con ese título en lugar de la del día |
+| `--create` | Con `--title`: crea la nota si no existe (sin él → error) |
 | `--section <nombre>` | Sección/pestaña destino. La crea si no existe. Default: `Note` |
 | `--tag <tag>` | Añade este tag a la nota (si no lo tiene ya) |
 | `--group <nombre>` | Asigna la nota a un grupo |
 | `--folder <nombre>` | Coloca la nota en una carpeta de ese grupo (requiere `--group`) |
 | `--raw` | Fuerza modo raw/markdown en la sección (default) |
 | `--rich` | La sección nueva se crea en modo rich text |
+| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
+| `--json` | Resultado JSON en stdout (líneas informativas → stderr) |
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
+
+**JSON de `add`/`set`:** `{ "note": "<título>", "dirname": "…", "section": "…",
+"createdNote": bool, "createdSection": bool, "bytesWritten": n }` (con `--dry-run`
+añade `"dryRun": true` y `dirname` es `null` si la nota se crearía).
 
 ```bash
 noteflow add "Fix: CORS en /api/notes"
 noteflow add "Revisar logs del servidor" --section "Tasks" --tag urgent
 noteflow add "Reunión con cliente" --title "Proyecto Alpha" --section "Meetings"
-noteflow add "nueva feature" --group backend
+noteflow add --file notas.md --title "Nota nueva" --create
+git log --oneline -5 | noteflow add --stdin --section "Log"
 ```
 
 ---
@@ -211,7 +238,7 @@ noteflow read "Proyecto Alpha" --json | jq '.sections[].name'
 ### `set` — Sobrescribir (o crear) una sección
 
 ```bash
-noteflow set <título> <sección> [fuente de contenido] [--rich]
+noteflow set <título> <sección> [fuente de contenido] [--rich] [--dry-run] [--json]
 ```
 
 **Reemplaza** el contenido de una sección (la crea si no existe). Es el complemento
@@ -223,6 +250,8 @@ de `add`, que solo **añade al final**. Es la forma recomendada de **editar** un
 | `--file <ruta>` | Lee el contenido de un archivo |
 | `--stdin` | Lee de stdin (también se usa automáticamente al recibir un pipe) |
 | `--rich` | Si crea la sección, la crea en modo rich text (default: raw) |
+| `--dry-run` | Resuelve el destino y muestra qué haría **sin escribir ni sincronizar** |
+| `--json` | Resultado JSON en stdout (mismo shape que `add`; info → stderr) |
 
 - Si la sección no existe, se crea (mensaje `Created section "X"`).
 - Nombres duplicados: usa el sufijo `#n` (`"Tasks#2"`). Ante ambigüedad sin sufijo,
@@ -234,12 +263,14 @@ cat todo.md | noteflow set "Proyecto Alpha" Tasks --stdin
 noteflow set "Proyecto Alpha" Notas --file ./notas.txt
 ```
 
-> **⚠ Windows / PowerShell — contenido multilínea o complejo:** para texto de
-> **una sola línea** `--text` va bien. Para **varias líneas** o caracteres
-> conflictivos, **usa `--file <ruta>`** (la vía más fiable): al pasar un `--text`
-> con saltos de línea, PowerShell puede **truncarlo a la primera línea** sin avisar.
-> `--stdin` (pipe/here-string) también funciona; el CLI ya limpia el BOM que
-> PowerShell añade. Regla práctica para agentes: **contenido no trivial → `--file`.**
+> **⚠ Windows — contenido multilínea o complejo:** el shim `noteflow.cmd`
+> (cmd.exe) **trunca los argumentos multilínea** en el primer salto de línea y
+> descarta el resto de la línea de comandos (se pierden hasta los flags que
+> vengan después). Desde PowerShell se usa automáticamente el shim
+> `noteflow.ps1`, que pasa argv multilínea y Unicode intactos. Aun así, la vía
+> más fiable para **varias líneas** o caracteres conflictivos es **`--file <ruta>`**
+> (o `--stdin`; el CLI ya limpia el BOM que PowerShell añade). Regla práctica
+> para agentes: **contenido no trivial → `--file` o `--stdin`.**
 
 **Editar una parte concreta de una sección grande:** el CLI edita a nivel de
 sección (no hay find-replace). Con `set` el patrón es leer → modificar → sobrescribir:
@@ -367,13 +398,15 @@ noteflow section delete "Proyecto Alpha" "Tasks#2"   # la 2ª sección llamada "
 ### `delete` / `rm` — Eliminar nota
 
 ```bash
-noteflow delete <título> [--yes]
+noteflow delete <título> [--yes] [--json]
 ```
 
-Pide confirmación salvo con `--yes`. Si hay sync activo, también la elimina del repositorio GitHub.
+Pide confirmación salvo con `--yes`. Si hay sync activo, también la elimina del
+remoto (Cloud o GitHub). `--json` imprime
+`{ "deleted": true|false, "note": "<título>" }` en stdout (info → stderr).
 
 ```bash
-noteflow delete "Borrador temporal" --yes
+noteflow delete "Borrador temporal" --yes --json
 ```
 
 ---
@@ -602,6 +635,13 @@ noteflow self-update
 
 Si ya está en la última versión: `Already up to date`.
 
+### `version` — Versión del CLI
+
+```bash
+noteflow version     # o: noteflow --version / -v
+# noteflow CLI v2.1.0
+```
+
 ---
 
 ## Sync con NoteFlow Cloud (cuenta, cifrado)
@@ -688,15 +728,26 @@ JSON: `{ notesDir, noteCount, github: { owner, repo, lastSync, tokenAccessible }
 
 | Flag | Aplica a | Descripción |
 |---|---|---|
-| `--json` | `list`, `get`, `read`, `path`, `new`, `groups`, `folders`, `status`, `cloud status` | Salida JSON machine-readable |
+| `--json` | `list`, `get`, `read`, `path`, `new`, `add`, `set`, `delete`, `groups`, `folders`, `status`, `cloud status` | Salida JSON machine-readable en stdout (líneas informativas → stderr) |
 | `--yes` | `delete`, `group delete`, `folder delete`, `section delete` | Salta confirmación interactiva |
 | `--archived` | `list` | Incluye notas archivadas |
 | `--section <nombre>` | `read`, `path`, `get`, `add`, `set` | Apunta a una sección por nombre |
 | `--group <nombre>` | `add`, `new`, `move`, `list`, `folders`, `folder *` | Apunta a/filtra por un grupo |
 | `--folder <nombre>` | `add`, `new`, `move`, `list` | Apunta a/filtra por una carpeta (requiere grupo) |
 | `--ungroup` | `move` | Saca la nota del grupo y la carpeta |
-| `--text` / `--file` / `--stdin` | `set` | Fuente del contenido a escribir |
+| `--text` / `--file` / `--stdin` | `add`, `set` | Fuente del contenido a escribir |
+| `--create` | `add` | Con `--title`: crea la nota si no existe (sin él, `add` falla) |
+| `--dry-run` | `add`, `set` | Resuelve el destino sin escribir ni sincronizar |
 | `--rich` | `add`, `set`, `section add` | Sección nueva en modo rich text (default: raw) |
+| `--force` | `pull` | Solo GitHub: sobrescribe aunque lo local sea más nuevo |
+
+**Parser estricto:** un flag desconocido (`Unknown flag: --foo`) o un flag de
+valor sin valor (`Flag --title requires a value`) son **error con exit 1** —
+nunca se ignoran en silencio.
+
+**JSON a prueba de codepage:** toda salida `--json` escapa los caracteres
+no-ASCII como `\uXXXX`, así el JSON sobrevive intacto a cualquier codepage de
+consola (PowerShell 5.1 incluido).
 
 ---
 
@@ -739,6 +790,8 @@ echo "contenido" | noteflow set "título" "Sección" --stdin
 
 # 3b. …o añadir al final en vez de sobrescribir
 noteflow add "más contenido" --title "título" --section "Sección"
+#    ⚠ --title ya NO auto-crea la nota: si no existe, añade --create (o usa 'new')
+#    Regla de oro: contenido no trivial (multilínea, comillas…) → --file o --stdin
 
 # 3c. …o editar el .md de la sección con tus propias herramientas (ver abajo)
 noteflow path "título" "Sección"     # → ruta absoluta del .md

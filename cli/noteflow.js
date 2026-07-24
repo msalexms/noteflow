@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict'
+// v2.1.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -10,6 +11,10 @@ const { execSync } = require('node:child_process')
 const readline = require('node:readline')
 
 // ── Constants ────────────────────────────────────────────────────────────────
+
+// ⚠️ keep in sync with the "// v" header comment above (informational marker;
+// self-update compares full file contents, not this version).
+const CLI_VERSION = '2.1.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -70,8 +75,23 @@ function noteDirname(id, title) {
   return `${slug ? slug + '-' : ''}${id}`
 }
 
-function out(msg) { console.log(msg) }
+// With --json, stdout must carry ONLY the JSON payload: every informational
+// line (sync status, warnings, "Created section"…) is rerouted to stderr.
+let jsonMode = false
+function out(msg) { if (jsonMode) console.error(msg); else console.log(msg) }
 function err(msg) { console.error(`  Error: ${msg}`) }
+
+/**
+ * JSON.stringify with every non-ASCII char escaped as \uXXXX so the output
+ * survives any console codepage (PowerShell 5.1 mangles raw UTF-8 otherwise).
+ * Escaping per UTF-16 code unit keeps surrogate pairs valid JSON.
+ */
+function toJson(value) {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+}
+
+/** Writes a machine-readable result to stdout (the only stdout line in --json mode). */
+function jsonOut(value) { process.stdout.write(toJson(value) + '\n') }
 
 function lineCount(content) { return content ? content.split('\n').length : 0 }
 
@@ -1315,14 +1335,14 @@ async function cmdCloudStatus(opts) {
   const gh = getSyncSettings()
   const noteCount = listLocalNoteDirs().length
   if (opts.json) {
-    process.stdout.write(JSON.stringify({
+    jsonOut({
       notesDir: NOTES_DIR,
       noteCount,
       cloud: account
         ? { email: account.email, enabled: !!c.enabled, keysMode, lastSync: c.lastSync || null, pullCursor: c.pullCursor || null }
         : null,
       githubConfigured: !!(gh.enabled && gh.owner && gh.repo),
-    }) + '\n')
+    })
     return
   }
   out('\n  NoteFlow Cloud')
@@ -1410,7 +1430,8 @@ async function cmdCloudPull() {
 
 function confirm(question) {
   return new Promise(resolve => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    // In --json mode the prompt goes to stderr so stdout stays pure JSON
+    const rl = readline.createInterface({ input: process.stdin, output: jsonMode ? process.stderr : process.stdout })
     rl.question(`  ${question} (y/N) `, answer => { rl.close(); resolve(answer.trim().toLowerCase() === 'y') })
   })
 }
@@ -1436,22 +1457,42 @@ function warnIfDesktopRunning(opts) {
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-// noteflow add <text> [--title <t>] [--section <s>] [--tag <t>] [--group <g>] [--raw|--rich]
-async function cmdAdd(text, opts) {
-  text = text.replace(/^﻿+/, '').replace(/\r\n?/g, '\n')
+// noteflow add [<text>] [--text <t> | --file <p> | --stdin] [--title <t>] [--section <s>]
+//              [--tag <t>] [--group <g>] [--raw|--rich] [--create] [--dry-run] [--json]
+async function cmdAdd(positionalText, opts) {
+  // Content: positional arg XOR a flag source (--text/--file/--stdin, same helper as `set`).
+  // Windows note: the .cmd shim truncates multi-line argv, so flag/stdin sources
+  // are the reliable path for multi-line content.
+  const hasFlagSource = typeof opts.text === 'string' || opts.file || opts.stdin
+  if (positionalText && hasFlagSource) {
+    err('Provide the content either as an argument or via --text/--file/--stdin — not both')
+    process.exit(1)
+  }
+  let text
+  if (positionalText) text = positionalText.replace(/^﻿+/, '').replace(/\r\n?/g, '\n')
+  else if (hasFlagSource || !process.stdin.isTTY) text = await resolveSetContent(opts)
+  else { err('Usage: noteflow add <text> [options] — or provide content with --text "...", --file <path>, or --stdin'); process.exit(1) }
+  if (!text) { err('No content to add'); process.exit(1) }
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
 
   const targetTitle = opts.title || getTodayTitle()
   const sectionName = opts.section || 'Note'
   const isRaw = opts.raw !== false // default true (raw/markdown mode)
+  const bytesWritten = Buffer.byteLength(text, 'utf-8')
 
   // Find existing note by title
   let existing = null
   if (opts.title) {
     const matches = findNoteByTitle(opts.title)
     if (matches.length) existing = matches[0]
+    // No match → creating a brand-new note is opt-in (--create), so a typo in
+    // --title fails loudly instead of silently spawning a stray note.
+    if (!existing && !opts.create) {
+      err(`Note "${opts.title}" not found. Pass --create to create it, or use 'noteflow new'.`)
+      process.exit(1)
+    }
   } else {
-    existing = findTodayNote()
+    existing = findTodayNote() // the daily note keeps its auto-create behavior
   }
 
   if (existing) {
@@ -1461,6 +1502,13 @@ async function cmdAdd(text, opts) {
 
     // Find or create target section
     let sec = note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase())
+    const createdSection = !sec
+    if (opts.dryRun) {
+      const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : sectionName, createdNote: false, createdSection, bytesWritten, dryRun: true }
+      if (opts.json) { jsonOut(result); return }
+      out(`  [dry-run] Would append ${text.length} chars to "${note.title}" → "${result.section}"${createdSection ? ' (new section)' : ''} — nothing written`)
+      return
+    }
     if (!sec) {
       sec = { id: nanoid(6), name: sectionName, content: '', isRawMode: isRaw }
       note.sections.push(sec)
@@ -1483,9 +1531,17 @@ async function cmdAdd(text, opts) {
       err('--folder requires --group')
     }
     writeNoteFolder(note.dirname, note)
-    out(`  Added to ${note.dirname}${opts.section ? ` → ${sectionName}` : ''}`)
+    if (opts.json) jsonOut({ note: note.title, dirname: note.dirname, section: sec.name, createdNote: false, createdSection, bytesWritten })
+    else out(`  Added to "${note.title}" → "${sec.name}" (+${text.length} chars)`)
     await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
   } else {
+    if (opts.dryRun) {
+      // dirname is null: it embeds a random id that only gets minted on real creation
+      const result = { note: targetTitle, dirname: null, section: sectionName, createdNote: true, createdSection: true, bytesWritten, dryRun: true }
+      if (opts.json) { jsonOut(result); return }
+      out(`  [dry-run] Would create note "${targetTitle}" with section "${sectionName}" (${text.length} chars) — nothing written`)
+      return
+    }
     const id = nanoid(8)
     const now = new Date().toISOString()
     let groupId, folderId
@@ -1512,7 +1568,8 @@ async function cmdAdd(text, opts) {
     }
     const dirname = noteDirname(id, note.title)
     const written = writeNoteFolder(dirname, note)
-    out(`  Created ${dirname}/`)
+    if (opts.json) jsonOut({ note: targetTitle, dirname, section: sectionName, createdNote: true, createdSection: true, bytesWritten })
+    else out(`  Created note "${targetTitle}" → "${sectionName}" (dirname: ${dirname})`)
     await syncPushNoteFiles(dirname, written)
   }
 }
@@ -1544,7 +1601,7 @@ async function cmdNew(title, opts) {
   }
   const dirname = noteDirname(id, title)
   const written = writeNoteFolder(dirname, note)
-  if (opts.json) { process.stdout.write(JSON.stringify({ id, title, dirname }) + '\n'); return }
+  if (opts.json) { jsonOut({ id, title, dirname }); return }
   out(`  Created "${title}"  →  ${dirname}/`)
   await syncPushNoteFiles(dirname, written)
 }
@@ -1566,12 +1623,12 @@ function cmdList(opts) {
   filtered.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''))
 
   if (opts.json) {
-    process.stdout.write(JSON.stringify(filtered.map(n => ({
+    jsonOut(filtered.map(n => ({
       id: n.id, title: n.title, tags: n.tags, group: n.group, folder: n.folder,
       created: n.created, updated: n.updated, archived: n.archived, favorited: n.favorited ?? n.pinned ?? false,
       sections: n.sections?.map(s => s.name),
       dirname: n.dirname,
-    }))) + '\n')
+    })))
     return
   }
 
@@ -1610,7 +1667,7 @@ function cmdGet(titleQuery, opts) {
       sections: note.sections?.map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
       dirname: note.dirname,
     }
-    process.stdout.write(JSON.stringify(result) + '\n')
+    jsonOut(result)
     return
   }
 
@@ -1628,7 +1685,7 @@ function cmdGet(titleQuery, opts) {
   }
 }
 
-// noteflow delete <title> [--yes]
+// noteflow delete <title> [--yes] [--json]
 async function cmdDelete(titleQuery, opts) {
   const matches = findNoteByTitle(titleQuery)
   if (!matches.length) { err(`No note found: "${titleQuery}"`); process.exit(1) }
@@ -1640,10 +1697,15 @@ async function cmdDelete(titleQuery, opts) {
   const note = matches[0]
   if (!opts.yes) {
     const ok = await confirm(`Delete "${note.title}"?`)
-    if (!ok) { out('  Cancelled'); return }
+    if (!ok) {
+      if (opts.json) jsonOut({ deleted: false, note: note.title })
+      else out('  Cancelled')
+      return
+    }
   }
   fs.rmSync(note.filePath, { recursive: true, force: true })
-  out(`  Deleted "${note.title}"`)
+  if (opts.json) jsonOut({ deleted: true, note: note.title })
+  else out(`  Deleted "${note.title}"`)
 
   // Remove the note from the remote too — Cloud (tombstones) takes priority.
   if (cloudActive()) {
@@ -1746,18 +1808,18 @@ function cmdRead(titleQuery, sectionName, opts) {
   if (sectionName) {
     const sec = resolveSection(note, sectionName)
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ id: note.id, title: note.title, section: sec.name, content: sec.content || '', isRawMode: sec.isRawMode }) + '\n')
+      jsonOut({ id: note.id, title: note.title, section: sec.name, content: sec.content || '', isRawMode: sec.isRawMode })
       return
     }
     process.stdout.write((sec.content || '') + '\n')
     return
   }
   if (opts.json) {
-    process.stdout.write(JSON.stringify({
+    jsonOut({
       id: note.id, title: note.title, tags: note.tags, group: note.group, folder: note.folder,
       sections: (note.sections || []).map(s => ({ id: s.id, name: s.name, content: s.content, isRawMode: s.isRawMode })),
       dirname: note.dirname,
-    }) + '\n')
+    })
     return
   }
   let buf = `# ${note.title}\n`
@@ -1776,17 +1838,17 @@ function cmdPath(titleQuery, sectionName, opts) {
     const sec = resolveSection(note, sectionName)
     const file = sectionFilePath(note, sec)
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ id: note.id, title: note.title, dir, section: sec.name, file, isRawMode: sec.isRawMode }) + '\n')
+      jsonOut({ id: note.id, title: note.title, dir, section: sec.name, file, isRawMode: sec.isRawMode })
       return
     }
     process.stdout.write(file + '\n')
     return
   }
   if (opts.json) {
-    process.stdout.write(JSON.stringify({
+    jsonOut({
       id: note.id, title: note.title, dir, noteFile: path.join(dir, NOTE_MD),
       sections: (note.sections || []).map(s => ({ id: s.id, name: s.name, file: sectionFilePath(note, s), isRawMode: s.isRawMode })),
-    }) + '\n')
+    })
     return
   }
   process.stdout.write(dir + '\n')
@@ -1806,23 +1868,30 @@ async function cmdTouch(titleQuery) {
   await syncPushNoteFiles(note.dirname, written)
 }
 
-// noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--rich]
+// noteflow set <title> <section> [--text <t> | --file <p> | --stdin] [--rich] [--dry-run] [--json]
 // Overwrites the section's content (creates it if missing). Complements `add` (append).
 async function cmdSet(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   const content = await resolveSetContent(opts)
+  const bytesWritten = Buffer.byteLength(content, 'utf-8')
   let sec = matchSectionOrNull(note, sectionName) // exits on ambiguity rather than guessing
-  let created = false
+  const createdSection = !sec
+  if (opts.dryRun) {
+    const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : parseSectionRef(sectionName).baseName, createdNote: false, createdSection, bytesWritten, dryRun: true }
+    if (opts.json) { jsonOut(result); return }
+    out(`  [dry-run] Would ${createdSection ? 'create' : 'overwrite'} section "${result.section}" in "${note.title}" (${content.length} chars) — nothing written`)
+    return
+  }
   if (!sec) {
     sec = { id: nanoid(6), name: parseSectionRef(sectionName).baseName, content: '', isRawMode: opts.raw !== false }
     note.sections = note.sections || []
     note.sections.push(sec)
-    created = true
   }
   sec.content = content
   writeNoteFolder(note.dirname, note)
-  if (created) out(`  Created section "${sec.name}"`)
-  out(`  Set "${note.title}" → ${sec.name}  (${content ? lineCount(content) + ' lines' : 'empty'})`)
+  if (createdSection) out(`  Created section "${sec.name}"`)
+  if (opts.json) jsonOut({ note: note.title, dirname: note.dirname, section: sec.name, createdNote: false, createdSection, bytesWritten })
+  else out(`  Set "${note.title}" → "${sec.name}"  (${content ? lineCount(content) + ' lines' : 'empty'})`)
   await syncPushNoteFiles(note.dirname, [NOTE_MD, `${sec.id}.md`])
 }
 
@@ -1884,7 +1953,7 @@ async function cmdSectionDelete(titleQuery, name, opts) {
 // noteflow groups [--json]
 function cmdGroups(opts) {
   const groups = readGroups()
-  if (opts.json) { process.stdout.write(JSON.stringify(groups) + '\n'); return }
+  if (opts.json) { jsonOut(groups); return }
   if (!groups.length) { out('  No groups'); return }
   out('')
   for (const g of groups) out(`  ${g.name}  (id: ${g.id}, color: ${g.color})`)
@@ -1904,7 +1973,7 @@ function cmdGroupCreate(name, opts) {
   const g = { id: nanoid(8), name, color, order: groups.length }
   groups.push(g)
   writeGroups(groups)
-  if (opts.json) { process.stdout.write(JSON.stringify(g) + '\n'); return }
+  if (opts.json) { jsonOut(g); return }
   out(`  Created group "${name}"  (id: ${g.id})`)
 }
 
@@ -1943,7 +2012,7 @@ function cmdFolders(opts) {
     if (!g) { err(`Group not found: "${opts.group}"`); process.exit(1) }
     folders = folders.filter(f => f.groupId === g.id)
   }
-  if (opts.json) { process.stdout.write(JSON.stringify(folders) + '\n'); return }
+  if (opts.json) { jsonOut(folders); return }
   if (!folders.length) { out('  No folders'); return }
   const byGroup = new Map()
   for (const f of folders) {
@@ -1975,7 +2044,7 @@ function cmdFolderCreate(name, opts) {
   const folder = { id: nanoid(8), name, groupId: g.id, order: maxOrder + 1 }
   folders.push(folder)
   writeFolders(folders)
-  if (opts.json) { process.stdout.write(JSON.stringify(folder) + '\n'); return }
+  if (opts.json) { jsonOut(folder); return }
   out(`  Created folder "${name}" in group "${g.name}"  (id: ${folder.id})`)
 }
 
@@ -2292,7 +2361,8 @@ async function cmdSelfUpdate() {
     }).on('error', (e) => { try { fs.unlinkSync(tmpPath) } catch {} ; reject(e) })
   })
 
-  // Extract version comment from downloaded file (first line with "// v")
+  // Up-to-date check is a full-content comparison (the "// v" header comment
+  // in the script is informational only, not parsed here).
   const newContent = fs.readFileSync(tmpPath, 'utf-8')
   const currentContent = fs.readFileSync(selfPath, 'utf-8')
 
@@ -2313,14 +2383,14 @@ function cmdStatus(opts) {
   const noteCount = listLocalNoteDirs().length
   const groups = readGroups()
   if (opts.json) {
-    process.stdout.write(JSON.stringify({
+    jsonOut({
       notesDir: NOTES_DIR, noteCount,
       github: sync.enabled && sync.owner && sync.repo ? {
         owner: sync.owner, repo: sync.repo, lastSync: sync.lastSync,
         tokenAccessible: !!getToken(),
       } : null,
       groups: groups.length,
-    }) + '\n')
+    })
     return
   }
   out('\n  NoteFlow CLI')
@@ -2339,28 +2409,38 @@ function cmdStatus(opts) {
 function cmdHelp(topic) {
   const topics = {
     add: `
-  noteflow add <text> [options]
+  noteflow add [<text>] [options]
 
-  Adds text to today's daily note (or a specific note).
-  If the note doesn't exist it will be created.
+  Appends text to today's daily note (auto-created), or to a note picked with
+  --title. With --title the note must exist — pass --create to create it.
+
+  Content source (pick ONE — positional <text> or a flag):
+    --text "<content>"   Inline text
+    --file <path>        Read content from a file
+    --stdin              Read content from stdin (also auto-used when piped)
 
   Options:
-    --title <title>     Write to/create a note with this title instead of today's date
+    --title <title>     Target a note with this title instead of today's date
+    --create            With --title: create the note when it doesn't exist
     --section <name>    Write to a specific section/tab (creates it if missing)
     --tag <tag>         Add a metadata tag to the note
     --group <name>      Assign the note to a group (only when creating)
     --folder <name>     Put the note in a folder of that group (requires --group)
     --raw               Force raw/markdown mode for the section (default: true)
     --rich              Use rich text mode for the section
+    --dry-run           Show what would be written (note/section/bytes) without writing
+    --json              Machine-readable result on stdout; info lines go to stderr
 
-  On Windows PowerShell a multi-line --text may be truncated to its first line;
-  use --file <path> or --stdin for multi-line content.
+  Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
+  everything after the first newline). PowerShell automatically picks the
+  noteflow.ps1 shim, which passes them intact — but for non-trivial content
+  always prefer --file or --stdin.
 
   Examples:
     noteflow add "Fix: CORS issue"
     noteflow add "meeting notes" --title "Project Alpha" --section "Meetings"
-    noteflow add "- [ ] deploy" --section "Tasks" --tag urgent
-    noteflow add "text" --group backend
+    noteflow add --file notes.md --title "New Note" --create
+    git log --oneline -5 | noteflow add --stdin --section "Log"
 `,
     list: `
   noteflow list [options]
@@ -2433,7 +2513,7 @@ function cmdHelp(topic) {
     noteflow touch "Project Alpha"
 `,
     set: `
-  noteflow set <title> <section> [content source] [--rich]
+  noteflow set <title> <section> [content source] [--rich] [--dry-run] [--json]
 
   Overwrites a section's content (creates the section if it doesn't exist).
   This is the counterpart of 'add', which only appends.
@@ -2444,8 +2524,14 @@ function cmdHelp(topic) {
     --stdin              Read content from stdin (also auto-used when piped)
     --rich               Create a new section in rich-text mode (default: raw)
 
-  On Windows PowerShell a multi-line --text may be truncated to its first line;
-  use --file <path> or --stdin for multi-line content.
+  Other options:
+    --dry-run            Show what would be written (note/section/bytes) without writing
+    --json               Machine-readable result on stdout; info lines go to stderr
+
+  Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
+  everything after the first newline). PowerShell automatically picks the
+  noteflow.ps1 shim, which passes them intact — but for non-trivial content
+  always prefer --file or --stdin.
 
   Examples:
     noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
@@ -2529,10 +2615,11 @@ function cmdHelp(topic) {
     noteflow archive "Old Project"
 `,
     delete: `
-  noteflow delete <title> [--yes]   (alias: rm)
+  noteflow delete <title> [--yes] [--json]   (alias: rm)
 
   Deletes a note. Title can be partial; prompts for confirmation unless --yes.
-  With GitHub sync enabled the note is also removed from the repo.
+  With sync enabled the note is also removed from the remote (Cloud or GitHub).
+  --json prints { "deleted": true|false, "note": "<title>" } on stdout.
 
   Example:
     noteflow delete "Scratch" --yes
@@ -2617,10 +2704,12 @@ function cmdHelp(topic) {
                           login/logout/status/setup/push/pull — 'noteflow help cloud'
     migrate               One-time migration: flat .md notes → folder format v2
     self-update           Update this CLI script to the latest version
+    version / --version   Print the CLI version
 
   Flags available on most commands:
-    --json                Machine-readable JSON output
+    --json                Machine-readable JSON output (info lines go to stderr)
     --yes                 Skip confirmation prompts
+    --dry-run             add/set: resolve the target without writing anything
 
   Agent quickstart (read + write by name, no ids):
     noteflow list --json                      Discover note titles + section names
@@ -2657,22 +2746,33 @@ function cmdHelp(topic) {
 
 // ── Arg parser ────────────────────────────────────────────────────────────────
 
+// Strict by design (agents drive this CLI): unknown flags and value flags
+// missing their value are hard errors, never silently dropped.
+const BOOLEAN_FLAGS = {
+  '--json': ['json', true], '--yes': ['yes', true], '--archived': ['archived', true],
+  '--raw': ['raw', true], '--rich': ['raw', false], '--stdin': ['stdin', true],
+  '--ungroup': ['ungroup', true], '--create': ['create', true],
+  '--dry-run': ['dryRun', true], '--force': ['force', true],
+}
+const VALUE_FLAGS = ['--tag', '--title', '--section', '--group', '--folder', '--color', '--text', '--file']
+
 function parseFlags(args) {
   const flags = {}; const positional = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
-    if (a === '--json')     { flags.json = true }
-    else if (a === '--yes') { flags.yes = true }
-    else if (a === '--archived') { flags.archived = true }
-    else if (a === '--raw') { flags.raw = true }
-    else if (a === '--rich') { flags.raw = false }
-    else if (a === '--stdin') { flags.stdin = true }
-    else if (a === '--ungroup') { flags.ungroup = true }
-    else if ((a === '--tag' || a === '--title' || a === '--section' || a === '--group' || a === '--folder' || a === '--color' || a === '--text' || a === '--file') && i + 1 < args.length) {
+    // Object.hasOwn: a plain `BOOLEAN_FLAGS[a]` would hit Object.prototype for
+    // positionals like "constructor"/"toString" and crash. (VALUE_FLAGS is an
+    // array + .includes, which has no such inherited-key pitfall.)
+    if (Object.hasOwn(BOOLEAN_FLAGS, a)) {
+      const [key, value] = BOOLEAN_FLAGS[a]
+      flags[key] = value
+    } else if (VALUE_FLAGS.includes(a)) {
+      if (i + 1 >= args.length) { err(`Flag ${a} requires a value`); process.exit(1) }
       flags[a.slice(2)] = args[++i]
-    }
-    else if (a.startsWith('--')) { /* unknown flag, ignore */ }
-    else positional.push(a)
+    } else if (a.startsWith('--')) {
+      err(`Unknown flag: ${a}`)
+      process.exit(1)
+    } else positional.push(a)
   }
   return { flags, positional }
 }
@@ -2684,14 +2784,15 @@ async function main() {
   const cmd = args[0]
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') { cmdHelp(args[1]); return }
+  if (cmd === 'version' || cmd === '--version' || cmd === '-v') { out(`noteflow CLI v${CLI_VERSION}`); return }
 
   const { flags, positional } = parseFlags(args.slice(1))
+  if (flags.json) jsonMode = true // reroute informational out() lines to stderr
 
   switch (cmd) {
     case 'add': {
-      const text = positional.join(' ')
-      if (!text) { err('Usage: noteflow add <text> [options]'); process.exit(1) }
-      await cmdAdd(text, flags)
+      // Content may come as a positional arg or via --text/--file/--stdin — cmdAdd validates
+      await cmdAdd(positional.join(' '), flags)
       break
     }
     case 'new': {

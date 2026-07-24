@@ -134,7 +134,9 @@ Se dispara con tags `v*`. Dos jobs:
   },
   "extraResources": [
     { "from": "cli/noteflow.js",  "to": "cli/noteflow.js" },
-    { "from": "cli/noteflow.cmd", "to": "cli/noteflow.cmd" }
+    { "from": "cli/noteflow.cmd", "to": "cli/noteflow.cmd" },
+    { "from": "cli/noteflow.ps1", "to": "cli/noteflow.ps1" },  // shim PowerShell: argv multilínea/Unicode intactos
+    { "from": "cli/noteflow-cli", "to": "cli/noteflow-cli" }   // skill del CLI (SKILL.md)
   ],
   "asarUnpack": [
     "**/node_modules/better-sqlite3/**", "**/node_modules/bindings/**",

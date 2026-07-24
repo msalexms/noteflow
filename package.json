@@ -181,6 +181,10 @@
         "to": "cli/noteflow.cmd"
       },
       {
+        "from": "cli/noteflow.ps1",
+        "to": "cli/noteflow.ps1"
+      },
+      {
         "from": "cli/noteflow-cli",
         "to": "cli/noteflow-cli"
       }
