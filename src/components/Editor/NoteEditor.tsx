@@ -1332,7 +1332,10 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
           )}
         </div>
 
-        <div className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}>
+        <div
+          className={`flex-1 overflow-hidden mr-1 relative${readableWidth ? ' editor-readable' : ''}`}
+          style={readableWidth ? { fontSize: `${fontSize}px` } : undefined}
+        >
           {rawMode ? (
             <>
               <textarea

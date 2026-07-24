@@ -152,6 +152,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor({
         view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
         return true
       },
+      // Una nota arrastrada desde la sidebar lleva nuestro payload propio
+      // (`application/x-noteflow-note-id`). Soltarla sobre el editor debe abrirla
+      // en un panel dividido — eso lo hace el shell (`<main>` en App.tsx) —, NO
+      // pegar el id como texto. Cortamos aquí el insert por defecto de ProseMirror
+      // devolviendo true (hace preventDefault); el evento sigue burbujeando y el
+      // onDrop del shell abre el split como corresponde.
+      handleDrop: (_view, event) => {
+        const dt = (event as DragEvent).dataTransfer
+        if (dt?.types.includes('application/x-noteflow-note-id')) return true
+        return false
+      },
     },
     extensions: [
       Document,

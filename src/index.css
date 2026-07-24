@@ -555,13 +555,21 @@ button {
 .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] {
   position: relative;
 }
-.editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  /* Sit just outside the column; clamp so it never escapes the viewport on
-     narrow windows (degrades by overlapping the right gutter instead). */
-  margin-left: min(0.5rem, calc((100cqw - var(--readable-col)) / 2 - 0.5rem));
+/* Only pull the actions out once the editor is wide enough to have a real
+   gutter (≥ readable column + margin). Below that, keep the default in-flow
+   layout so the buttons never overlap the text on narrow windows. The 58em
+   threshold is measured against the container's font-size (set to the prose
+   font on .editor-readable), so it scales with the configurable font size:
+   readable-col is 52em, leaving ~3em of gutter each side at the threshold. */
+@container (min-width: 58em) {
+  .editor-readable .prose-editor .ProseMirror ul[data-type="taskList"] li[data-node-view-wrapper] .task-actions {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    /* Sit just outside the column; clamp so it never escapes the viewport on
+       narrow windows (degrades by overlapping the right gutter instead). */
+    margin-left: min(0.5rem, calc((100cqw - var(--readable-col)) / 2 - 0.5rem));
+  }
 }
 
 /* Date badge pill */
