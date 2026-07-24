@@ -194,6 +194,7 @@ function inlineElToMd(el: Element): string {
       if (tag === 'strong' || tag === 'b') result += `**${inlineElToMd(c)}**`
       else if (tag === 'em' || tag === 'i') result += `*${inlineElToMd(c)}*`
       else if (tag === 's') result += `~~${inlineElToMd(c)}~~`
+      else if (tag === 'u') result += `++${inlineElToMd(c)}++`
       else if (tag === 'mark') result += `==${inlineElToMd(c)}==`
       else if (tag === 'code') result += `\`${(c.textContent ?? '').replace(/\u00A0/g, ' ')}\``
       else if (tag === 'br') result += '\n'
@@ -257,7 +258,13 @@ function listElToMd(listEl: Element, depth: number): string {
       const dueAnn    = due   ? ` 📅${due}`   : ''
       const alarmAnn  = alarm ? ` ⏰${alarm}` : ''
       const impAnn    = importance ? ` 🔺${importance}` : ''
-      result += `${prefix}- [${checked ? 'x' : ' '}] ${text}${dueAnn}${alarmAnn}${impAnn}\n`
+      const ann       = `${dueAnn}${alarmAnn}${impAnn}`
+      // Annotations belong to the task, not to a specific physical line. For
+      // multi-line tasks (soft breaks) keep them on the first line so the parser
+      // — which only reads annotations off the `- [ ]` line — round-trips them.
+      const nl        = text.indexOf('\n')
+      const body      = nl === -1 ? `${text}${ann}` : `${text.slice(0, nl)}${ann}${text.slice(nl)}`
+      result += `${prefix}- [${checked ? 'x' : ' '}] ${body}\n`
     } else if (isOl) {
       result += `${prefix}${olIndex++}. ${text}\n`
     } else {
@@ -297,6 +304,10 @@ function inlineToHtml(s: string): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/~~(.+?)~~/g, '<s>$1</s>')
+    // Underline: `++text++` → <u>. Markdown has no native underline syntax, so
+    // NoteFlow uses `++` (mirrors the `==` highlight convention). Non-greedy +
+    // global; `++` doesn't collide with **/*/__/~~/== markers.
+    .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
     // Highlight: `==text==` → <mark>. Non-greedy + global so multiple highlights
     // on one line round-trip. `==` doesn't collide with **/*/__/~~ markers.
     .replace(/==(.+?)==/g, '<mark>$1</mark>')
@@ -365,9 +376,21 @@ function parseMdListItems(lines: string[]): MdListItem[] {
     } else if (ulMatch) {
       item = { type: 'ul', checked: false, text: ulMatch[1], due: null, alarm: null, importance: null, children: [] }
     } else {
-      // Continuation line (soft/hard break inside list item) — append to last item
+      // Continuation line (soft/hard break inside list item) — append to last item.
       if (stack.length > 0) {
-        stack[stack.length - 1].node.text += '\n' + line.trim()
+        const node = stack[stack.length - 1].node
+        if (node.type === 'task') {
+          // Recover annotations that an older build appended to the last physical
+          // line of a multi-line task instead of the first (they'd otherwise show
+          // up as literal "🔺low"/"📅…"/"⏰…" text and the attribute would be lost).
+          const { text: contText, due, alarm, importance } = extractDeadlineAnnotations(line.trim())
+          if (due && !node.due) node.due = due
+          if (alarm && !node.alarm) node.alarm = alarm
+          if (importance && !node.importance) node.importance = importance
+          node.text += '\n' + contText
+        } else {
+          node.text += '\n' + line.trim()
+        }
       }
       continue
     }
