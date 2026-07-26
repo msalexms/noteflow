@@ -10,6 +10,11 @@ export const overview = {
   emptyDropHint: 'Vacío — suelta una nota aquí',
   empty: 'Vacío',
 
+  selectAllNotesTooltip: 'Seleccionar todas las notas de este grupo (Ctrl/Cmd+A)',
+  deselectAllNotesTooltip: 'Limpiar la selección (Ctrl/Cmd+A)',
+  selectBandTooltip: 'Seleccionar todas las notas de "{name}"',
+  deselectBandTooltip: 'Deseleccionar todas las notas de "{name}"',
+
   deleteNotes: 'Eliminar notas',
   deleteNotesMessage: '{count} notas se eliminarán permanentemente.',
 

@@ -530,7 +530,9 @@ export function App() {
           ) : brainViewOpen ? (
             <BrainView onClose={() => setBrainView(false)} />
           ) : groupViewId ? (
-            <GroupOverview groupId={groupViewId} onClose={() => closeFullView()} />
+            // Keyed by group (like NoteOverview below): switching groups remounts the view so
+            // its local state — multi-selection above all — never leaks into the new group.
+            <GroupOverview key={groupViewId} groupId={groupViewId} onClose={() => closeFullView()} />
           ) : noteViewId ? (
             <NoteOverview key={noteViewId} noteId={noteViewId} onClose={() => closeFullView()} />
           ) : isLoading && notes.length === 0 ? (

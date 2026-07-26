@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   X, Folder, Plus, FolderPlus, FileText, Archive, StretchHorizontal,
   Star, StarOff, Trash2, FolderInput, ChevronRight, FolderMinus, Pencil,
+  CheckSquare, Square, Check, Minus,
 } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
@@ -13,7 +14,7 @@ import { ConfirmModal } from '../ConfirmModal'
 import { OverviewNoteCard } from '../OverviewNoteCard'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
-import type { GroupColor, NoteGroup, NoteFolder } from '../../types'
+import type { GroupColor, Note, NoteGroup, NoteFolder } from '../../types'
 
 interface GroupOverviewProps {
   groupId: string
@@ -114,25 +115,70 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
       i.kind === 'group' && i.group.id === groupId,
   )
 
+  // Every note rendered in this view (folder bands + loose + archived), in render order.
+  // Single source of truth for the header select-all and the per-band checkboxes.
+  const allViewNotes = useMemo<Note[]>(
+    () =>
+      groupItem
+        ? [
+            ...groupItem.folders.flatMap((f) => f.notes),
+            ...groupItem.notes,
+            ...archivedNotes,
+          ]
+        : [],
+    [groupItem, archivedNotes],
+  )
+
+  // Select-all toggle (header button + Ctrl/Cmd+A): if every note in the view is already
+  // selected → clear the selection; otherwise select them all, archived band included.
+  const toggleSelectAll = useCallback(() => {
+    if (allViewNotes.length === 0) return
+    if (allViewNotes.every((n) => selectedIds.has(n.id))) setSelectedIds(new Set())
+    else setSelectedIds(new Set(allViewNotes.map((n) => n.id)))
+  }, [allViewNotes, selectedIds])
+
   // Group vanished (deleted locally or via sync) → close the overview
   useEffect(() => {
     if (!groupItem) onClose()
   }, [groupItem, onClose])
 
-  // Escape closes the color popover first, then clears an active selection, then the overview.
+  // Escape closes the color popover first, then clears an active selection, then the overview;
+  // Ctrl/Cmd+A toggles the whole-view selection.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // Let inline-edit inputs handle their own Escape (cancel) without closing.
-      if (editingGroup || editingFolderId !== null || showNewFolder) return
-      e.preventDefault()
-      if (colorPickerOpen) setColorPickerOpen(false)
-      else if (selectedIds.size > 0) setSelectedIds(new Set())
-      else onClose()
+      if (e.key === 'Escape') {
+        // Let inline-edit inputs handle their own Escape (cancel) without closing.
+        if (editingGroup || editingFolderId !== null || showNewFolder) return
+        e.preventDefault()
+        if (colorPickerOpen) setColorPickerOpen(false)
+        else if (selectedIds.size > 0) setSelectedIds(new Set())
+        else onClose()
+        return
+      }
+      // Never change the selection under an open confirm dialog: its message and the pending
+      // batch action were built from the selection as it was when the dialog opened.
+      if (confirmDelete || folderToDelete) return
+      // This view only replaces the <main> pane — the sidebar, the AI panel, the settings modal
+      // and the command palette stay mounted, so never steal Ctrl/Cmd+A from a field that has its
+      // own select-all (that also covers the inline rename/new-folder inputs). Alt is excluded too
+      // (AltGr = Ctrl+Alt on ES/LatAm layouts).
+      const target = e.target as HTMLElement
+      const isEditing =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      if (isEditing) return
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        toggleSelectAll()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, selectedIds, editingGroup, editingFolderId, showNewFolder, colorPickerOpen])
+  }, [
+    onClose, selectedIds, editingGroup, editingFolderId, showNewFolder, colorPickerOpen,
+    confirmDelete, folderToDelete, toggleSelectAll,
+  ])
 
   // Close the color popover on outside click (the popover itself stops propagation).
   useEffect(() => {
@@ -199,6 +245,27 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
 
   // ── Multi-select ──────────────────────────────────────────────────────────
   const selectionActive = selectedIds.size > 0
+  // Drives the header button's icon/label (and its tooltip).
+  const selectingAll = allViewNotes.length > 0 && allViewNotes.every((n) => selectedIds.has(n.id))
+
+  // Per-band select-all: only touches that band's notes, so the other bands keep their marks.
+  const bandSelectProps = (bandNotes: Note[]) => {
+    const selectedInBand = bandNotes.filter((n) => selectedIds.has(n.id)).length
+    const allSelected = bandNotes.length > 0 && selectedInBand === bandNotes.length
+    return {
+      allSelected,
+      someSelected: selectedInBand > 0 && !allSelected,
+      onToggleSelectAll: () =>
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          bandNotes.forEach((n) => {
+            if (allSelected) next.delete(n.id)
+            else next.add(n.id)
+          })
+          return next
+        }),
+    }
+  }
 
   const toggleSelected = (noteId: string) => {
     setSelectedIds((prev) => {
@@ -464,6 +531,16 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
           />
         </div>
 
+        {allViewNotes.length > 0 && (
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
+            title={selectingAll ? t.overview.deselectAllNotesTooltip : t.overview.selectAllNotesTooltip}
+          >
+            {selectingAll ? <CheckSquare size={12} /> : <Square size={12} />}
+            {selectingAll ? t.overview.deselectAll : t.overview.selectAll}
+          </button>
+        )}
         <button
           onClick={handleNewNote}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-surface-2 text-[11px] font-mono text-text-muted hover:text-text hover:border-text/25 transition-colors"
@@ -542,6 +619,8 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
                 onEditCancel={() => setEditingFolderId(null)}
                 onStartRename={() => startFolderRename(folder)}
                 onDelete={() => setFolderToDelete(folder)}
+                selectionActive={selectionActive}
+                {...bandSelectProps(folderNotes)}
               >
                 {folderNotes.map((note) => (
                   <OverviewNoteCard
@@ -577,6 +656,8 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
                 onDragOver={(e) => onBandDragOver(e, ROOT_BAND)}
                 onDragLeave={(e) => onBandDragLeave(e, ROOT_BAND)}
                 onDrop={(e) => onBandDrop(e, ROOT_BAND)}
+                selectionActive={selectionActive}
+                {...bandSelectProps(looseNotes)}
               >
                 {looseNotes.map((note) => (
                   <OverviewNoteCard
@@ -609,6 +690,8 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
                 isFolder={false}
                 cardWidth={cardWidth}
                 icon={<Archive size={13} className="flex-shrink-0 text-text-muted/60" />}
+                selectionActive={selectionActive}
+                {...bandSelectProps(archivedNotes)}
               >
                 {archivedNotes.map((note) => (
                   <OverviewNoteCard
@@ -692,6 +775,11 @@ interface BandProps {
   onDragOver?: (e: React.DragEvent) => void
   onDragLeave?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
+  // Band-level select-all (checkbox in the band header)
+  allSelected?: boolean
+  someSelected?: boolean  // partial: at least one note ticked, but not all of them
+  selectionActive?: boolean
+  onToggleSelectAll?: () => void
   // Folder rename/delete (only wired for folder bands)
   editing?: boolean
   editValue?: string
@@ -706,12 +794,18 @@ interface BandProps {
 function Band({
   label, count, color, isFolder, cardWidth, active, icon,
   onDragOver, onDragLeave, onDrop,
+  allSelected, someSelected, selectionActive, onToggleSelectAll,
   editing, editValue, onEditChange, onEditCommit, onEditCancel, onStartRename, onDelete,
   children,
 }: BandProps) {
   const t = useT()
   const droppable = Boolean(onDrop)
   const hasFolderActions = isFolder && Boolean(onStartRename || onDelete)
+  const bandTicked = Boolean(allSelected || someSelected)
+  const bandSelectLabel = tf(
+    allSelected ? t.overview.deselectBandTooltip : t.overview.selectBandTooltip,
+    { name: label },
+  )
   return (
     <section
       onDragOver={onDragOver}
@@ -720,6 +814,32 @@ function Band({
       className={`rounded-lg border transition-colors ${active ? 'border-text/25 bg-text/5' : 'border-transparent'}`}
     >
       <div className={`group/band flex items-center px-1 ${isFolder ? 'gap-2 pt-1 pb-2.5' : 'gap-1.5 py-1.5'}`}>
+        {/* Band select-all — same visual language as the card tick: hidden until the band is
+            hovered (or something is already selected), and out of the way while the folder name
+            is being renamed (like the rename/delete buttons). Empty bands keep the slot so the
+            headers stay aligned across bands. */}
+        {onToggleSelectAll && (count === 0 || editing ? (
+          <span className="w-4 h-4 flex-shrink-0" aria-hidden />
+        ) : (
+          <span
+            role="checkbox"
+            aria-checked={allSelected ? true : someSelected ? 'mixed' : false}
+            aria-label={bandSelectLabel}
+            title={bandSelectLabel}
+            onClick={(e) => { e.stopPropagation(); onToggleSelectAll() }}
+            className={`flex-shrink-0 flex items-center justify-center w-4 h-4 rounded border transition-all cursor-pointer ${
+              bandTicked || selectionActive ? 'opacity-100' : 'opacity-0 group-hover/band:opacity-100'
+            } ${
+              allSelected
+                ? 'bg-text border-text text-bg-editor'
+                : someSelected
+                  ? 'border-text/70 bg-surface-1/80 text-text'
+                  : 'border-text/40 bg-surface-1/80 text-transparent hover:border-text/70'
+            }`}
+          >
+            {allSelected ? <Check size={11} strokeWidth={3} /> : <Minus size={11} strokeWidth={3} />}
+          </span>
+        ))}
         {icon ? (
           icon
         ) : isFolder ? (

@@ -12,6 +12,12 @@ export const overview = {
   emptyDropHint: 'Empty — drop a note here',
   empty: 'Empty',
 
+  // Select-all in the group view: header button (Ctrl/Cmd+A) + per-band checkbox.
+  selectAllNotesTooltip: 'Select every note in this group (Ctrl/Cmd+A)',
+  deselectAllNotesTooltip: 'Clear the selection (Ctrl/Cmd+A)',
+  selectBandTooltip: 'Select all notes in "{name}"',
+  deselectBandTooltip: 'Deselect all notes in "{name}"',
+
   // Group-overview delete confirmations.
   deleteNotes: 'Delete notes',
   deleteNotesMessage: '{count} notes will be permanently deleted.',

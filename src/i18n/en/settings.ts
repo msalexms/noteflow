@@ -312,7 +312,7 @@ export const settings = {
     deleteSectionShortcut: 'Delete section',
     nextSection: 'Next section',
     prevSection: 'Previous section',
-    selectAllSections: 'Select all sections (in the note overview)',
+    selectAllSections: 'Select all (sections in the note overview, notes in the group overview)',
     deleteSelectedNote: 'Delete selected note (when not editing)',
     openSectionSticky: 'Open current section as sticky',
     openAllSticky: 'Open all sections as sticky',

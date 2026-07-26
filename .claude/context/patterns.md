@@ -64,8 +64,18 @@ para reorganizar por drag&drop. La navegación a una sección concreta usa `pend
 + un `noteflow:request-section` diferido con `setTimeout(0)` (el editor monta tras cerrar la vista;
 bajo StrictMode el efecto de montaje consume el `pending` dos veces, de ahí el re-aviso por evento).
 El ancho de tarjeta se guarda en `localStorage` (`noteflow:group-view-card-width`). Sin IPC nuevo.
+`App.tsx` **keya la vista por `groupViewId`** (igual que `NoteOverview` por `noteViewId`): cambiar de
+grupo remonta el componente, así que la selección múltiple y el resto de estado local (rename inline,
+popover de color) no se filtran al grupo nuevo — importante porque las acciones por lotes se calculan
+contra `notes` global, no contra la vista.
 **Selección múltiple:** estado local `selectedIds: Set<string>` en `GroupOverview`; cada `NoteCard`
-recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hover o marcada). Las
+recibe `selected`/`selectionActive`/`onToggleSelect` y muestra una checkbox (hover o marcada).
+**Select-all a dos niveles:** el memo `allViewNotes` (notas de las carpetas + sueltas + archivadas, en
+orden de render) es la única fuente para el botón "Select all/Deselect all" de la cabecera y su atajo
+`Ctrl/Cmd+A` (mismo `toggleSelectAll`, con la guarda de INPUT/TEXTAREA/contentEditable y sin `alt`/`shift`,
+que también cubre los inline-edit); cada `Band` recibe `allSelected`/`someSelected`/`onToggleSelectAll`
+(helper `bandSelectProps`) y pinta una checkbox tri-estado en su cabecera que solo añade/quita las notas
+de esa banda (estado parcial → `aria-checked="mixed"` + icono `Minus`). Las
 acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan los primitivos del
 store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
 iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
