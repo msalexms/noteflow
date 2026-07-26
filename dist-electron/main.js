@@ -1938,7 +1938,10 @@ electron_1.ipcMain.handle('ai:llm-set-config', (_event, patch) => {
     // All field edits apply to the ACTIVE preset, so each provider keeps its own key/model/baseUrl.
     const id = cfg.active;
     const ps = { ...(cfg.byPreset[id] ?? {}) };
-    if (patch.model !== undefined)
+    // A model outside a curated catalog (managed plan) is dropped, not stored: the renderer
+    // already offers those presets a read-only field, and persisting one would make the saved
+    // config diverge from the model actually used (see llm.acceptsModel).
+    if (patch.model !== undefined && llm.acceptsModel(id, patch.model))
         ps.model = patch.model;
     if (patch.baseUrl !== undefined)
         ps.baseUrl = patch.baseUrl;

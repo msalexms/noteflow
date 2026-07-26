@@ -120,7 +120,12 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   credenciales. `baseUrl` editable salvo Anthropic y NoteFlow AI. El preset `noteflow` no usa API
   key: su credencial es un access token fresco de la cuenta por request (`resolveConfigAsync`;
   detalle en `.claude/context/monetization.md` § 3). `presetOf()` con id desconocido cae en
-  `anthropic`, no en `PRESETS[0]`.
+  `anthropic`, no en `PRESETS[0]`. **Modelo efectivo** (`effectiveModel`, `llm/index.ts`): el
+  guardado o, si no hay, `suggestedModels[0]`; en los presets con **catálogo curado** (los que
+  llevan `modelMeta` — hoy solo `noteflow`, cuya lista rota y cuyo proxy rechaza lo que no esté en
+  ella) un modelo guardado que ya no esté en `suggestedModels` **también** cae en el primero, para
+  que un catálogo renovado no deje al usuario con un modelo inválido. En los presets BYO el modelo
+  es libre y se respeta tal cual.
 - **UI del proveedor (`LlmConfigView`, embebida en Settings → IA y en la pestaña "settings" del panel
   del cerebro):** **selector de dos cards mutuamente excluyentes** (mismo patrón que Settings → Sync,
   con badge Activo/Inactivo) — **NoteFlow AI** (gestionado) vs **proveedor propio / IA local** (BYO key
@@ -132,6 +137,12 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   NoteFlow AI **no aparece en el `<select>`** (que solo lista el resto de presets); su sección es la
   barra de consumo mensual + el gate (aviso ámbar → Ajustes → Cuenta) o el botón "Use NoteFlow AI"
   (solo con entitlement `ai`).
+  - **Campo "Model":** texto libre en los presets BYO, pero **solo lectura** (`disabled` + hint
+    `modelCuratedHint`) en los de catálogo curado (`preset.modelMeta`) — ahí se elige con los chips.
+    Si fuera editable, teclear un id que no está en el catálogo lo persistiría en `ps.model` mientras
+    `effectiveModel` sigue resolviendo al primer modelo curado: guardado y usado divergirían (y el
+    input "saltaría" a cada tecla). Main aplica la misma regla como defensa en profundidad:
+    `ai:llm-set-config` descarta un `model` que `llm.acceptsModel()` rechace.
   - `mode` (`'noteflow' | 'byo'`) es **estado de vista**, no el proveedor activo: se resuelve **una
     vez** desde `llmConfig.active` cuando la config está disponible (lazy init desde
     `useAiChatStore.getState()`, o una suscripción al store si aún no ha cargado) y **no se mueve solo**
@@ -212,11 +223,18 @@ Python…) quedan literales. **Borrador persistente:** las
 - **Adjuntos nativos (la app NUNCA procesa documentos):** la capa LLM admite `Attachment`
   (`{kind:'pdf'|'image', mediaType, data:base64}`) vía `ChatOptions.attachments`; `anthropic.ts`
   los mapea a bloques `document`/`image` y `openaiCompatible.ts` las imágenes a `image_url` parts.
-  Qué se ofrece lo decide `providerCapabilities(preset)` (en `llm/index.ts`, expuesto en
+  Qué se ofrece lo decide `providerCapabilities(preset, activeModel)` (en `llm/index.ts`, expuesto en
   `LlmConfigPublic.capabilities`): **PDF solo Anthropic**; las **imágenes son por preset** porque el
   soporte de visión es **dependiente del modelo** — cada preset declara un default `images?` en
   `presets.ts` (false en los de solo-texto: **DeepSeek/MiniMax/Moonshot**, que rechazan `image_url`
-  con un 400; true en los vision-capaces/flexibles: OpenAI/OpenRouter/Ollama/Custom). `.txt/.md` se
+  con un 400; true en los vision-capaces/flexibles: OpenAI/OpenRouter/Ollama/Custom). **Excepción:
+  los presets con `modelMeta`** (hoy solo `noteflow`, cuyo catálogo mezcla modelos con y sin visión)
+  refinan el flag **por modelo activo** — manda `modelMeta[activeModel].images` sobre el default del
+  preset (text-only en el catálogo gestionado: los dos DeepSeek y `xiaomi/mimo-v2.5-pro` — **tres de
+  los cinco modelos ×1**). ⚠️ **El modelo por defecto del plan gestionado (`suggestedModels[0]`, hoy
+  `deepseek/deepseek-v4-pro`) es text-only**, así que quien active NoteFlow AI sin tocar el selector
+  **no verá adjuntar imágenes** hasta que elija un modelo con visión: no dar por hecho que el plan
+  gestionado trae visión "de serie". `.txt/.md` se
   incrustan como texto (universal). DOCX/OCR no se soportan (requerirían procesar). El picker capa las
   extensiones y `ai:chat` filtra los adjuntos por `caps` (defensa en profundidad: si cambias a un
   proveedor sin imágenes, los adjuntos de imagen no se envían). **Archivos de texto/código:** se admite

@@ -132,8 +132,10 @@ La Edge Function `supabase/functions/ai-proxy` expone un endpoint OpenAI-compati
 del usuario, comprueba el entitlement `ai`/`bundle` y la cuota mensual de tokens, y reenvía a
 **OpenRouter** con la única key del servidor. El consumo se registra en `usage_events` (migración
 0003) leyendo el bloque `usage` que OpenRouter añade al final del stream. La **migración 0007**
-añade la **cuota ponderada** (columna `quota_tokens`): los modelos avanzados descuentan de la
-cuota a razón de su multiplicador (×6 hoy) en vez de 1:1. Pasos del operador:
+añade la **cuota ponderada** (columna `quota_tokens`): los modelos por encima de la baseline
+descuentan de la cuota a razón de su multiplicador (hoy dos niveles de pago, **×2** para el
+intermedio y **×6** para los avanzados; el resto ×1) en vez de 1:1. El mapa autoritativo es
+`MODEL_QUOTA_MULTIPLIERS` en `functions/ai-proxy/logic.ts`. Pasos del operador:
 
 1. **Correr las migraciones 0003 y 0007** (`supabase/migrations/0003_ai_usage.sql` y
    `0007_ai_usage_weighted.sql`), igual que las anteriores (SQL Editor o `supabase db push`). La
@@ -149,11 +151,27 @@ cuota a razón de su multiplicador (×6 hoy) en vez de 1:1. Pasos del operador:
    # Opcionales (defaults en el código: 3.000.000 tokens/mes y la lista curada
    # de supabase/functions/ai-proxy/logic.ts):
    supabase secrets set AI_MONTHLY_TOKENS=3000000
-   supabase secrets set AI_ALLOWED_MODELS=openai/gpt-4o-mini,google/gemini-2.5-flash
+   supabase secrets set AI_ALLOWED_MODELS=deepseek/deepseek-v4-pro,anthropic/claude-haiku-4.5
    ```
 
-   > Si se cambia `AI_ALLOWED_MODELS`, mantener en sync `NOTEFLOW_AI_MODELS` en
-   > `electron/ai/llm/presets.ts` (la lista de modelos sugeridos que ve el cliente).
+   > Si se cambia `AI_ALLOWED_MODELS`, mantener en sync `NOTEFLOW_AI_MODELS` (y
+   > `NOTEFLOW_AI_MODEL_META`) en `electron/ai/llm/presets.ts` — la lista que ve el cliente.
+   > **Ojo: ampliar el catálogo solo en el servidor no sirve de nada.** El cliente trata su
+   > lista como cerrada: no ofrece los modelos que no estén en ella, `acceptsModel()` se niega
+   > a guardarlos y `effectiveModel()` reescribe al primero de la lista un modelo guardado que
+   > ya no aparezca. O sea que **añadir o quitar modelos requiere también release de la app**;
+   > al revés (recortar la lista del servidor sin tocar el cliente) deja a los usuarios con
+   > modelos que el proxy rechaza con 400. `AI_ALLOWED_MODELS` es para **emergencias**
+   > (retirar deprisa un modelo que se ha vuelto caro o ha desaparecido de OpenRouter), no el
+   > sitio donde se gestiona el catálogo.
+
+   > **Orden al rotar el catálogo (importa):** 1) desplegar primero la Edge Function
+   > (`supabase functions deploy ai-proxy`, con el catálogo nuevo ya en `logic.ts`), 2) después
+   > publicar la release de la app. Al revés, el picker ofrece modelos que el backend todavía
+   > rechaza con **400**. Y si la rotación **retira** modelos hay una ventana inevitable: los
+   > usuarios que aún no han actualizado y tenían seleccionado uno de los retirados reciben 400
+   > hasta que actualicen — el fallback de `effectiveModel()` viaja en la app, no en el proxy,
+   > así que el servidor no puede repararles la selección.
 
 3. **Desplegar la función** — esta SÍ con verificación de JWT (el default; a diferencia del
    webhook, aquí el caller es la app con el access token del usuario):

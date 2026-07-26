@@ -121,12 +121,15 @@ export const aiPanel = {
       useButton: 'Use this provider',
     },
     // Suffix appended to model options that burn the monthly quota faster
-    // (e.g. "anthropic/claude-sonnet-5 (6× quota)").
+    // (e.g. "grok-4.5 (2× quota)", "kimi-k3 (6× quota)").
     modelQuotaSuffix: '({mult}× quota)',
     baseUrl: 'Base URL',
     apiKey: 'API key',
     keySaved: 'Key saved',
     model: 'Model',
+    // Helper under the Model label when the active preset serves a curated catalog
+    // (NoteFlow AI): the field is read-only and the choice is made with the chips.
+    modelCuratedHint: 'Managed plan — pick one of the models below.',
     load: 'Load',
     error: 'Error',
     testConnection: 'Test connection',

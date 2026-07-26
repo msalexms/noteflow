@@ -26,9 +26,9 @@ describe('parseAllowedModels', () => {
   })
 
   it('parses a comma-separated override with whitespace tolerance', () => {
-    expect(parseAllowedModels(' openai/gpt-4o-mini , google/gemini-2.5-flash ,')).toEqual([
-      'openai/gpt-4o-mini',
-      'google/gemini-2.5-flash',
+    expect(parseAllowedModels(' openai/gpt-5.6-luna , x-ai/grok-4.5 ,')).toEqual([
+      'openai/gpt-5.6-luna',
+      'x-ai/grok-4.5',
     ])
   })
 
@@ -56,18 +56,18 @@ describe('parseMonthlyTokens', () => {
 })
 
 describe('isModelAllowed', () => {
-  const allowed = ['openai/gpt-4o-mini', 'google/gemini-2.5-flash']
+  const allowed = ['openai/gpt-5.6-luna', 'x-ai/grok-4.5']
 
   it('accepts exact matches only', () => {
-    expect(isModelAllowed('openai/gpt-4o-mini', allowed)).toBe(true)
-    expect(isModelAllowed('openai/gpt-4o', allowed)).toBe(false)
-    expect(isModelAllowed('OPENAI/GPT-4O-MINI', allowed)).toBe(false)
+    expect(isModelAllowed('openai/gpt-5.6-luna', allowed)).toBe(true)
+    expect(isModelAllowed('openai/gpt-5.6', allowed)).toBe(false)
+    expect(isModelAllowed('OPENAI/GPT-5.6-LUNA-PRO', allowed)).toBe(false)
   })
 
   it('rejects non-string models without throwing', () => {
     expect(isModelAllowed(undefined, allowed)).toBe(false)
     expect(isModelAllowed(42, allowed)).toBe(false)
-    expect(isModelAllowed({ model: 'openai/gpt-4o-mini' }, allowed)).toBe(false)
+    expect(isModelAllowed({ model: 'openai/gpt-5.6-luna' }, allowed)).toBe(false)
   })
 })
 
@@ -117,14 +117,17 @@ describe('computeQuota', () => {
 
 describe('quotaMultiplierFor', () => {
   it('returns the map value for advanced (×6) models', () => {
-    expect(quotaMultiplierFor('anthropic/claude-sonnet-5')).toBe(6)
-    expect(quotaMultiplierFor('openai/gpt-5.2')).toBe(6)
-    expect(quotaMultiplierFor('google/gemini-3.5-flash')).toBe(6)
+    expect(quotaMultiplierFor('moonshotai/kimi-k3')).toBe(6)
+  })
+
+  it('returns the map value for mid-tier (×2) models', () => {
+    expect(quotaMultiplierFor('x-ai/grok-4.5')).toBe(2)
   })
 
   it('returns 1 for standard curated models (not in the map)', () => {
-    expect(quotaMultiplierFor('openai/gpt-4o-mini')).toBe(1)
+    expect(quotaMultiplierFor('openai/gpt-5.6-luna')).toBe(1)
     expect(quotaMultiplierFor('deepseek/deepseek-v4-flash')).toBe(1)
+    expect(quotaMultiplierFor('xiaomi/mimo-v2.5-pro')).toBe(1)
   })
 
   it('returns 1 for unknown models', () => {
@@ -141,22 +144,27 @@ describe('quotaMultiplierFor', () => {
 
 describe('computeQuotaTokens', () => {
   it('sums in+out unweighted for standard models', () => {
-    expect(computeQuotaTokens({ tokensIn: 120, tokensOut: 45 }, 'openai/gpt-4o-mini')).toBe(165)
+    expect(computeQuotaTokens({ tokensIn: 120, tokensOut: 45 }, 'openai/gpt-5.6-luna')).toBe(165)
+  })
+
+  it('applies the ×2 multiplier for mid-tier models', () => {
+    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'x-ai/grok-4.5')).toBe(300)
   })
 
   it('applies the ×6 multiplier for advanced models', () => {
-    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'anthropic/claude-sonnet-5')).toBe(900)
+    expect(computeQuotaTokens({ tokensIn: 100, tokensOut: 50 }, 'moonshotai/kimi-k3')).toBe(900)
   })
 
   it('always yields an integer (round contract; current multipliers are integral)', () => {
-    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 7, tokensOut: 3 }, 'openai/gpt-5.2'))).toBe(true)
-    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 1, tokensOut: 2 }, 'minimax/minimax-m3'))).toBe(true)
+    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 7, tokensOut: 3 }, 'moonshotai/kimi-k3'))).toBe(true)
+    expect(Number.isInteger(computeQuotaTokens({ tokensIn: 1, tokensOut: 2 }, 'anthropic/claude-haiku-4.5'))).toBe(true)
   })
 
   it('treats zero and malformed usage sides as 0', () => {
-    expect(computeQuotaTokens({ tokensIn: 0, tokensOut: 0 }, 'openai/gpt-5.2')).toBe(0)
-    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'anthropic/claude-sonnet-5')).toBe(60)
-    expect(computeQuotaTokens({ tokensIn: -5, tokensOut: 10 }, 'openai/gpt-4o-mini')).toBe(10)
+    expect(computeQuotaTokens({ tokensIn: 0, tokensOut: 0 }, 'moonshotai/kimi-k3')).toBe(0)
+    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'moonshotai/kimi-k3')).toBe(60)
+    expect(computeQuotaTokens({ tokensIn: NaN, tokensOut: 10 }, 'x-ai/grok-4.5')).toBe(20)
+    expect(computeQuotaTokens({ tokensIn: -5, tokensOut: 10 }, 'openai/gpt-5.6-luna')).toBe(10)
   })
 })
 
@@ -180,7 +188,7 @@ describe('openAiErrorBody / modelsListBody', () => {
 
 describe('buildUpstreamBody', () => {
   it('injects usage.include without touching the rest of the body', () => {
-    const body = { model: 'openai/gpt-4o-mini', messages: [{ role: 'user', content: 'hi' }], stream: true }
+    const body = { model: 'openai/gpt-5.6-luna', messages: [{ role: 'user', content: 'hi' }], stream: true }
     expect(buildUpstreamBody(body)).toEqual({ ...body, usage: { include: true } })
     // Original object untouched.
     expect('usage' in body).toBe(false)
@@ -188,7 +196,7 @@ describe('buildUpstreamBody', () => {
 
   it('strips the OpenRouter routing/extra-cost fields (allowlist bypass vectors)', () => {
     const body = {
-      model: 'openai/gpt-4o-mini',
+      model: 'openai/gpt-5.6-luna',
       messages: [{ role: 'user', content: 'hi' }],
       // Fallback routing: would execute non-allowlisted (expensive) models.
       models: ['anthropic/claude-opus-4', 'openai/o3'],
@@ -204,7 +212,7 @@ describe('buildUpstreamBody', () => {
     expect(upstream).not.toHaveProperty('plugins')
     // Legitimate fields still pass through, usage.include is added.
     expect(upstream).toEqual({
-      model: 'openai/gpt-4o-mini',
+      model: 'openai/gpt-5.6-luna',
       messages: [{ role: 'user', content: 'hi' }],
       usage: { include: true },
     })
@@ -215,7 +223,7 @@ describe('buildUpstreamBody', () => {
 
   it('passes other OpenAI fields (tools, temperature, max_tokens…) through untouched', () => {
     const body = {
-      model: 'openai/gpt-4o-mini',
+      model: 'openai/gpt-5.6-luna',
       messages: [{ role: 'user', content: 'hi' }],
       stream: true,
       max_tokens: 4096,

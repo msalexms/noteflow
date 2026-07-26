@@ -112,6 +112,7 @@ export const aiPanel: Messages['aiPanel'] = {
     apiKey: 'Clave API',
     keySaved: 'Clave guardada',
     model: 'Modelo',
+    modelCuratedHint: 'Plan gestionado — elige uno de los modelos de abajo.',
     load: 'Cargar',
     error: 'Error',
     testConnection: 'Probar conexión',

@@ -12,24 +12,25 @@ export type LlmImpl = 'anthropic' | 'openai'
 
 /**
  * Curated OpenRouter model ids served by the managed NoteFlow AI plan. All are
- * tool-calling capable (the chat is agentic); all support vision EXCEPT the two
- * DeepSeek models (text-only — see NOTEFLOW_AI_MODEL_META). KEEP IN SYNC with
- * DEFAULT_ALLOWED_MODELS in supabase/functions/ai-proxy/logic.ts — the proxy
- * rejects anything else.
+ * tool-calling capable (the chat is agentic); the two DeepSeek models and Xiaomi
+ * MiMo are text-only, the rest accept images (see NOTEFLOW_AI_MODEL_META).
+ * The first entry is the de-facto default model for the preset (suggestedModels[0])
+ * — today a text-only one, so a fresh managed setup starts WITHOUT image support
+ * until the user picks another model (providerCapabilities gates the attach UI).
+ * KEEP IN SYNC with DEFAULT_ALLOWED_MODELS in supabase/functions/ai-proxy/logic.ts
+ * — the proxy rejects anything else.
  */
 export const NOTEFLOW_AI_MODELS = [
   // Standard models (×1 quota).
-  'openai/gpt-4o-mini',
-  'openai/gpt-4.1-mini',
-  'anthropic/claude-haiku-4.5',
-  'google/gemini-2.5-flash',
-  'deepseek/deepseek-v4-flash',
   'deepseek/deepseek-v4-pro',
-  'minimax/minimax-m3',
+  'deepseek/deepseek-v4-flash',
+  'xiaomi/mimo-v2.5-pro',
+  'openai/gpt-5.6-luna',
+  'anthropic/claude-haiku-4.5',
+  // Mid-tier (×2 quota).
+  'x-ai/grok-4.5',
   // Advanced models (×6 quota).
-  'anthropic/claude-sonnet-5',
-  'openai/gpt-5.2',
-  'google/gemini-3.5-flash',
+  'moonshotai/kimi-k3',
 ]
 
 /**
@@ -38,22 +39,20 @@ export const NOTEFLOW_AI_MODELS = [
  *     (KEEP IN SYNC with MODEL_QUOTA_MULTIPLIERS in
  *     supabase/functions/ai-proxy/logic.ts — there only the non-×1 entries are
  *     listed; here every curated model is spelled out for the UI).
- *   - images: native vision support (the two DeepSeek models are text-only).
+ *   - images: native vision support (the two DeepSeek models and Xiaomi MiMo
+ *     are text-only — three of the five ×1 models).
  * Exposed to the renderer through the preset's `modelMeta` field so the model
  * picker can flag quota cost, and used by providerCapabilities (llm/index.ts)
  * to gate image attachments per active model.
  */
 export const NOTEFLOW_AI_MODEL_META: Record<string, { quotaMultiplier: number; images: boolean }> = {
-  'openai/gpt-4o-mini': { quotaMultiplier: 1, images: true },
-  'openai/gpt-4.1-mini': { quotaMultiplier: 1, images: true },
-  'anthropic/claude-haiku-4.5': { quotaMultiplier: 1, images: true },
-  'google/gemini-2.5-flash': { quotaMultiplier: 1, images: true },
-  'deepseek/deepseek-v4-flash': { quotaMultiplier: 1, images: false },
   'deepseek/deepseek-v4-pro': { quotaMultiplier: 1, images: false },
-  'minimax/minimax-m3': { quotaMultiplier: 1, images: true },
-  'anthropic/claude-sonnet-5': { quotaMultiplier: 6, images: true },
-  'openai/gpt-5.2': { quotaMultiplier: 6, images: true },
-  'google/gemini-3.5-flash': { quotaMultiplier: 6, images: true },
+  'deepseek/deepseek-v4-flash': { quotaMultiplier: 1, images: false },
+  'xiaomi/mimo-v2.5-pro': { quotaMultiplier: 1, images: false },
+  'openai/gpt-5.6-luna': { quotaMultiplier: 1, images: true },
+  'anthropic/claude-haiku-4.5': { quotaMultiplier: 1, images: true },
+  'x-ai/grok-4.5': { quotaMultiplier: 2, images: true },
+  'moonshotai/kimi-k3': { quotaMultiplier: 6, images: true },
 }
 
 export interface LlmPreset {
@@ -72,8 +71,9 @@ export interface LlmPreset {
   // preset the vision capability is refined PER MODEL via modelMeta below.
   images?: boolean
   // Per-model metadata (quota multiplier + vision), only set on the `noteflow` preset. The
-  // renderer uses it to flag "6× quota" models in the picker; providerCapabilities uses it
-  // to gate image attachments by the ACTIVE model.
+  // renderer uses it to flag "N× quota" models in the picker; providerCapabilities uses it
+  // to gate image attachments by the ACTIVE model. Its presence also marks the preset as
+  // having a CURATED catalog (see effectiveModel in llm/index.ts).
   modelMeta?: Record<string, { quotaMultiplier: number; images: boolean }>
 }
 

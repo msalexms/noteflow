@@ -189,7 +189,10 @@ export interface LlmPreset {
   suggestedModels: string[]
   images?: boolean // per-preset default for native image (vision) support; see providerCapabilities
   // Per-model metadata, only on the managed `noteflow` preset: quota multiplier
-  // (advanced models burn the monthly quota faster) + native vision support.
+  // (pricier models burn the monthly quota faster) + native vision support.
+  // Its mere presence also marks the preset as serving a CURATED catalog: the model
+  // is picked from suggestedModels (read-only field, no free text) and main refuses
+  // to store anything else — see electron/ai/llm/presets.ts and acceptsModel().
   modelMeta?: Record<string, { quotaMultiplier: number; images: boolean }>
 }
 

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_LLM_CONFIG = exports.decryptSecret = exports.encryptSecret = exports.PRESETS = void 0;
 exports.withActiveProvider = withActiveProvider;
 exports.byoFallbackProvider = byoFallbackProvider;
+exports.acceptsModel = acceptsModel;
 exports.resolveConfig = resolveConfig;
 exports.resolveConfigAsync = resolveConfigAsync;
 exports.providerCapabilities = providerCapabilities;
@@ -45,7 +46,29 @@ function byoFallbackProvider(cfg) {
 function effectiveModel(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);
     const ps = cfg.byPreset[preset.id] ?? {};
-    return ps.model?.trim() || preset.suggestedModels[0] || '';
+    const stored = ps.model?.trim() || '';
+    // Presets with `modelMeta` (today only the managed `noteflow` plan) serve a CURATED
+    // catalog that rotates: the proxy rejects anything outside it, so a model the user
+    // picked months ago can silently become invalid and break every request. Fall back to
+    // the first suggested model in that case. Everywhere else the model is free-form (the
+    // user may type any id their provider serves), so the stored value is honoured as-is.
+    if (preset.modelMeta && stored && !preset.suggestedModels.includes(stored)) {
+        return preset.suggestedModels[0] || stored;
+    }
+    return stored || preset.suggestedModels[0] || '';
+}
+/**
+ * Whether `model` may be PERSISTED for `presetId`. Presets with a curated catalog
+ * (`modelMeta` — today only the managed plan) accept nothing outside it: storing another
+ * id would leave settings.json holding a model the proxy rejects while effectiveModel
+ * resolves the requests to a different one — stored and used must never diverge. BYO
+ * presets accept anything (the user knows what their provider serves).
+ * Compares the TRIMMED id, exactly like effectiveModel does, so both guards agree on
+ * what belongs to the catalog (a padded id must not be accepted here and rewritten there).
+ */
+function acceptsModel(presetId, model) {
+    const preset = (0, presets_1.presetOf)(presetId);
+    return !preset.modelMeta || preset.suggestedModels.includes(model.trim());
 }
 function effectiveBaseUrl(cfg) {
     const preset = (0, presets_1.presetOf)(cfg.active);

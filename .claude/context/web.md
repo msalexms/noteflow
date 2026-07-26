@@ -134,7 +134,7 @@ features nuevas destacables.
 
 **Descargas del landing (`#get`)** — fila flex con los **dos botones de descarga** (Windows `nf-lift`
 primario + Linux `nf-ghost` con `dlGhost`, 14px), ambos a `/releases/latest` y con su `data-dl`
-(`win`/`linux`) → rótulo de versión → disclaimer. Los dos botones pesan **igual** a propósito: los dos
+(`win`/`linux`) → rótulo de versión → disclaimer → nota de SmartScreen. Los dos botones pesan **igual** a propósito: los dos
 son descargas, ninguno debe leerse como la opción menor. **Nada se hornea en build time** y no hay dependencia del `package.json` raíz: la web solo se redespliega con
 cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuanto salga un release.
 
@@ -153,6 +153,12 @@ cambios en `docs/**`, así que cualquier versión/URL horneada mentiría en cuan
 - **Rótulo de versión** (`[data-dl-version-row]` / `[data-dl-version]`): sale con
   `visibility:hidden` (hueco reservado, sin salto de layout) y solo aparece cuando el script resuelve
   el `tag_name`. Fallo/403/JSON raro → silencioso: sin rótulo y con los `href` a `/releases/latest`.
+- **Nota de SmartScreen** (`download.winNote`, caja tras el disclaimer): el instalador de Windows **no
+  está firmado** (no hay certificado de code signing), así que la primera ejecución dispara el aviso de
+  SmartScreen. Una sola frase: qué es, que **no** habla de la app (código abierto) y los clics para
+  seguir. Va teñida con el ámbar `--detail` (borde 26%, fondo 6%, icono de escudo) para que lea como
+  warning **sin** competir con los botones ni con el disclaimer de privacidad. Cuando haya firma de
+  código, esta nota **se borra**.
 
 ### `/cli` — fuente de verdad: **`cli/noteflow-cli/SKILL.md`** (skill `noteflow-cli`)
 Documenta el CLI **v1.10.0**. Anclas: `#install` `#notes-dir` `#format` `#commands` `#flags`
@@ -209,7 +215,7 @@ capacidades se autogestionan gratis: IA con Ollama/key propia, nube con GitHub S
 |---|---|---|
 | `#free` | Lo gratis (editor, Cerebro local, IA con key propia/Ollama, cifrado, GitHub Sync, CLI) + callout "los planes suman, no sustituyen" | monetization.md § visión |
 | `#plans` | Grid de 3 cards de precio: AI €5.99/mes · €49.99/año, Cloud €3.99/mes · €39.99/año, Bundle €7.99/mes · €79.99/año (badge "Best value") + alta desde la app + MoR Lemon Squeezy; las cifras van también al JSON-LD (`offers`) | monetization.md § visión "Precios" (y `src/lib/subscriptionPlans.ts`) |
-| `#ai` | Plan NoteFlow AI: **modelos curados literales** (gpt-4o-mini, gpt-4.1-mini, claude-haiku-4.5, gemini-2.5-flash), **cuota 3M tokens/mes**, mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `AI_MONTHLY_TOKENS`) + § visión "Precios" |
+| `#ai` | Plan NoteFlow AI: **modelos curados literales** en tres bloques por coste de cuota — estándar ×1 (los dos DeepSeek, mimo-v2.5-pro, gpt-5.6-luna, claude-haiku-4.5), intermedio ×2 (grok-4.5) y avanzados ×6 (kimi-k3) —, **cuota 3M tokens/mes**, mensual/anual con **€5.99/mes o €49.99/año** en el bullet, alta vía Settings → Account → Subscribe (checkout Lemon Squeezy) | monetization.md § 3 (`NOTEFLOW_AI_MODELS`, `MODEL_QUOTA_MULTIPLIERS`, `AI_MONTHLY_TOKENS`) + § visión "Precios" |
 | `#cloud` | Plan NoteFlow Cloud marcado **"Available now"**: sync automática, cifrado **dual** (managed por defecto + E2EE opt-in), bullet con **€3.99/mes o €39.99/año**; GitHub Sync sigue gratis | monetization.md § 4 (badge activo, no `--soon`; + § visión "Precios" |
 | `#compare` | Tabla gestionado vs autogestionado (IA, setup, sync, "todo lo demás gratis") | monetization.md §§ 3-4 |
 | `#privacy` | RAG local, al proxy viaja lo mismo que con key propia, `aiHidden`/cifradas nunca salen, IA gestionada ≠ nube de notas | monetization.md § 3 "Privacidad" + `/ai#privacy` |

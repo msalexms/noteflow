@@ -56,7 +56,12 @@ export function LlmConfigView({
   const preset = useMemo(() => presets.find((p) => p.id === llmConfig?.active) ?? null, [presets, llmConfig?.active])
   // The managed plan has its own card in the selector, so it is never a <select> option.
   const selectablePresets = useMemo(() => presets.filter((p) => p.id !== 'noteflow'), [presets])
+  // Chips offered for the active preset. For a curated catalog (preset.modelMeta — the managed
+  // plan) the list is EXACTLY the catalog: main refuses to store anything else, so surfacing an
+  // extra id fetched from /models (the operator may widen AI_ALLOWED_MODELS server-side without
+  // an app release) would render a chip that does nothing when clicked.
   const modelOptions = useMemo(() => {
+    if (preset?.modelMeta) return preset.suggestedModels
     const set = new Set<string>([...(preset?.suggestedModels ?? []), ...models])
     if (llmConfig?.model) set.add(llmConfig.model)
     return [...set]
@@ -134,8 +139,8 @@ export function LlmConfigView({
 
   const changeProvider = (id: string) => { if (id !== llmConfig.active) void setLlmConfig({ active: id }) }
   // Picker label: show the model name only, dropping the "provider/" prefix
-  // (openai/gpt-4o-mini → gpt-4o-mini). The stored/sent id keeps the full form
-  // — this is cosmetic. Advanced NoteFlow AI models keep a "(6× quota)" suffix.
+  // (x-ai/grok-4.5 → grok-4.5). The stored/sent id keeps the full form — this is
+  // cosmetic. NoteFlow AI models above the ×1 baseline keep an "(N× quota)" suffix.
   const modelLabel = (m: string) => {
     const name = m.includes('/') ? m.slice(m.indexOf('/') + 1) : m
     const mult = preset.modelMeta?.[m]?.quotaMultiplier ?? 1
@@ -175,6 +180,9 @@ export function LlmConfigView({
   }
 
   const managedActive = llmConfig.active === 'noteflow'
+  // Presets carrying `modelMeta` (today only the managed plan) serve a CURATED catalog: the
+  // model is picked from the chips, never typed. Main enforces the same rule (llm.acceptsModel).
+  const curatedCatalog = !!preset.modelMeta
   const entitled = !!account?.entitlements.ai
   // The BYO provider on screen owns the config only while it is the active one: baseUrl / key /
   // model all write to whatever provider is active, so those fields stay HIDDEN until the picked
@@ -196,14 +204,22 @@ export function LlmConfigView({
     <Box className="gap-3">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <FieldLabel>{t.aiPanel.provider.model}</FieldLabel>
+          <FieldLabel hint={curatedCatalog ? t.aiPanel.provider.modelCuratedHint : undefined}>
+            {t.aiPanel.provider.model}
+          </FieldLabel>
           <button onClick={loadModels} disabled={modelsLoading} className="text-[11px] text-text-muted hover:text-text flex items-center gap-1">
             {modelsLoading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} {t.aiPanel.provider.load}
           </button>
         </div>
+        {/* Free-text everywhere EXCEPT presets with a curated catalog (modelMeta — the managed
+            plan): there the model must be one of the chips below, so the field is read-only.
+            Typing into it would fight effectiveModel (which resolves an unknown id back to the
+            first curated one) and persist a model the proxy rejects. Same idea as the base URL,
+            which is simply not offered when the preset does not allow editing it. */}
         <input
           value={llmConfig.model}
           onChange={(e) => pickModel(e.target.value)}
+          disabled={curatedCatalog}
           placeholder={preset.impl === 'anthropic' ? 'claude-opus-4-8' : 'model-name'}
           className={`${FIELD_INPUT} py-1.5`}
         />

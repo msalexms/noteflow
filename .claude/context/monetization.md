@@ -133,8 +133,10 @@ es **un preset más**, no una implementación nueva.
   "avanzados" (más caros), así que la cuota mensual ya no cuenta tokens reales sino **tokens
   ponderados**. Cada modelo tiene un multiplicador (`MODEL_QUOTA_MULTIPLIERS` en
   `ai-proxy/logic.ts`: solo los ≠×1; lo que no esté es ×1) y lo que descuenta de la cuota es
-  `computeQuotaTokens = round((tokens_in+tokens_out) * multiplicador)`. Hoy: **estándar ×1**,
-  **avanzados ×6**. `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
+  `computeQuotaTokens = round((tokens_in+tokens_out) * multiplicador)`. Hoy hay tres niveles:
+  **estándar ×1**, **intermedio ×2** y **avanzados ×6** (nada asume un conjunto fijo de valores —
+  `quotaMultiplierFor` acepta cualquier número finito positivo, así que añadir un nivel es una
+  entrada más en el mapa). `tokens_in`/`tokens_out` siguen guardándose sin ponderar (coste real del
   operador); lo ponderado va a la columna nueva `usage_events.quota_tokens`, que es lo que
   `get_month_usage` suma (0007 la redefine + backfill de filas históricas = tokens reales, todas
   eran ×1). El multiplicador se refleja en el cliente (`NOTEFLOW_AI_MODEL_META` en `presets.ts`)
@@ -145,14 +147,25 @@ es **un preset más**, no una implementación nueva.
   (main pide un access token fresco; devuelve `null` ante cualquier fallo — la UI solo oculta la
   barra) que alimenta la barra de consumo de la **sección NoteFlow AI** de `LlmConfigView`.
 - **Upstream OpenRouter:** una key, cientos de modelos, cambiar el catálogo sin tocar infra
-  (sobrecoste ~5%, asumido). Lista curada actual (todos tool-calling; **visión en todos salvo los
-  dos DeepSeek**, text-only) — **estándar ×1:** `openai/gpt-4o-mini`, `openai/gpt-4.1-mini`,
-  `anthropic/claude-haiku-4.5`, `google/gemini-2.5-flash`, `deepseek/deepseek-v4-flash`,
-  `deepseek/deepseek-v4-pro`, `minimax/minimax-m3`; **avanzados ×6:** `anthropic/claude-sonnet-5`,
-  `openai/gpt-5.2`, `google/gemini-3.5-flash`. **Duplicada a propósito** en
-  `DEFAULT_ALLOWED_MODELS` (`ai-proxy/logic.ts`) y `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener
-  en sync. La visión por-modelo la refina `providerCapabilities(preset, activeModel)` para el
-  preset `noteflow` (los DeepSeek → `images:false`).
+  (sobrecoste ~5%, asumido). Lista curada actual (todos tool-calling; **text-only los dos DeepSeek
+  y `xiaomi/mimo-v2.5-pro`** — o sea **tres de los cinco ×1**; el resto acepta imágenes) —
+  **estándar ×1:** `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
+  `xiaomi/mimo-v2.5-pro`, `openai/gpt-5.6-luna`, `anthropic/claude-haiku-4.5`;
+  **intermedio ×2:** `x-ai/grok-4.5`; **avanzados ×6:** `moonshotai/kimi-k3`. El **orden importa**:
+  el primero (`deepseek/deepseek-v4-pro`) es el modelo por defecto de facto (`suggestedModels[0]`)
+  y, al ser **text-only**, el plan gestionado arranca **sin adjuntar imágenes** hasta que el
+  usuario elija otro modelo (lo capa `providerCapabilities`, ver `.claude/context/ai.md`).
+  **Duplicada a propósito** en `DEFAULT_ALLOWED_MODELS` (`ai-proxy/logic.ts`) y
+  `NOTEFLOW_AI_MODELS` (`presets.ts`): mantener en sync — lo fija el test
+  `tests/supabase/ai-catalog-mirror.test.ts`. La visión por-modelo la refina
+  `providerCapabilities(preset, activeModel)` para el preset `noteflow` (DeepSeek y MiMo →
+  `images:false`). **Orden de despliegue de una rotación:** primero la Edge Function, después la
+  release de la app (detalle y por qué en `supabase/README.md` § 6).
+- **El catálogo rota** (entran y salen modelos), así que el modelo guardado por el usuario puede
+  quedar obsoleto y el proxy rechazaría **todas** sus peticiones. `effectiveModel()`
+  (`electron/ai/llm/index.ts`) protege ese caso: en los presets con catálogo curado (los que
+  tienen `modelMeta` — hoy solo `noteflow`), si el modelo guardado no está en `suggestedModels`
+  se usa `suggestedModels[0]`. En los presets BYO el modelo es libre y **no** se toca.
 - **Cliente:** preset `noteflow` **primero** en `presets.ts` (`impl: 'openai'`, `baseUrl` =
   `AI_PROXY_URL` de `cloudConfig.ts`, `needsKey: false`, `editableBaseUrl: false`).
   ⚠️ `presetOf()` con id desconocido cae **explícitamente en `anthropic`** (ya no en `PRESETS[0]`)
@@ -162,7 +175,8 @@ es **un preset más**, no una implementación nueva.
   la usa en chat/list-models/test/profile-generate; `resolveConfig` síncrona queda para el resto.
   `toPublic().configured` para este preset exige sesión + entitlement `ai`, y
   `notConfiguredMessage()` da el motivo exacto ("sign in" vs "requires subscription").
-  Capabilities: imágenes sí (modelos curados con visión); PDF no (anthropic-only).
+  Capabilities: imágenes **según el modelo activo** (`modelMeta`; los text-only las desactivan);
+  PDF no (anthropic-only).
 - **UI:** `LlmConfigView` presenta las dos fuentes del asistente como **opciones excluyentes** —
   selector de dos cards (**NoteFlow AI** vs **proveedor propio / IA local**, ambas siempre visibles,
   con badge Activo/Inactivo) y debajo solo la sección de la elegida. El preset **NoteFlow AI no
@@ -589,7 +603,7 @@ login|logout|status|setup|push|pull`), sin dependencias (webcrypto + `fetch` de 
 | Fase | Contenido |
 |---|---|
 | **4.0 Fundación** | ✅ **Desplegada y operativa** (cuenta en la app, AccountPanel, esquema `subscriptions` + RLS, proyecto Supabase real conectado, webhook `billing-webhook` de Lemon Squeezy con productos/variantes reales dados de alta) |
-| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×6), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
+| **4.1 IA gestionada** | ✅ **Desplegada y operativa** (Edge Function `ai-proxy` en producción + migración 0003 + preset `noteflow` + cuotas/metering + botón de suscripción + auto-activación del preset al suscribirse + **selector excluyente de fuente del asistente** en `LlmConfigView` (NoteFlow AI vs proveedor propio/IA local) — ver § 3). Probada end-to-end. **Ampliación (código listo, pendiente de correr 0007 + redeploy):** catálogo con modelos avanzados + chinos, **cuota ponderada** (`quota_tokens`, multiplicadores ×1/×2/×6 — ver § 3), endpoint `/usage` + **barra de consumo en la UI** (la sección NoteFlow AI ya la muestra vía IPC `ai:llm-usage`) |
 | **4.2 Nube cifrada** | 🔨 **En curso — tramos 1, 2, 3 y 4 hechos + modo dual managed/e2ee:** fundación criptográfica (`cloudCrypto.ts` + tests) + esquema de servidor (migraciones 0004-0006) + **motor de sync** (`cloudKeys.ts`, `cloudSync.ts`/`cloudSyncLogic.ts` con tests, interfaz `SyncProvider`, IPC `cloud:*`) + **Realtime** (`cloudRealtime.ts`/`cloudRealtimeLogic.ts` con tests: push por WS + loop de seguridad 5 min) + **modos managed/e2ee** (Edge Function `cloud-keys`, default managed sin secretos, E2EE opt-in, upgrade one-way) + **Settings UI** (`CloudPanel.tsx`: onboarding con elección de modo, unlock, enable/disable/pull/lock, switch a modo privado, enforcement visual de la exclusión con GitHub Sync). **Desplegado (2026-07-12):** migraciones 0004-0006 aplicadas en el proyecto real, secret `CLOUD_MANAGED_KEK` puesto, Edge Function `cloud-keys` ACTIVE (verify JWT) y **smoke E2E del realtime verificado** (edición → evento → pull reactivo en segundos). El producto Cloud (y el Bundle) ya existen en Lemon Squeezy y sus checkout URLs están pobladas en `cloudConfig.ts` → los planes ofrecen botón Subscribe; lo que sigue pendiente del operador es el **paso a live mode de la store** (ver § 3, "Pendiente del operador (billing)") |
 | **4.3 Futuro** | Historial de versiones, compartir notas, ¿acceso web? |
 

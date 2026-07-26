@@ -205,6 +205,13 @@ Acento del color del grupo a la izquierda.
   alterna su marca (en vez de abrir la nota); **Ctrl/Cmd+click** alterna siempre (e inicia la
   selección). Las tarjetas seleccionadas se resaltan (anillo). Funciona en todas las bandas,
   incluida "Archived".
+- **Seleccionar todo** → botón **"Select all" / "Deselect all"** en la cabecera (junto a "New note";
+  solo si hay notas) y atajo **`Ctrl/Cmd+A`**: marca **todas** las notas de la vista (carpetas +
+  "No folder" + "Archived"); si ya lo están, limpia la selección.
+- **Seleccionar una banda** → checkbox en la cabecera de cada banda (carpeta, "No folder" o
+  "Archived"), visible al pasar el ratón por la banda o siempre que haya una selección activa:
+  marca/desmarca solo las notas de esa banda. Si solo hay algunas marcadas se muestra en estado
+  intermedio (guion).
 - **Barra de acciones** flotante (abajo, centrada, sticky al hacer scroll) cuando hay ≥1 marcada:
   contador "N selected" + **Favorite/Unfavorite**, **Archive/Unarchive** (ambos como toggle: si
   todas ya lo tienen, lo quitan; si no, lo ponen), **Move to group** (cualquier grupo o "No group"),
@@ -547,7 +554,9 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   con qué modelo se hace la siguiente pregunta. Si no hay proveedor configurado, muestra un CTA a Ajustes.
   - **Adjuntar archivos (📎):** junto al campo de escribir hay un botón de clip para mandar **imágenes,
     PDFs y .txt/.md** con tu pregunta — lo que el **modelo activo** admita (Anthropic: PDF+imágenes+texto;
-    OpenAI-compatibles: imágenes+texto; .txt/.md siempre). Los archivos elegidos aparecen como **chips
+    OpenAI-compatibles: imágenes+texto; .txt/.md siempre). Ojo: en **NoteFlow AI** varios modelos curados
+    son de solo texto —incluido el que viene elegido por defecto—, así que ahí el botón solo ofrece
+    imágenes si eliges un modelo con visión. Los archivos elegidos aparecen como **chips
     removibles** sobre el campo y quedan pegados al mensaje al enviarlo; puedes mandar solo adjuntos sin
     texto. La IA **lee los documentos directamente** (la app no extrae texto): el .txt/.md se incrusta en
     el mensaje y el PDF/imagen va nativo al proveedor. Los adjuntos siguen disponibles para **preguntas de
@@ -590,7 +599,8 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
   eligen con un **selector de dos cards** (mismo patrón que Ajustes → Sincronización; badge
   Activo/Inactivo en cada una, y debajo solo la sección de la que elijas):
   - **NoteFlow AI (suscripción):** plan gestionado — sin API key ni Base URL (usa tu cuenta NoteFlow),
-    modelos curados (algunos con sufijo "6× cuota") y **barra de consumo mensual**. Botón "Use NoteFlow
+    modelos curados (los más caros con sufijo "N× cuota" — hoy 2× y 6×; el campo "Model" es de **solo
+    lectura**, se elige haciendo clic en uno de los modelos) y **barra de consumo mensual**. Botón "Use NoteFlow
     AI" para activarlo (o check "Active" si ya lo es). Sin sesión o sin suscripción, la card sigue
     visible pero en vez del botón muestra el aviso del motivo ("sign in" / "requires subscription")
     **+ el bloque de planes con precios**: NoteFlow AI y, si tampoco tienes Cloud, el Bundle (con
@@ -992,7 +1002,7 @@ Fuente de verdad: `src/components/Settings/ShortcutsPanel.tsx`.
 | `Ctrl+W` | Eliminar sección |
 | `Ctrl+Tab` | Siguiente sección |
 | `Ctrl+Shift+Tab` | Sección anterior |
-| `Ctrl+A` | Seleccionar/deseleccionar todas las secciones (en la vista de nota) |
+| `Ctrl+A` | Seleccionar todo (secciones en la vista de nota, notas en la vista de grupo) |
 | `Delete` | Borrar nota seleccionada (cuando no se edita) |
 
 ### Sticky notes

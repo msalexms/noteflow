@@ -7,7 +7,8 @@
  * Curated OpenRouter model ids the managed plan serves by default (overridable
  * with the AI_ALLOWED_MODELS env). All of them MUST support tool calling — the
  * NoteFlow chat is agentic. NOT all of them support vision: the two DeepSeek
- * models are text-only (every other curated model accepts image input).
+ * models and Xiaomi MiMo are text-only (every other curated model accepts image
+ * input).
  *
  * KEEP IN SYNC with NOTEFLOW_AI_MODELS in electron/ai/llm/presets.ts (the
  * `noteflow` preset shows this same list as suggested models in the client,
@@ -15,17 +16,15 @@
  */
 export const DEFAULT_ALLOWED_MODELS: readonly string[] = [
   // Standard models (×1 quota).
-  'openai/gpt-4o-mini',
-  'openai/gpt-4.1-mini',
-  'anthropic/claude-haiku-4.5',
-  'google/gemini-2.5-flash',
-  'deepseek/deepseek-v4-flash',
   'deepseek/deepseek-v4-pro',
-  'minimax/minimax-m3',
+  'deepseek/deepseek-v4-flash',
+  'xiaomi/mimo-v2.5-pro',
+  'openai/gpt-5.6-luna',
+  'anthropic/claude-haiku-4.5',
+  // Mid-tier (×2 quota — see MODEL_QUOTA_MULTIPLIERS).
+  'x-ai/grok-4.5',
   // Advanced models (×6 quota — see MODEL_QUOTA_MULTIPLIERS).
-  'anthropic/claude-sonnet-5',
-  'openai/gpt-5.2',
-  'google/gemini-3.5-flash',
+  'moonshotai/kimi-k3',
 ]
 
 /** Default monthly QUOTA token budget (weighted input + output) per user. */
@@ -33,17 +32,19 @@ export const DEFAULT_MONTHLY_TOKENS = 3_000_000
 
 /**
  * Per-model quota multipliers: what a real token costs against the monthly
- * quota. Only models more expensive than the baseline are listed — anything
- * not in the map is ×1. Real tokens (tokens_in/tokens_out) are still recorded
- * unweighted for the operator's cost accounting; the weighted value goes to
- * the usage_events.quota_tokens column (migration 0007).
+ * quota. Only models more expensive than the ×1 baseline are listed — anything
+ * not in the map (every standard model, and unknown ids) is ×1. There are two
+ * paid tiers today, mid-tier ×2 and advanced ×6, but nothing here assumes a
+ * fixed set of values: quotaMultiplierFor accepts any positive finite number,
+ * so adding a tier is just a new entry. Real tokens (tokens_in/tokens_out) are
+ * still recorded unweighted for the operator's cost accounting; the weighted
+ * value goes to the usage_events.quota_tokens column (migration 0007).
  *
  * KEEP IN SYNC with NOTEFLOW_AI_MODEL_META in electron/ai/llm/presets.ts.
  */
 export const MODEL_QUOTA_MULTIPLIERS: Readonly<Record<string, number>> = {
-  'anthropic/claude-sonnet-5': 6,
-  'openai/gpt-5.2': 6,
-  'google/gemini-3.5-flash': 6,
+  'x-ai/grok-4.5': 2,
+  'moonshotai/kimi-k3': 6,
 }
 
 /** Quota multiplier for a model — unknown/unlisted models cost the ×1 baseline. */

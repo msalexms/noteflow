@@ -43,8 +43,31 @@ export function byoFallbackProvider(cfg: LlmConfigStored): string {
 function effectiveModel(cfg: LlmConfigStored): string {
   const preset = presetOf(cfg.active)
   const ps = cfg.byPreset[preset.id] ?? {}
-  return ps.model?.trim() || preset.suggestedModels[0] || ''
+  const stored = ps.model?.trim() || ''
+  // Presets with `modelMeta` (today only the managed `noteflow` plan) serve a CURATED
+  // catalog that rotates: the proxy rejects anything outside it, so a model the user
+  // picked months ago can silently become invalid and break every request. Fall back to
+  // the first suggested model in that case. Everywhere else the model is free-form (the
+  // user may type any id their provider serves), so the stored value is honoured as-is.
+  if (preset.modelMeta && stored && !preset.suggestedModels.includes(stored)) {
+    return preset.suggestedModels[0] || stored
+  }
+  return stored || preset.suggestedModels[0] || ''
 }
+/**
+ * Whether `model` may be PERSISTED for `presetId`. Presets with a curated catalog
+ * (`modelMeta` — today only the managed plan) accept nothing outside it: storing another
+ * id would leave settings.json holding a model the proxy rejects while effectiveModel
+ * resolves the requests to a different one — stored and used must never diverge. BYO
+ * presets accept anything (the user knows what their provider serves).
+ * Compares the TRIMMED id, exactly like effectiveModel does, so both guards agree on
+ * what belongs to the catalog (a padded id must not be accepted here and rewritten there).
+ */
+export function acceptsModel(presetId: string, model: string): boolean {
+  const preset = presetOf(presetId)
+  return !preset.modelMeta || preset.suggestedModels.includes(model.trim())
+}
+
 function effectiveBaseUrl(cfg: LlmConfigStored): string {
   const preset = presetOf(cfg.active)
   const ps = cfg.byPreset[preset.id] ?? {}

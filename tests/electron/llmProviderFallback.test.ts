@@ -11,7 +11,10 @@ vi.mock('electron', () => ({
   },
 }))
 
-const { withActiveProvider, byoFallbackProvider, DEFAULT_LLM_CONFIG } = await import('../../electron/ai/llm')
+const { withActiveProvider, byoFallbackProvider, resolveConfig, acceptsModel, DEFAULT_LLM_CONFIG } = await import(
+  '../../electron/ai/llm'
+)
+const { NOTEFLOW_AI_MODELS } = await import('../../electron/ai/llm/presets')
 type LlmConfigStored = import('../../electron/ai/llm').LlmConfigStored
 
 const base: LlmConfigStored = { active: 'ollama', byPreset: {} }
@@ -57,5 +60,67 @@ describe('byoFallbackProvider', () => {
     expect(byoFallbackProvider({ active: 'noteflow', byPreset: {}, lastByoProvider: 'gone-provider' })).toBe(
       DEFAULT_LLM_CONFIG.active
     )
+  })
+})
+
+// The managed plan serves a CURATED catalog that rotates; the proxy rejects anything
+// outside it, so a stored model that left the catalog must not keep being sent.
+describe('resolveConfig — model of the managed (curated) preset', () => {
+  const managed = (model?: string): LlmConfigStored => ({
+    active: 'noteflow',
+    byPreset: model === undefined ? {} : { noteflow: { model } },
+  })
+
+  it('keeps a stored model that is still in the catalog', () => {
+    const current = NOTEFLOW_AI_MODELS[NOTEFLOW_AI_MODELS.length - 1]
+    expect(resolveConfig(managed(current)).model).toBe(current)
+  })
+
+  it('falls back to the first curated model when the stored one left the catalog', () => {
+    expect(resolveConfig(managed('openai/gpt-4o-mini')).model).toBe(NOTEFLOW_AI_MODELS[0])
+  })
+
+  it('uses the first curated model when nothing is stored yet', () => {
+    expect(resolveConfig(managed()).model).toBe(NOTEFLOW_AI_MODELS[0])
+    expect(resolveConfig(managed('  ')).model).toBe(NOTEFLOW_AI_MODELS[0])
+  })
+
+  it('never rewrites the model of a BYO preset (any id the provider serves is valid)', () => {
+    const byo: LlmConfigStored = { active: 'ollama', byPreset: { ollama: { model: 'llama3.2:3b' } } }
+    expect(resolveConfig(byo).model).toBe('llama3.2:3b')
+    const openai: LlmConfigStored = { active: 'openai', byPreset: { openai: { model: 'gpt-4.1' } } }
+    expect(resolveConfig(openai).model).toBe('gpt-4.1')
+  })
+})
+
+// The write-side half of the same invariant (stored ≡ used): main drops a model patch this
+// rejects, so an id outside a curated catalog never reaches settings.json in the first place.
+describe('acceptsModel', () => {
+  it('accepts any id of the curated catalog', () => {
+    for (const model of NOTEFLOW_AI_MODELS) expect(acceptsModel('noteflow', model)).toBe(true)
+  })
+
+  it('rejects an id that left the curated catalog', () => {
+    expect(acceptsModel('noteflow', 'openai/gpt-5.2')).toBe(false)
+    expect(acceptsModel('noteflow', '')).toBe(false)
+    // Half-typed input: what the read-only field in the UI prevents, and main drops anyway.
+    expect(acceptsModel('noteflow', 'o')).toBe(false)
+  })
+
+  it('trims exactly like effectiveModel, so both guards agree on the same id', () => {
+    const padded = `  ${NOTEFLOW_AI_MODELS[0]}  `
+    expect(acceptsModel('noteflow', padded)).toBe(true)
+    expect(resolveConfig({ active: 'noteflow', byPreset: { noteflow: { model: padded } } }).model).toBe(
+      NOTEFLOW_AI_MODELS[0]
+    )
+  })
+
+  it('accepts anything for a BYO preset', () => {
+    expect(acceptsModel('ollama', 'llama3.2:3b')).toBe(true)
+    expect(acceptsModel('openai', 'some-model-shipped-tomorrow')).toBe(true)
+  })
+
+  it('accepts anything for an unknown preset id (presetOf falls back to anthropic — no catalog)', () => {
+    expect(acceptsModel('gone-provider', 'whatever')).toBe(true)
   })
 })
