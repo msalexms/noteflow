@@ -327,12 +327,27 @@
 
         // post — skipped on lowPower: UnrealBloomPass runs a full-res blur chain per frame,
         // which is what tanks mobile GPUs when several brains are mounted.
+        //
+        // Bloom is a dark-theme glow. On a transparent canvas in light theme (the footer brain)
+        // it becomes a bug: the pass composites its blur additively over the *canvas*, which
+        // deposits alpha across the whole blur radius, so the element paints a hazy grey veil
+        // over the parchment that breathes in and out with the `bloom.strength` oscillation
+        // below — right behind the download copy. There it is swapped for a plain copy pass.
+        //
+        // The composer itself must stay in the chain either way: the passes render the scene
+        // into a (non-multisampled) render target and blit it as a fullscreen quad, so dropping
+        // it would hand rasterization to the MSAA default framebuffer and visibly fatten the
+        // wireframe's edges. Same round-trip, one pass swapped — the wireframe is untouched.
         let composer = null, bloom = null;
         if (!lowPower) {
           composer = new T.EffectComposer(renderer);
           composer.addPass(new T.RenderPass(scene, camera));
-          bloom = new T.UnrealBloomPass(new T.Vector2(width, height), LOOK.bloomStrength, LOOK.bloomRadius, Math.max(LOOK.bloomThreshold, opts.transparent ? 0 : bgLum));
-          composer.addPass(bloom);
+          if (isDark) {
+            bloom = new T.UnrealBloomPass(new T.Vector2(width, height), LOOK.bloomStrength, LOOK.bloomRadius, Math.max(LOOK.bloomThreshold, opts.transparent ? 0 : bgLum));
+            composer.addPass(bloom);
+          } else {
+            composer.addPass(new T.ShaderPass(T.CopyShader));
+          }
           composer.setPixelRatio(pixelRatio);
           composer.setSize(width, height);
         }
@@ -346,7 +361,7 @@
           width = w; height = h;
           camera.aspect = width / height; applyViewOffset();
           renderer.setSize(width, height);
-          if (composer) { composer.setSize(width, height); bloom.setSize(width, height); }
+          if (composer) { composer.setSize(width, height); if (bloom) bloom.setSize(width, height); }
           if (motionDone) renderFrame(); // static (reduced-motion) frame must track resizes
         });
         ro.observe(container);
