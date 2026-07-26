@@ -174,6 +174,7 @@ export const es: Content = {
     linux: 'Descargar para Linux',
     versionLabel: 'Última versión',
     disclaimer: `Tus notas se quedan en tu máquina como archivos <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> planos. La sincronización es tu propio repo privado de GitHub. Usa tu propia clave de modelo. Sin servidores, sin telemetría.`,
+    winNote: `Windows puede avisar del instalador: aún no está firmado, no es inseguro — el código es abierto y está en GitHub. Pulsa <strong style="font-weight:500;color:var(--detail);">Más información → Ejecutar de todas formas</strong>.`,
     footer: {
       brand: 'NoteFlow',
       tagline: 'Notas rápidas, con cerebro.',

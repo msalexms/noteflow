@@ -185,6 +185,9 @@ export const en = {
     // client script reads the tag from the GitHub API — no version is known at build time.
     versionLabel: 'Latest release',
     disclaimer: `Your notes stay on your machine as plain <span style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink-dim);">.md</span> files. Sync is your own private GitHub repo. Bring your own model key. No servers, no telemetry.`,
+    // Footnote to the Windows button: unsigned installers trip SmartScreen on first run.
+    // Kept to one line — what the warning is, what it is *not*, and the clicks to get past it.
+    winNote: `Windows may warn about the installer: it isn't code-signed yet, not unsafe — the source is open on GitHub. Click <strong style="font-weight:500;color:var(--detail);">More info → Run anyway</strong>.`,
     footer: {
       brand: 'NoteFlow',
       tagline: 'Fast notes, with a brain.',

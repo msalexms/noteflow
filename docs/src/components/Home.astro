@@ -490,7 +490,7 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       <div style="position:absolute;inset:0;background:linear-gradient(0deg,var(--bg) 0%,transparent 45%,rgba(0,0,0,0) 100%);pointer-events:none;"></div>
       <div style="position:relative;z-index:2;max-width:900px;margin:0 auto;padding:clamp(90px,12vw,150px) clamp(22px,5vw,64px);text-align:center;">
         <div data-reveal>
-          <div style={`display:inline-flex;align-items:center;gap:11px;margin-bottom:22px;${label}`}><span style="width:18px;height:1px;background:var(--detail);"></span>{t.download.kicker}</div>
+          <div class="nf-plate" style={`display:inline-flex;align-items:center;gap:11px;margin-bottom:22px;padding:8px 14px;${label}`}><span style="width:18px;height:1px;background:var(--detail);"></span>{t.download.kicker}</div>
           <h2 style="margin:0;font-size:clamp(40px,6vw,82px);line-height:1.02;letter-spacing:-.018em;font-weight:500;color:var(--ink-strong);" set:html={t.download.h2}></h2>
           <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:42px;">
             <a href={RELEASES_LATEST_URL} data-dl="win" target="_blank" rel="noopener" class="nf-lift" style="display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:14px;letter-spacing:.02em;color:var(--bg);background:var(--ink-strong);padding:16px 30px;border-radius:5px;box-shadow:0 12px 36px rgba(0,0,0,.32);">{t.download.windows}</a>
@@ -499,8 +499,25 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
           {/* Hidden until the client script reports the real tag_name — `visibility` (not `display`)
               so the reserved line never shifts what follows when it appears. It labels the two
               buttons above ("what you are about to download"), hence the tight margin. */}
-          <p data-dl-version-row style="visibility:hidden;margin:16px 0 0;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
-          <p style="margin:30px auto 0;max-width:460px;font-size:17px;line-height:1.6;color:var(--ink-faint);" set:html={t.download.disclaimer}></p>
+          {/* `inline-block` so the plate hugs the line instead of spanning the whole column;
+              the parent is text-align:center, so it still centres. */}
+          <p data-dl-version-row class="nf-plate" style="visibility:hidden;display:inline-block;margin:16px 0 0;padding:7px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.02em;color:var(--ink-faint);">{t.download.versionLabel} <span data-dl-version></span></p>
+          {/* max-width carries the horizontal padding on top of the original 460px text
+              column (box-sizing is border-box site-wide), so the copy wraps exactly as before
+              and only the plate is wider. */}
+          <p class="nf-plate" style="margin:30px auto 0;max-width:496px;padding:12px 18px;font-size:17px;line-height:1.6;color:var(--ink-faint);" set:html={t.download.disclaimer}></p>
+          {/* SmartScreen footnote for the Windows build (unsigned installer). Tinted with the
+              site's amber `--detail` so it reads as a warning, but at footnote weight — it must
+              not compete with the buttons or the privacy disclaimer above it. The amber rides
+              on the same background scrim as `.nf-plate`, hence the nested color-mix. */}
+          <div style="display:flex;gap:10px;align-items:flex-start;text-align:left;margin:22px auto 0;max-width:460px;padding:12px 14px;border:1px solid color-mix(in srgb, var(--detail) 26%, transparent);border-radius:6px;background:color-mix(in srgb, var(--detail) 6%, color-mix(in srgb, var(--bg) 76%, transparent));">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:2px;color:var(--detail);" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <path d="M12 8v4"></path>
+              <path d="M12 16h.01"></path>
+            </svg>
+            <p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--ink-dim);" set:html={t.download.winNote}></p>
+          </div>
         </div>
         {/* Grouped footer: brand block + three link columns (Docs / Project / Legal),
             then the copyright row. Docs and legal links carry no data-nav — the synapse script
@@ -852,6 +869,19 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       border-color: var(--detail);
     }
 
+    /* ── Download-section copy plates ───────────────────────────────────────── */
+    /* The whole download column sits directly on the ambient brain, and most of its copy is
+       --ink-faint / --ink-dim, which the wireframe swallows. Each block of copy carries a
+       scrim of the page background itself: where there is no wireframe it is invisible (the
+       same colour as what it covers), and where there is one it knocks it back. Kept well
+       under 100% on purpose — a solid plate would read as a card and break the "brain
+       showing through the footer" effect. Padding is set per element so each plate hugs its
+       own text. */
+    .nf-plate {
+      background: color-mix(in srgb, var(--bg) 76%, transparent);
+      border-radius: 6px;
+    }
+
     /* ── Grouped footer (Download section) ──────────────────────────────────── */
     /* Brand block takes the leftover space; the four link columns size to content. */
     .nf-footer-grid {
@@ -860,6 +890,14 @@ const brainCardColors = ['rgb(var(--accent))', 'rgb(var(--accent-2))', 'rgb(var(
       column-gap: clamp(24px, 4.5vw, 60px);
       row-gap: 34px;
       align-items: start;
+      /* One plate for the whole grid rather than one per column — four separate cards in a
+         row would read as a component the design never had. The negative margins cancel the
+         padding exactly, so the plate bleeds outwards and nothing in the grid moves; the
+         -20px stays inside the content column's own padding, so it never clips. */
+      margin: -16px -20px;
+      padding: 16px 20px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--bg) 76%, transparent);
     }
     .nf-footer-col { display: flex; flex-direction: column; gap: 11px; }
     .nf-footer-head {
