@@ -204,10 +204,6 @@
       "dist-electron/**/*"
     ]
   },
-  "directories": {
-    "doc": "docs",
-    "test": "tests"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yagoid/noteflow.git"
