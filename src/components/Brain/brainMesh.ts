@@ -72,7 +72,7 @@ export const DEFAULT_BRAIN_PARAMS: BrainShapeParams = {
   noiseAmp: 0.065, noiseFreq: 2.4,
   shells: [1], // single outer shell = the brain silhouette; the interior is filled below
   // Random interior lattice (region-tagged → notes can live inside too, not just on the surface).
-  interior: { fillDensity: 0.9, margin: 0.92, neighbors: 3, maxEdge: 0.4 },
+  interior: { fillDensity: 0.5, margin: 0.92, neighbors: 3, maxEdge: 0.4 },
   centerY: 0.2,
   rotation: [-8, 0, 0],
   lobes: {
@@ -676,7 +676,7 @@ export function normalizeShape(s?: any): BrainShapeParams {
 // Tune here: lower VERTS_PER_NODE / DETAIL_MIN for an even sparser look, raise for denser.
 const VERTS_PER_NODE = 5
 const DETAIL_MIN = 1.6
-const DETAIL_MAX = 3.3
+const DETAIL_MAX = 3.2
 export function adaptiveDetail(nodeCount: number): number {
   const target = Math.max(40, nodeCount * VERTS_PER_NODE)
   // Invert V(d) = 10·4^d + 2  →  d = log4((target − 2) / 10).
