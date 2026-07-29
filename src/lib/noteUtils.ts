@@ -287,7 +287,7 @@ export function defaultNoteTitle(): string {
 }
 
 export function isDefaultNoteTitle(title: string): boolean {
-  return !title.trim() || title.trim() === 'Untitled' || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(title.trim())
+  return !title.trim() || title.trim() === 'Untitled' || /^\d{2}[/-]\d{2}[/-]\d{4}$/.test(title.trim())
 }
 
 export function createEmptyNote(): Omit<Note, 'filePath' | 'raw'> {
