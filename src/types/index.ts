@@ -251,7 +251,7 @@ export interface ChatSession {
   title: string
   createdAt: string
   updatedAt: string
-  messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; error?: boolean; actions?: ChatToolActivity[]; attachments?: ChatAttachment[] }>
+  messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; error?: boolean; errorText?: string; actions?: ChatToolActivity[]; attachments?: ChatAttachment[] }>
 }
 
 // A note cited as a source for a chat answer (powers citations + brain illumination)

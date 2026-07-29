@@ -570,6 +570,10 @@ La mitad izquierda de la vista cerebro. Toda su UI está **en inglés**. Pestañ
     **acciones destructivas** (borrar nota/sección/grupo/carpeta) **piden confirmación**: aparece una
     tarjeta **Confirm / Cancel** y nada se borra hasta que confirmas. Las notas **cifradas** se pueden
     listar pero el agente no lee ni edita su contenido. (Implementación: tool-calling nativo, no el CLI.)
+  - **Si algo falla a media respuesta** (p. ej. se agota la cuota mensual del plan NoteFlow AI
+    mientras el modelo escribe o encadena acciones), **el texto ya escrito se conserva** y el error
+    aparece justo debajo en una **fila roja** ⚠ con el motivo. Nunca se corta la respuesta en seco
+    sin explicación.
 - **Related:** las "Related notes" por sección (lo que antes estaba al pie del cerebro), eligiendo
   cualquier nota/sección como origen. Necesita la IA local (embeddings) activada.
 - **Profile:** cuestionario del **segundo cerebro** — **no aparece solo**: al entrar al cerebro

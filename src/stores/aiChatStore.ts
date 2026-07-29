@@ -7,7 +7,8 @@ export interface ChatTurn {
   id: string
   role: 'user' | 'assistant'
   content: string
-  error?: boolean
+  error?: boolean      // the whole turn IS the error (nothing was written before it failed)
+  errorText?: string   // failure that landed AFTER some text — shown next to the partial answer
   actions?: ChatToolActivity[]
   attachments?: ChatAttachment[]
 }
@@ -339,7 +340,14 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       set((s) => {
         const msgs = s.messages.slice()
         const last = msgs[msgs.length - 1]
-        if (last && last.role === 'assistant') msgs[msgs.length - 1] = { ...last, content: last.content || `⚠ ${p.error}`, error: true }
+        // The agent loop makes one request per step, so a failure (the monthly quota running
+        // out, a gateway hiccup…) often lands after the model already wrote some text. Never
+        // drop it: keep the partial answer rendered as Markdown and hang the error off the turn.
+        if (last && last.role === 'assistant') {
+          msgs[msgs.length - 1] = last.content
+            ? { ...last, errorText: p.error }
+            : { ...last, content: `⚠ ${p.error}`, error: true }
+        }
         return { messages: msgs, streaming: false, awaitingModelText: false, currentRequestId: null, pendingConfirm: null, suggestions: [] }
       })
       persist()

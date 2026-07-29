@@ -314,6 +314,13 @@ export function ChatView({
                 </div>
               )
             )}
+            {/* Failure that arrived mid-turn (e.g. the monthly quota ran out on a later agent
+                step): the text above stays as written, the error gets its own red row. */}
+            {m.errorText && (
+              <div className="mt-1 px-2.5 py-1.5 rounded text-[13px] font-mono whitespace-pre-wrap break-words leading-relaxed bg-red-500/10 text-red-300 border border-red-500/30">
+                {`⚠ ${m.errorText}`}
+              </div>
+            )}
             {m.role === 'user' && m.attachments && m.attachments.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1 justify-end">
                 {m.attachments.map((a) => <AttachmentChip key={a.id} a={a} />)}

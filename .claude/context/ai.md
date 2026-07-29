@@ -175,6 +175,20 @@ Capa de **LLM** sobre el índice, independiente del flag de embeddings. **Dos in
   `MAX_AGENT_STEPS`). **Tools siempre activas** (el modelo decide); **solo las destructivas piden
   confirmación**: el main emite `ai:chat-confirm-request` y `await`ea `chatConfirms` (resuelto por
   `ai:chat-confirm`); si se cancela, devuelve un `ToolResult` "user declined" sin abortar el turno.
+- **Errores a mitad de respuesta (nunca se pierden):** como cada paso del bucle agéntico es una
+  petición propia, un fallo (típico: agotar la cuota mensual del plan gestionado, 429 con
+  `monthly_quota_exceeded`) suele llegar **después** de que el modelo ya haya escrito texto. Ojo al
+  camino de cada tipo de fallo: el **429 de cuota** lo rechaza el proxy ANTES de reenviar, así que
+  llega como **error HTTP al arrancar el paso** (rama `!res.ok`); los **frames SSE de error** cubren
+  los fallos de OpenRouter a media stream. Dos piezas lo garantizan: (1)
+  `openaiCompatible.streamTurn` **no se traga los frames SSE de error** (`data: {"error":…}`) — el
+  `JSON.parse` sigue ignorando keepalives/frames partidos, pero un payload con `error` **lanza**
+  (con el **código máquina delante**, porque `friendlyChatError` hace `raw.includes(...)`) y cancela
+  el reader; el provider de Anthropic ya propaga por SDK. (2) En el renderer, `ChatTurn` tiene
+  **`error`** (el turno entero *es* el error → burbuja roja) y **`errorText`** (falló tras emitir
+  texto → se conserva la respuesta parcial como Markdown y el error se pinta en una fila roja debajo,
+  `ChatView`). Antes el listener `onAiChatError` hacía `last.content || ⚠…` y descartaba el error si
+  ya había texto: la respuesta se cortaba a medias sin ninguna señal.
 - **Iluminación de fuentes:** las notas citadas se "encienden" en el cerebro — pulso/halo aditivo
   brillante en 3D (`litGroup` en `BrainScene`, parpadeo por `sin`) y glow + anillo en 2D
   (`BrainCanvas`). NO se fuerzan etiquetas (eso metía ruido). Prop `highlightedNoteIds`.

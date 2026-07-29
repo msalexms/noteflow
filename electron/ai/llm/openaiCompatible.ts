@@ -64,6 +64,24 @@ function safeParseArgs(args: string): Record<string, unknown> {
   }
 }
 
+/**
+ * Render an SSE error payload as a single line. The machine code goes FIRST so it survives the
+ * length cap: main's `friendlyChatError` matches on it (e.g. `monthly_quota_exceeded` for the
+ * NoteFlow AI monthly quota), so losing it would turn a localized message into raw JSON.
+ */
+function describeStreamError(error: unknown): string {
+  if (typeof error === 'string') return error.slice(0, 300)
+  const e = (error ?? {}) as { code?: unknown; type?: unknown }
+  const code = typeof e.code === 'string' && e.code ? e.code : typeof e.type === 'string' && e.type ? e.type : ''
+  let detail: string
+  try {
+    detail = JSON.stringify(error) ?? String(error)
+  } catch {
+    detail = String(error)
+  }
+  return `${code ? `${code} — ` : ''}${detail.slice(0, 300)}`
+}
+
 export class OpenAiCompatibleProvider implements LlmProvider {
   constructor(private cfg: ResolvedLlmConfig) {}
 
@@ -121,44 +139,57 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     // tool_calls arrive fragmented across SSE chunks; accumulate by their array index.
     const accum = new Map<number, { id: string; name: string; args: string }>()
 
+    // Returns true on the terminating [DONE] frame; a failure reported mid-stream throws.
     const drain = (data: string): boolean => {
       if (data === '[DONE]') return true
+      let json: {
+        error?: unknown
+        choices?: Array<{
+          delta?: {
+            content?: string
+            tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
+          }
+        }>
+      }
       try {
-        const json = JSON.parse(data) as {
-          choices?: Array<{
-            delta?: {
-              content?: string
-              tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
-            }
-          }>
-        }
-        const delta = json.choices?.[0]?.delta
-        if (delta?.content) { text += delta.content; onDelta(delta.content) }
-        for (const tc of delta?.tool_calls ?? []) {
-          const cur = accum.get(tc.index) ?? { id: '', name: '', args: '' }
-          if (tc.id) cur.id = tc.id
-          if (tc.function?.name) cur.name = tc.function.name
-          if (tc.function?.arguments) cur.args += tc.function.arguments
-          accum.set(tc.index, cur)
-        }
+        json = JSON.parse(data)
       } catch {
         // keepalive or partial frame — ignore
+        return false
+      }
+      // Gateways (OpenRouter, the NoteFlow AI proxy) can fail AFTER the stream started and report
+      // it as a `data: {"error": …}` frame instead of an HTTP error. Swallowing it would truncate
+      // the answer with no feedback at all, so raise it and let ai:chat surface it.
+      if (json.error) throw new Error(`Stream error — ${describeStreamError(json.error)}`)
+      const delta = json.choices?.[0]?.delta
+      if (delta?.content) { text += delta.content; onDelta(delta.content) }
+      for (const tc of delta?.tool_calls ?? []) {
+        const cur = accum.get(tc.index) ?? { id: '', name: '', args: '' }
+        if (tc.id) cur.id = tc.id
+        if (tc.function?.name) cur.name = tc.function.name
+        if (tc.function?.arguments) cur.args += tc.function.arguments
+        accum.set(tc.index, cur)
       }
       return false
     }
 
-    let finished = false
-    while (!finished) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let nl: number
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim()
-        buf = buf.slice(nl + 1)
-        if (!line.startsWith('data:')) continue
-        if (drain(line.slice(5).trim())) { finished = true; break }
+    try {
+      let finished = false
+      while (!finished) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim()
+          buf = buf.slice(nl + 1)
+          if (!line.startsWith('data:')) continue
+          if (drain(line.slice(5).trim())) { finished = true; break }
+        }
       }
+    } catch (err) {
+      void reader.cancel().catch(() => {}) // best effort: don't leave the response hanging
+      throw err
     }
 
     const toolCalls: ToolCall[] = [...accum.entries()]
