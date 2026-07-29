@@ -54,7 +54,7 @@ noteflow/
 ├── cli/
 │   ├── noteflow.js      # CLI companion (Node.js standalone, sin deps de Electron)
 │   ├── noteflow.cmd     # Wrapper Windows cmd.exe (entra en PATH vía NSIS) — ⚠ trunca argv multilínea
-│   ├── noteflow.ps1     # Wrapper PowerShell (PS lo prefiere sobre .cmd en PATH; pasa argv multilínea/Unicode intactos; con ExecutionPolicy Restricted falla → usar noteflow.cmd o RemoteSigned)
+│   ├── noteflow.ps1     # Wrapper PowerShell (PS lo prefiere sobre .cmd en PATH; pasa argv multilínea/Unicode intactos, reenvía stdin de la tubería en UTF-8 y fuerza OutputEncoding UTF-8 — ver patterns.md § CLI; con ExecutionPolicy Restricted falla → usar noteflow.cmd o RemoteSigned)
 │   ├── install-cli.sh   # Instalador headless Linux/RPi (curl | sudo bash)
 │   └── noteflow-cli/SKILL.md  # Skill publicada del CLI (npx skills add ...)
 ├── build/

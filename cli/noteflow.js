@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict'
-// v2.1.0 — human-readable version marker (keep in sync with CLI_VERSION below)
+// v2.2.0 — human-readable version marker (keep in sync with CLI_VERSION below)
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -14,7 +14,7 @@ const readline = require('node:readline')
 
 // ⚠️ keep in sync with the "// v" header comment above (informational marker;
 // self-update compares full file contents, not this version).
-const CLI_VERSION = '2.1.0'
+const CLI_VERSION = '2.2.0'
 
 const GITHUB_CLIENT_ID = 'Ov23liut9QOJ2pJFF0KR'
 const DEFAULT_REPO = 'noteflow-notes'
@@ -450,14 +450,43 @@ function parseSectionRef(name) {
   return { baseName: name, ordinal: null }
 }
 
+// Filler words dropped before comparing section names loosely (see sectionTokens).
+const SECTION_STOPWORDS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'en', 'para', 'con', 'of', 'the', 'a', 'and', 'to'])
+
+/** Section name → set of meaningful tokens (diacritics stripped, lowercased, stopwords dropped). */
+function sectionTokens(name) {
+  const plain = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  return new Set(plain.split(/[^\p{L}\p{N}]+/u).filter(t => t && !SECTION_STOPWORDS.has(t)))
+}
+
+/**
+ * Sections whose tokens are a superset of the query's — a forgiving last resort
+ * for agents that half-remember a name ('Variables de entorno' → 'Variables Entorno').
+ * Read-only by design: see the `fuzzy` option of matchSectionOrNull.
+ */
+function fuzzySectionMatches(sections, name) {
+  const wanted = [...sectionTokens(name)]
+  if (!wanted.length) return []
+  return (sections || []).filter(s => {
+    const have = sectionTokens(s.name)
+    return wanted.every(t => have.has(t))
+  })
+}
+
 /**
  * Finds a section by name. Section names are NOT unique in NoteFlow, so:
  *  - 'Name#2' targets the 2nd section named 'Name' (1-based).
  *  - an exact single match wins; multiple exact matches exit with a '#n' hint.
  *  - otherwise a single case-insensitive substring match wins.
+ *  - with { fuzzy: true }, a last resort: a single token-subset match wins (see
+ *    fuzzySectionMatches) and is announced on stderr.
  * Returns the section or null (no match at all). Ambiguity/out-of-range exit the process.
+ *
+ * `fuzzy` is opt-in and enabled ONLY by the read-only commands (`read`, `path`):
+ * guessing there costs nothing, while 'add'/'set' would write into the wrong
+ * section and 'section rename'/'section delete' would destroy it.
  */
-function matchSectionOrNull(note, name) {
+function matchSectionOrNull(note, name, { fuzzy = false } = {}) {
   const { baseName, ordinal } = parseSectionRef(name)
   const q = baseName.toLowerCase()
   const exact = (note.sections || []).filter(s => s.name.toLowerCase() === q)
@@ -477,12 +506,24 @@ function matchSectionOrNull(note, name) {
     err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${partial.map(s => s.name).join(', ')}. Use the exact name.`)
     process.exit(1)
   }
+  if (fuzzy) {
+    const loose = fuzzySectionMatches(note.sections, baseName)
+    if (loose.length === 1) {
+      // stderr on purpose: stdout of read/path stays verbatim and pipe-safe.
+      console.error(`  Note: matched section "${loose[0].name}"`)
+      return loose[0]
+    }
+    if (loose.length > 1) {
+      err(`Ambiguous section "${baseName}" in "${note.title}" — matches: ${loose.map(s => s.name).join(', ')}. Use the exact name.`)
+      process.exit(1)
+    }
+  }
   return null
 }
 
 /** Like matchSectionOrNull but exits when nothing matches (read/rename/delete must target an existing section). */
-function resolveSection(note, name) {
-  const sec = matchSectionOrNull(note, name)
+function resolveSection(note, name, opts) {
+  const sec = matchSectionOrNull(note, name, opts)
   if (!sec) { err(`No section "${parseSectionRef(name).baseName}" in "${note.title}". Sections: ${sectionNamesOf(note)}`); process.exit(1) }
   return sec
 }
@@ -499,15 +540,31 @@ function readStdin() {
 /** Content for `set`: --text wins, then --file, then stdin (explicit --stdin or a non-TTY pipe). */
 async function resolveSetContent(opts) {
   let raw
+  let fromStdin = false
   if (typeof opts.text === 'string') raw = opts.text
   else if (opts.file) {
     try { raw = fs.readFileSync(path.resolve(opts.file), 'utf-8') }
     catch (e) { err(`Cannot read --file: ${e.message}`); process.exit(1) }
-  } else if (opts.stdin || !process.stdin.isTTY) raw = await readStdin()
+  } else if (opts.stdin || !process.stdin.isTTY) { fromStdin = true; raw = await readStdin() }
   else { err('No content. Provide --text "..." , --file <path>, or pipe content with --stdin'); process.exit(1) }
   // Strip a leading BOM (PowerShell pipes/here-strings add one) and normalize
   // CRLF/CR to LF so piped/echoed input round-trips cleanly.
-  return raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+  const content = raw.replace(/^﻿+/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+  // Windows safety net. Two ways to land here with nothing: no content source was
+  // given at all (stdin is just not a TTY), or an outdated noteflow.ps1 shim kept
+  // stdin for itself in a pipeline, so node saw EOF. 'self-update' only refreshes
+  // noteflow.js, so installed shims stay broken — name both causes instead of a
+  // bare "no content".
+  if (fromStdin && !content && process.platform === 'win32') {
+    err('Nothing arrived on stdin.\n'
+      + '  Either no content was piped in (pass --text "..." or --file <path>), or the PowerShell\n'
+      + '  shim (noteflow.ps1) did not forward the pipe — older shims keep stdin for themselves.\n'
+      + '  Workarounds for the latter: write the content to a file and pass --file <path>, or invoke\n'
+      + '  the cmd shim explicitly ("text" | noteflow.cmd set ... --stdin). Only reinstalling/updating\n'
+      + '  the NoteFlow app refreshes the shims — \'noteflow self-update\' does not.')
+    process.exit(1)
+  }
+  return content
 }
 
 // ── GitHub API ────────────────────────────────────────────────────────────────
@@ -1476,7 +1533,8 @@ async function cmdAdd(positionalText, opts) {
   if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true })
 
   const targetTitle = opts.title || getTodayTitle()
-  const sectionName = opts.section || 'Note'
+  const explicitSection = typeof opts.section === 'string' && opts.section !== ''
+  const sectionName = explicitSection ? opts.section : 'Note'
   const isRaw = opts.raw !== false // default true (raw/markdown mode)
   const bytesWritten = Buffer.byteLength(text, 'utf-8')
 
@@ -1500,19 +1558,28 @@ async function cmdAdd(positionalText, opts) {
     if (!note) { err(`Could not read note "${existing.title}"`); process.exit(1) }
     if (!note.sections.length) note.sections = [{ id: nanoid(6), name: 'Note', content: '', isRawMode: true }]
 
-    // Find or create target section
-    let sec = note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase())
+    // Find or create target section. An EXPLICIT --section resolves like in `set`
+    // (partial names hit the existing section instead of spawning a duplicate,
+    // '#n' picks among same-named ones, ambiguity exits rather than guessing).
+    // ⚠️ The implicit default ('Note', when no --section is given) must stay
+    // exact-or-create: the user named nothing, so a substring hit would silently
+    // append the daily note to an unrelated section ('Meeting Notes') — or abort
+    // as ambiguous with no way out. Do NOT "unify" these two branches.
+    let sec = explicitSection
+      ? matchSectionOrNull(note, sectionName)
+      : note.sections.find(s => s.name.toLowerCase() === sectionName.toLowerCase()) || null
     const createdSection = !sec
+    const newSectionName = explicitSection ? parseSectionRef(sectionName).baseName : sectionName
     if (opts.dryRun) {
-      const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : sectionName, createdNote: false, createdSection, bytesWritten, dryRun: true }
+      const result = { note: note.title, dirname: note.dirname, section: sec ? sec.name : newSectionName, createdNote: false, createdSection, bytesWritten, dryRun: true }
       if (opts.json) { jsonOut(result); return }
       out(`  [dry-run] Would append ${text.length} chars to "${note.title}" → "${result.section}"${createdSection ? ' (new section)' : ''} — nothing written`)
       return
     }
     if (!sec) {
-      sec = { id: nanoid(6), name: sectionName, content: '', isRawMode: isRaw }
+      sec = { id: nanoid(6), name: newSectionName, content: '', isRawMode: isRaw }
       note.sections.push(sec)
-      out(`  Created section "${sectionName}"`)
+      out(`  Created section "${newSectionName}"`)
     }
     const base = (sec.content || '').replace(/\n$/, '')
     sec.content = base ? base + '\n' + text : text
@@ -1806,7 +1873,7 @@ function cmdSections(titleQuery) {
 function cmdRead(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   if (sectionName) {
-    const sec = resolveSection(note, sectionName)
+    const sec = resolveSection(note, sectionName, { fuzzy: true }) // read-only: a loose name match is safe here
     if (opts.json) {
       jsonOut({ id: note.id, title: note.title, section: sec.name, content: sec.content || '', isRawMode: sec.isRawMode })
       return
@@ -1835,7 +1902,7 @@ function cmdPath(titleQuery, sectionName, opts) {
   const note = resolveNote(titleQuery)
   const dir = path.resolve(note.filePath)
   if (sectionName) {
-    const sec = resolveSection(note, sectionName)
+    const sec = resolveSection(note, sectionName, { fuzzy: true }) // read-only: a loose name match is safe here
     const file = sectionFilePath(note, sec)
     if (opts.json) {
       jsonOut({ id: note.id, title: note.title, dir, section: sec.name, file, isRawMode: sec.isRawMode })
@@ -2422,7 +2489,7 @@ function cmdHelp(topic) {
   Options:
     --title <title>     Target a note with this title instead of today's date
     --create            With --title: create the note when it doesn't exist
-    --section <name>    Write to a specific section/tab (creates it if missing)
+    --section <name>    Write to a section/tab (resolved below; creates it if missing)
     --tag <tag>         Add a metadata tag to the note
     --group <name>      Assign the note to a group (only when creating)
     --folder <name>     Put the note in a folder of that group (requires --group)
@@ -2431,10 +2498,18 @@ function cmdHelp(topic) {
     --dry-run           Show what would be written (note/section/bytes) without writing
     --json              Machine-readable result on stdout; info lines go to stderr
 
+  Section resolution (same as 'set'): an explicit --section matches the exact name
+  first, then a single case-insensitive substring ("Variables" hits an existing
+  "Variables Entorno" instead of duplicating it), and "Name#2" picks among
+  same-named sections; ambiguity is an error, not a guess. Without --section the
+  default section "Note" is matched EXACTLY (or created) — never by substring.
+
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
-  noteflow.ps1 shim, which passes them intact — but for non-trivial content
-  always prefer --file or --stdin.
+  noteflow.ps1 shim, which passes them intact, forwards piped stdin as UTF-8 and
+  prints accents correctly — but for non-trivial content still prefer --file or
+  --stdin. If a piped --stdin arrives empty, your installed noteflow.ps1 predates
+  that fix: use --file, or pipe into noteflow.cmd, or update NoteFlow.
 
   Examples:
     noteflow add "Fix: CORS issue"
@@ -2480,6 +2555,10 @@ function cmdHelp(topic) {
     noteflow read "Project Alpha" --json     JSON with every section
 
   Duplicate section names: target one with a 1-based suffix, e.g. "Tasks#2".
+  Section names match exactly, then by substring, and finally by words ignoring
+  accents/case/filler ("Variables de entorno" finds "Variables Entorno"); a loose
+  hit is announced on stderr. Only 'read' and 'path' are that forgiving —
+  add/set/section rename/delete demand an exact-or-substring name.
 `,
     path: `
   noteflow path <title> [section]
@@ -2496,6 +2575,7 @@ function cmdHelp(topic) {
     noteflow path "Project Alpha" Tasks --json   { id, title, dir, section, file, isRawMode }
 
   Title can be partial; duplicate section names take a 1-based suffix ("Tasks#2").
+  Section names resolve like in 'read', including the loose word match.
 `,
     touch: `
   noteflow touch <title>
@@ -2506,6 +2586,10 @@ function cmdHelp(topic) {
 
   The note is re-read from disk first, so your manual edits are what gets synced.
   Files inside the note dir that are not note.md nor a listed section are removed.
+
+  The desktop app already watches the notes dir, so it shows an external edit on
+  its own; what 'touch' adds is the 'updated:' bump (the canonical sync timestamp)
+  and the push to the backend.
 
   Example:
     noteflow path "Project Alpha" Tasks      # -> /home/me/noteflow-notes/project-alpha-ab12/sec002.md
@@ -2528,10 +2612,17 @@ function cmdHelp(topic) {
     --dry-run            Show what would be written (note/section/bytes) without writing
     --json               Machine-readable result on stdout; info lines go to stderr
 
+  Section resolution: exact name first, then a single case-insensitive substring
+  ("Variables" hits an existing "Variables Entorno"), and "Name#2" picks among
+  same-named sections; ambiguity is an error, not a guess. With no match at all
+  the section is created with the name you typed.
+
   Windows: the noteflow.cmd shim truncates multi-line arguments (cmd.exe drops
   everything after the first newline). PowerShell automatically picks the
-  noteflow.ps1 shim, which passes them intact — but for non-trivial content
-  always prefer --file or --stdin.
+  noteflow.ps1 shim, which passes them intact, forwards piped stdin as UTF-8 and
+  prints accents correctly — but for non-trivial content still prefer --file or
+  --stdin. If a piped --stdin arrives empty, your installed noteflow.ps1 predates
+  that fix: use --file, or pipe into noteflow.cmd, or update NoteFlow.
 
   Examples:
     noteflow set "Project Alpha" Tasks --text "- [ ] deploy"
@@ -2546,7 +2637,8 @@ function cmdHelp(topic) {
 
   Manage a note's sections by name (no ids needed). Section names are NOT unique;
   disambiguate duplicates with a 1-based suffix, e.g. "Tasks#2". 'delete' refuses
-  to remove the last remaining section. Quote multi-word names.
+  to remove the last remaining section. Quote multi-word names. Being destructive,
+  'rename'/'delete' only accept exact or substring names — no loose matching.
 
   Examples:
     noteflow section add "Project Alpha" "Meeting Notes"
@@ -2961,10 +3053,11 @@ async function main() {
 if (require.main === module) {
   main().catch(e => { err(e.message); process.exit(1) })
 } else {
-  // Test-only surface: pure crypto + row-mapping functions, exported so the
-  // interop with the desktop app (dist-electron/cloudCrypto.js and
-  // cloudSyncLogic.js) can be verified. The CLI itself always runs as a script.
+  // Test-only surface: pure crypto + row-mapping functions (so the interop with
+  // the desktop app — dist-electron/cloudCrypto.js and cloudSyncLogic.js — can be
+  // verified) plus the pure name-matching helpers. The CLI always runs as a script.
   module.exports = {
+    sectionTokens, fuzzySectionMatches,
     toB64Url, fromB64Url, deriveKek, normalizeRecoveryCode, looksLikeRecoveryCode,
     derivePathKeyHmac, wrapKey, unwrapKey, encryptContent, decryptContent,
     generateDek, generateNoteKey,

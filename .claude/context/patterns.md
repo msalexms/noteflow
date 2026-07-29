@@ -439,7 +439,17 @@ Node.js standalone (sin deps de Electron) que opera directamente sobre los `.md`
 `monetization.md` § 4 "Cliente CLI (headless)"; con sesión Cloud activa, `push`/`pull`/`status` y el
 sync automático van a Cloud en vez de a GitHub), `migrate`, `self-update`.
 Todo se direcciona **por nombre** (título de nota + nombre de sección), nunca por id; los nombres de
-sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). Pensado para
+sección **no son únicos** → se desambiguan con un sufijo 1-based `#n` (p. ej. `Tasks#2`). La
+resolución de sección (`matchSectionOrNull`) es única para todos los comandos: exacto → subcadena →
+`#n`, y **falla ante ambigüedad en vez de adivinar** (`add` la usa igual que `set`, así un
+`--section` parcial escribe en la sección existente en lugar de duplicarla). ⚠️ En `cmdAdd` eso vale
+solo para el `--section` **explícito**: el default implícito `Note` se resuelve **exacto-o-crear**,
+porque por subcadena un `noteflow add "texto"` a la nota diaria acabaría en una sección ajena
+(`Meeting Notes`) o abortaría por ambigüedad sin escapatoria. Solo `read` y `path`
+—de lectura— activan un último fallback **tolerante** (`fuzzySectionMatches`: sin acentos ni
+mayúsculas, tokens y stopwords fuera, el candidato debe ser único), que avisa por **stderr** para no
+ensuciar el stdout verbatim; los que escriben o destruyen (`add`/`set`, `section rename`/`delete`)
+**no** lo usan. Pensado para
 agentes de IA: **`read`** imprime contenido raw apto para pipe (vs `get`, decorado para humanos) y
 **`set`** sobrescribe una sección (vs `add`, que solo añade al final). Como el CLI no tiene
 find-replace, para **ediciones parciales** existe la vía sin round-trip: **`path`** imprime la ruta
@@ -448,6 +458,19 @@ herramientas, y **`touch`** cierra el ciclo — relee la nota de disco (obligato
 reescribe cada `<secId>.md` desde `note.sections[].content`, así que una copia vieja pisaría la
 edición), bumpea `updated:` y hace `syncPushNoteFiles` de `note.md` + todas las secciones. Detalle
 completo en `cli/noteflow-cli/SKILL.md` (y skill `noteflow-cli`).
+
+**Shims de Windows (`cli/noteflow.cmd`, `cli/noteflow.ps1`).** PowerShell prefiere el `.ps1` sobre el
+`.cmd`, así que el `.ps1` carga con dos rarezas de PS 5.1: (1) en una **tubería** PowerShell se queda
+con stdin y node vería EOF → el shim lanza node vía `ProcessStartInfo` y le escribe `$input` como
+**bytes UTF-8** (`$input | & node` re-codifica y convierte los no-ASCII en `?`); redirige también
+stdout/stderr y reemite stdout por el pipeline de PS (con un handle heredado, `$x = … | noteflow …`
+y `> out.json` saldrían vacíos; el stderr de esa rama va a consola y no lo captura `2>&1`). (2) PS
+5.1 decodifica la salida del hijo con la **codepage OEM** (`Consideración` → `Consideraci├│n`) → fija
+`[Console]::OutputEncoding` a UTF-8 mientras dura la llamada y la restaura al salir. El `--json` ya
+era inmune (escapa a `\uXXXX`); esto arregla el texto plano de `read`/`get`/`path`.
+⚠️ `self-update` **solo** descarga `noteflow.js`, así que los shims viejos siguen instalados hasta
+actualizar la app → `resolveSetContent()` detecta el caso "stdin vacío en win32" y explica la salida
+(`--file`, `noteflow.cmd`, o actualizar).
 
 **Auto-instalación de la skill.** Para que un agente (Claude Code) descubra la CLI sin descargar nada,
 la app copia `cli/noteflow-cli/SKILL.md` a `~/.claude/skills/noteflow-cli/SKILL.md`. La carpeta

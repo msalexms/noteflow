@@ -1,7 +1,7 @@
 ---
 name: noteflow-cli
 description: Referencia completa del CLI de NoteFlow. Úsala cuando necesites interactuar con las notas del usuario desde la terminal — crear, leer, editar, organizar notas en grupos y carpetas, sincronizar con GitHub o NoteFlow Cloud, o integrar NoteFlow en scripts y flujos automatizados.
-version: 1.11.0
+version: 1.12.0
 ---
 
 # NoteFlow CLI — Referencia completa
@@ -19,11 +19,23 @@ curl -fsSL https://raw.githubusercontent.com/yagoid/noteflow/main/cli/install-cl
 Se instala automáticamente con el `.deb` o `.exe` de NoteFlow. No requiere pasos adicionales.
 
 > **Windows — shims:** en PATH van dos wrappers: `noteflow.cmd` (cmd.exe) y
-> `noteflow.ps1` (PowerShell lo prefiere sobre el `.cmd`; pasa argumentos
-> multilínea y Unicode intactos, cosa que el `.cmd` no — ver la nota en `set`).
+> `noteflow.ps1` (PowerShell lo prefiere sobre el `.cmd`). El `.ps1` pasa
+> argumentos multilínea y Unicode intactos (el `.cmd` no — ver la nota en `set`)
+> y además, dentro de una tubería, **reenvía stdin al CLI como bytes UTF-8** y
+> fija `OutputEncoding` a UTF-8 mientras dura la llamada (si no, PS 5.1 decodifica
+> la salida con la codepage OEM: `Consideración` → `Consideraci├│n`). Es decir,
+> `"texto" | noteflow set … --stdin` y `$x = noteflow read …` funcionan con
+> acentos desde PowerShell.
 > Si la ExecutionPolicy de PowerShell es `Restricted`, el `.ps1` falla con
 > "running scripts is disabled": ejecuta `noteflow.cmd` explícitamente o ajusta
 > la política (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).
+>
+> Detalles del `.ps1` en tubería: la salida se reemite desde PowerShell, así que
+> se puede capturar (`$x = "t" | noteflow … --json`) y redirigir (`> out.json`);
+> **stderr** de esa rama va directo a la consola y **no** se captura con `2>&1`.
+> Si un `--stdin` por tubería llega vacío, el shim instalado es anterior a este
+> arreglo (`self-update` solo actualiza `noteflow.js`, no los shims): usa
+> `--file`, canaliza a `noteflow.cmd`, o actualiza NoteFlow.
 
 ### Requisito
 Node.js ≥ 18. Sin dependencias npm.
@@ -120,6 +132,16 @@ existir**: si no hay match el comando **falla con exit 1** salvo que pases
 | `--json` | Resultado JSON en stdout (líneas informativas → stderr) |
 
 **Comportamiento de append:** el texto se añade al final del contenido existente de la sección, separado por `\n`.
+
+**`--section` explícito resuelve igual que en `set`:** nombre exacto → subcadena →
+sufijo `#n` para duplicados; ante ambigüedad **falla** en vez de adivinar. Así
+`--section "Variables"` escribe en la sección existente `Variables Entorno` en
+lugar de crear una duplicada. Solo crea sección nueva si no hay ningún match.
+
+**Sin `--section`, el default `Note` se resuelve exacto-o-crear** (nunca por
+subcadena): un `noteflow add "texto"` a la nota diaria no puede acabar en una
+sección ajena que contenga la palabra (p. ej. `Meeting Notes`) ni fallar por
+ambigüedad. Si quieres el matching parcial, pídelo con `--section`.
 
 **JSON de `add`/`set`:** `{ "note": "<título>", "dirname": "…", "section": "…",
 "createdNote": bool, "createdSection": bool, "bytesWritten": n }` (con `--dry-run`
@@ -226,6 +248,14 @@ Es la forma recomendada de **leer** una sección concreta.
 - El título puede ser parcial. Si hay varios matches, error pidiendo precisión.
 - **Nombres de sección duplicados:** apunta a uno con un sufijo 1-based, p. ej.
   `"Tasks#2"`. Si hay ambigüedad sin sufijo, el error te dice exactamente qué escribir.
+- **Matching tolerante (solo `read` y `path`):** tras probar nombre exacto y
+  subcadena, se compara por palabras ignorando mayúsculas, acentos y palabras
+  vacías (`de`, `la`, `the`…), así `"Variables de entorno"` encuentra
+  `Variables Entorno`. Solo vale si el candidato es **único**; si acierta por esta
+  vía lo avisa por **stderr** (`Note: matched section "…"`), nunca por stdout —
+  la salida sigue siendo verbatim y apta para pipe. `add`/`set` y
+  `section rename`/`delete` **no** lo usan (escribirían o destruirían la sección
+  equivocada).
 
 ```bash
 noteflow read "Proyecto Alpha" Tasks
@@ -267,10 +297,13 @@ noteflow set "Proyecto Alpha" Notas --file ./notas.txt
 > (cmd.exe) **trunca los argumentos multilínea** en el primer salto de línea y
 > descarta el resto de la línea de comandos (se pierden hasta los flags que
 > vengan después). Desde PowerShell se usa automáticamente el shim
-> `noteflow.ps1`, que pasa argv multilínea y Unicode intactos. Aun así, la vía
-> más fiable para **varias líneas** o caracteres conflictivos es **`--file <ruta>`**
-> (o `--stdin`; el CLI ya limpia el BOM que PowerShell añade). Regla práctica
-> para agentes: **contenido no trivial → `--file` o `--stdin`.**
+> `noteflow.ps1`, que pasa argv multilínea y Unicode intactos y **sí reenvía la
+> tubería a stdin** (en UTF-8). Aun así, la vía más fiable para **varias líneas**
+> o caracteres conflictivos es **`--file <ruta>`** (o `--stdin`; el CLI ya limpia
+> el BOM que PowerShell añade). Regla práctica para agentes: **contenido no
+> trivial → `--file` o `--stdin`.** Si un `--stdin` por tubería llega vacío en
+> Windows, el CLI falla con un error que lo explica: el `noteflow.ps1` instalado
+> es anterior al arreglo (ver la nota de shims en *Instalación*).
 
 **Editar una parte concreta de una sección grande:** el CLI edita a nivel de
 sección (no hay find-replace). Con `set` el patrón es leer → modificar → sobrescribir:
@@ -308,7 +341,8 @@ ejecuta **`noteflow touch <título>`** (bumpea `updated:` y sincroniza).
 
 - En `--json`, `file` es siempre la ruta **absoluta** del `.md`.
 - Resolución idéntica a `read`: título parcial, sufijo `#n` para nombres de sección
-  duplicados, error pidiendo precisión si hay ambigüedad. Notas cifradas se ignoran.
+  duplicados, matching tolerante como último recurso (aviso por stderr), error
+  pidiendo precisión si hay ambigüedad. Notas cifradas se ignoran.
 
 ```bash
 noteflow path "Proyecto Alpha" Tasks
@@ -331,6 +365,10 @@ sección al backend de sync activo (Cloud si hay sesión, si no GitHub). Es el
 **paso obligatorio después** de editar un `.md` con `noteflow path`: sin él, el
 cambio queda solo en local y el sync no se entera.
 
+- **La app de escritorio sí detecta las ediciones externas por su cuenta** (vigila
+  el dir de notas de forma recursiva y refresca la nota abierta). Lo que aporta
+  `touch` es otra cosa: bumpear `updated:` (el timestamp canónico de sync) y
+  empujar los ficheros al backend.
 - Sin sync configurado no falla: bumpea `updated:` y no imprime línea de sync.
 - Como cualquier comando que escribe, reescribe la carpeta de la nota: los `.md`
   que no sean `note.md` ni una sección listada en el índice **se eliminan**. No
@@ -639,7 +677,7 @@ Si ya está en la última versión: `Already up to date`.
 
 ```bash
 noteflow version     # o: noteflow --version / -v
-# noteflow CLI v2.1.0
+# noteflow CLI v2.2.0
 ```
 
 ---
@@ -747,7 +785,9 @@ nunca se ignoran en silencio.
 
 **JSON a prueba de codepage:** toda salida `--json` escapa los caracteres
 no-ASCII como `\uXXXX`, así el JSON sobrevive intacto a cualquier codepage de
-consola (PowerShell 5.1 incluido).
+consola (PowerShell 5.1 incluido). La salida de texto plano (`read`, `get`,
+`path`) va en UTF-8 crudo; en PowerShell el shim `noteflow.ps1` pone la consola
+en UTF-8 durante la llamada para que no se convierta en mojibake.
 
 ---
 
@@ -823,7 +863,8 @@ noteflow touch "título"
 ```
 
 - `touch` es **obligatorio**: es quien bumpea `updated:` en `note.md` y hace el push
-  (editar el `.md` a pelo no sincroniza nada por sí solo).
+  (editar el `.md` a pelo lo ve la app —vigila el dir de notas—, pero no sincroniza
+  nada por sí solo).
 - Usa `read`/`set` cuando reescribas la sección entera, o cuando no tengas acceso al
   sistema de ficheros (p. ej. la nota vive en otra máquina).
 
