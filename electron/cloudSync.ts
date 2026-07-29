@@ -32,6 +32,7 @@ import path from 'path'
 import * as account from './account'
 import * as cloudKeys from './cloudKeys'
 import * as cloudRealtime from './cloudRealtime'
+import * as githubSync from './githubSync'
 import { supabaseRest } from './cloudKeys'
 import { isCloudConfigured } from './cloudConfig'
 import { NOTE_MD, listNoteDirs } from './noteFormat'
@@ -269,6 +270,12 @@ export function enableCloudSync(): { ok: boolean; error?: string } {
   if (!isCloudConfigured()) return { ok: false, error: 'NoteFlow Cloud is not available in this build.' }
   if (!account.getAccountStatus().signedIn) return { ok: false, error: NOT_SIGNED_IN_ERROR }
   patchSettings({ enabled: true })
+  // GitHub Sync is now paused (syncProvider gives Cloud priority) and its
+  // `lastSync` freezes while notes keep arriving here, so its pull's
+  // local-deletion rule ("absent from remote + older than lastSync ⇒ deleted
+  // remotely") stops being sound. Flag it so the next GitHub pull reconciles
+  // instead of deleting. No-op if GitHub isn't connected.
+  githubSync.markNeedsFullReconcile()
   syncError = undefined
   setInitialPullStatus('pending')
   statusListener?.()
@@ -285,6 +292,14 @@ export function disableCloudSync(): { ok: boolean } {
   pushTimers.forEach((t) => clearTimeout(t))
   pushTimers.clear()
   patchSettings({ enabled: false })
+  // GitHub Sync is about to resume with a `lastSync` it can't trust: while Cloud
+  // was on it received no pushes, and notes that arrived here from another device
+  // keep their ORIGINAL `updated` (older than lastSync), so GitHub's catch-up
+  // never uploaded them. Without this, its next pull sees them as "absent from
+  // remote + older than lastSync" and deletes live notes. Marking on the way OUT
+  // also covers users whose Cloud was enabled by an earlier build (no flag was
+  // ever set for them) — there is no startup backfill.
+  githubSync.markNeedsFullReconcile()
   syncError = undefined
   setInitialPullStatus('pending')
   statusListener?.()

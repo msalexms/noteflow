@@ -9,6 +9,10 @@ excluyentes**: esta función es la única fuente de verdad (el tick del autosync
 si Cloud está habilitado), y la página Settings → Sync lo comunica visualmente (selector de dos
 tarjetas con badges de estado + aviso "paused" en el panel de GitHub con Cloud activo — tramo 4,
 ver `monetization.md` § 4 "Settings UI").
+⚠️ Exclusión mutua = **enrutado**, no "GitHub no escribe nunca": el pull manual de GitHub
+(`sync:pull`, botón de Settings → Sync → GitHub) sigue disponible con Cloud activo y su catch-up
+(`flushPendingLocalChanges`) empuja ficheros al repo **sin pasar por el router** — es lo que evita
+que el espejo pausado se quede obsoleto (ver la regla de borrado más abajo).
 
 **Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
 que conserva `lastSync`/`pullCursor`/journal) → se **libera la exclusión mutua** y GitHub Sync
@@ -81,6 +85,40 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   remotos con `deleteDir` pendiente y ficheros con `delete` pendiente (no resucitar borrados que
   aún no aterrizaron), y la regla de borrado local se salta cualquier dir con `upsert` pendiente
   (su push no aterrizó; borrarlo sería pérdida de datos).
+- **⚠️ Con Cloud habilitado, GitHub NO borra nada en local (espejo de solo-escritura).** La regla de
+  borrado del pull asume que `lastSync` significa "el remoto conocía TODO lo que había en disco en
+  ese instante", y esa premisa se rompe en cuanto GitHub queda **pausado por NoteFlow Cloud**: no
+  recibe pushes y su `lastSync` deja de describir lo que el repo contiene, así que las notas que
+  llegan por Cloud están ausentes del repo **y** con `updated <= lastSync` → la regla las borraba
+  (bug de pérdida de datos real: un usuario perdió 42 notas al pulsar Sincronizar en Settings → Sync
+  → GitHub). La decisión vive en `shouldRunDeletionRule(lastSyncTime, needsFullReconcile,
+  cloudEnabled, remoteIsV2)` (`syncState.ts`, puro y testeado): solo se borra con `lastSync` válido
+  (no nulo ni NaN), remoto v2, **Cloud deshabilitado** y sin reconcile pendiente. `pullNotes` lee
+  `cloudEnabled` de `settings.json` **plano y fail-closed** (`isCloudSyncEnabledFailClosed()`: si el
+  fichero no se puede leer o parsear responde "Cloud activo" ⇒ no borrar; solo la ausencia de sección
+  `cloudSync` — el usuario solo-GitHub — responde false), y lo más tarde posible dentro del pull.
+  No usa `readSettings()` porque ese degrada cualquier fallo a `{}` = fail-**open** en un guard
+  antipérdida. Importar `cloudSync.ts` sería un ciclo: ahora es él quien importa `githubSync.ts`.
+- **`needsFullReconcile` (flag one-shot en `settings.githubSync`, ausente = false):** gobierna el
+  **catch-up completo de subida**. Lo pone `markNeedsFullReconcile()` (setter en `githubSync.ts`:
+  escribe la variable en memoria **y** `settings.json` a la vez, porque cada push hace
+  `settings.githubSync = syncSettings` y machacaría un write externo; no-op sin repo conectado), y lo
+  llaman **`enableCloudSync()` Y `disableCloudSync()`** — marcar también a la **salida** es lo que
+  protege a) a los usuarios que ya tenían Cloud activo de builds anteriores (nunca recibieron el flag
+  al entrar y no hay backfill en el arranque) y b) a las notas que Cloud trajo de otro dispositivo con
+  un `updated` viejo, que el flush normal nunca sube. Cerrar sesión pasa por `disableCloudSync()`, así
+  que también marca. El **primer pull que termine OK** lo consume y corre `flushPendingLocalChanges`
+  con `previousLastSync = undefined`, que re-encola todas las carpetas de nota **cuyo `updated` sea
+  parseable** (las que no lo sea se saltan, igual que en el flush normal). Solo se limpia en el camino
+  de éxito, nunca en el `catch`. Mientras Cloud siga habilitado, los pulls posteriores corren el flush
+  **normal** (desde `previousLastSync`): mantiene el repo razonablemente fresco sin re-subir el corpus
+  entero, pero ⚠️ **filtra por el `updated` del `note.md`, no por el momento de llegada**, así que una
+  nota que Cloud traiga con `updated` anterior a `previousLastSync` NO se sube — de ahí que el flag se
+  vuelva a poner al apagar Cloud, que es cuando el borrado se rehabilita.
+  ⚠️ Al tocar cualquier `syncSettings = { ...s, … }` usar como base `syncSettings ?? s` (patrón de
+  `persistMigratedAt`): las closures del push debounced viven minutos (debounce + cola de mutaciones
+  serializada) y escribir sobre el snapshot viejo borraría un `needsFullReconcile` puesto entretanto,
+  re-armando la regla de borrado.
 - **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
   **note-order.json**, templates.json, ui-settings.json (los dos en negrita se pusheaban pero NO
   se pulleaban — bug arreglado con el cambio de formato). `templates.json` (plantillas) y
@@ -88,6 +126,12 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   patrón simple que note-order: push debounced + pull. ⚠️ La lista tiene un espejo en
   `CLOUD_METADATA_FILENAMES` (`cloudSyncLogic.ts`), en `RESERVED_ROOT_NAMES` (`main.ts`) y en
   `METADATA_FILES` del CLI (`cli/noteflow.js`) — mantener las cuatro en sync al añadir un JSON raíz.
+  📌 **Pendiente (no implementado):** el pull de metadatos **no arbitra por timestamp** — si el
+  contenido difiere gana el remoto. Lo único que hoy evita que un repo con metadatos obsoletos pise
+  `groups.json`/`folders.json`/`note-order.json` locales es la caché de SHAs; si esa caché se vacía
+  (`sync-state.json` perdido o corrupto, `disconnectGitHub`, `pruneShas`), el primer pull tras una
+  pausa larga de Cloud sobrescribe los metadatos locales con los viejos. Las notas sobreviven (la
+  regla de borrado ya no corre en ese escenario), pero pierden carpeta/grupo/orden.
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
   journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el

@@ -12,6 +12,7 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
   shouldDeletionRuleSkipDir,
+  shouldRunDeletionRule,
   getCachedSha,
   setCachedSha,
   pruneShas,
@@ -205,6 +206,45 @@ describe('pull decisions', () => {
     expect(shouldDeletionRuleSkipDir(state, 'groups.json')).toBe(false)
     // Prefix-sibling dir must not be protected by 'a/...' upserts
     expect(shouldDeletionRuleSkipDir(state, 'ab')).toBe(false)
+  })
+})
+
+describe('shouldRunDeletionRule', () => {
+  const LAST_SYNC = Date.parse('2026-07-06T09:00:00.000Z')
+
+  it('runs the rule in the normal case: lastSync known, remote on v2, Cloud off, no reconcile pending', () => {
+    expect(shouldRunDeletionRule(LAST_SYNC, false, false, true)).toBe(true)
+  })
+
+  it('never runs while NoteFlow Cloud is enabled (GitHub is a paused, write-only mirror)', () => {
+    // The data-loss case: lastSync is old and the remote is a healthy v2 repo,
+    // but it never received the notes that arrived through Cloud. Holds with the
+    // one-shot flag already consumed — that is the second manual pull.
+    expect(shouldRunDeletionRule(LAST_SYNC, false, true, true)).toBe(false)
+  })
+
+  it('never runs right after Cloud is switched off: disableCloudSync re-arms the reconcile flag', () => {
+    // The Cloud→off transition is the other loss path: GitHub resumes with a
+    // lastSync it can't trust (notes that arrived via Cloud with an OLDER
+    // `updated` were never uploaded). disableCloudSync() marks the flag, so this
+    // pull — Cloud already false, lastSync valid, remote a healthy v2 — must not
+    // delete. (The marking itself lives in cloudSync.enableCloudSync/
+    // disableCloudSync and needs Electron, so only the decision is unit-tested.)
+    expect(shouldRunDeletionRule(LAST_SYNC, true, false, true)).toBe(false)
+    expect(shouldRunDeletionRule(null, true, true, true)).toBe(false)
+    expect(shouldRunDeletionRule(LAST_SYNC, true, true, false)).toBe(false)
+  })
+
+  it('never runs without a lastSync (nothing can be assumed deleted remotely)', () => {
+    expect(shouldRunDeletionRule(null, false, false, true)).toBe(false)
+  })
+
+  it('never runs with an unparseable lastSync (NaN would delete everything missing)', () => {
+    expect(shouldRunDeletionRule(Number.NaN, false, false, true)).toBe(false)
+  })
+
+  it('never runs while the remote is not fully on format v2 (additive-only pull)', () => {
+    expect(shouldRunDeletionRule(LAST_SYNC, false, false, false)).toBe(false)
   })
 })
 

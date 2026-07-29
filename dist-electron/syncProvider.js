@@ -3,11 +3,16 @@
 // deletes and pulls to the active sync backend, extracted from what main.ts
 // historically consumed from githubSync.ts.
 //
-// GitHub Sync and NoteFlow Cloud are MUTUALLY EXCLUSIVE: when cloudSync is
-// enabled it takes priority and GitHub stops receiving writes (its connection
-// settings are untouched). The Settings UI enforcement of "pick one" arrives in
-// phase 4.2 stage 4 — until then getActiveSyncProvider() is the single source
-// of truth for which backend is live.
+// GitHub Sync and NoteFlow Cloud are MUTUALLY EXCLUSIVE *as routing targets*:
+// when cloudSync is enabled it takes priority and no write ROUTED THROUGH HERE
+// reaches GitHub (its connection settings are untouched). That is not the same
+// as "GitHub never writes": a manual GitHub pull (`sync:pull`, Settings → Sync →
+// GitHub) still runs inside githubSync and its catch-up (flushPendingLocalChanges)
+// pushes note files to the repo without passing through this router — by design,
+// it is what keeps the paused GitHub mirror from going stale (see sync.md).
+// The Settings UI enforcement of "pick one" arrives in phase 4.2 stage 4 — until
+// then getActiveSyncProvider() is the single source of truth for which backend
+// receives routed writes.
 //
 // Both adapters are THIN: they delegate 1:1 to the module singletons without
 // changing behavior. Backend-specific surface (Device Flow, remote format

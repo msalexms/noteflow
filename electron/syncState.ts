@@ -195,6 +195,37 @@ export function shouldDeletionRuleSkipDir(state: SyncState, dir: string): boolea
   return false
 }
 
+/**
+ * Should the pull run its local-deletion rule at all ("dir absent from remote +
+ * older than lastSync ⇒ it was deleted remotely")? The rule is only sound while
+ * `lastSync` really means "the remote knew everything on disk at that instant":
+ * - `lastSyncTime === null`: never synced — nothing can be assumed deleted.
+ * - `!remoteIsV2`: format v1↔v2 transition guard, the pull is additive only.
+ * - `cloudEnabled`: NoteFlow Cloud is the active provider, so GitHub Sync is
+ *   PAUSED (no pushes are routed to it) and its `lastSync` no longer tracks what
+ *   the repo actually holds — notes arriving via Cloud never reach it while
+ *   looking "older than lastSync". While paused GitHub is a write-only mirror:
+ *   it may never delete anything locally. This is the bug that made a user lose
+ *   42 notes on a manual pull from Settings → Sync → GitHub.
+ * - `needsFullReconcile`: one-shot flag set when Cloud takes over, consumed by
+ *   the first successful GitHub pull. It governs the FULL upload catch-up (and
+ *   also blocks deletion, for the window where it outlives `cloudEnabled` — e.g.
+ *   Cloud disabled again before that first pull, with `lastSync` still stale).
+ */
+export function shouldRunDeletionRule(
+  lastSyncTime: number | null,
+  needsFullReconcile: boolean,
+  cloudEnabled: boolean,
+  remoteIsV2: boolean,
+): boolean {
+  if (needsFullReconcile || cloudEnabled) return false
+  // An unparseable lastSync (NaN) must not authorize deletions either: every
+  // `updated > lastSync` comparison would be false and the rule would delete
+  // every dir missing from the remote.
+  if (lastSyncTime === null || !Number.isFinite(lastSyncTime)) return false
+  return remoteIsV2
+}
+
 // ── Reconciled-SHA cache ──────────────────────────────────────────────────────
 
 export function getCachedSha(state: SyncState, relPath: string): string | undefined {

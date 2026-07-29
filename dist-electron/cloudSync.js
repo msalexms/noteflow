@@ -84,6 +84,7 @@ const path_1 = __importDefault(require("path"));
 const account = __importStar(require("./account"));
 const cloudKeys = __importStar(require("./cloudKeys"));
 const cloudRealtime = __importStar(require("./cloudRealtime"));
+const githubSync = __importStar(require("./githubSync"));
 const cloudKeys_1 = require("./cloudKeys");
 const cloudConfig_1 = require("./cloudConfig");
 const noteFormat_1 = require("./noteFormat");
@@ -230,6 +231,12 @@ function enableCloudSync() {
     if (!account.getAccountStatus().signedIn)
         return { ok: false, error: NOT_SIGNED_IN_ERROR };
     patchSettings({ enabled: true });
+    // GitHub Sync is now paused (syncProvider gives Cloud priority) and its
+    // `lastSync` freezes while notes keep arriving here, so its pull's
+    // local-deletion rule ("absent from remote + older than lastSync ⇒ deleted
+    // remotely") stops being sound. Flag it so the next GitHub pull reconciles
+    // instead of deleting. No-op if GitHub isn't connected.
+    githubSync.markNeedsFullReconcile();
     syncError = undefined;
     setInitialPullStatus('pending');
     statusListener?.();
@@ -245,6 +252,14 @@ function disableCloudSync() {
     pushTimers.forEach((t) => clearTimeout(t));
     pushTimers.clear();
     patchSettings({ enabled: false });
+    // GitHub Sync is about to resume with a `lastSync` it can't trust: while Cloud
+    // was on it received no pushes, and notes that arrived here from another device
+    // keep their ORIGINAL `updated` (older than lastSync), so GitHub's catch-up
+    // never uploaded them. Without this, its next pull sees them as "absent from
+    // remote + older than lastSync" and deletes live notes. Marking on the way OUT
+    // also covers users whose Cloud was enabled by an earlier build (no flag was
+    // ever set for them) — there is no startup backfill.
+    githubSync.markNeedsFullReconcile();
     syncError = undefined;
     setInitialPullStatus('pending');
     statusListener?.();

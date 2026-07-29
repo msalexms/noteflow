@@ -23,6 +23,7 @@ import {
   shouldPullSkipDir,
   shouldPullSkipFile,
   shouldDeletionRuleSkipDir,
+  shouldRunDeletionRule,
   getCachedSha,
   setCachedSha,
   pruneShas,
@@ -63,6 +64,13 @@ export interface GitHubSyncSettings {
   repo?: string
   lastSync?: string
   remoteFormatMigratedAt?: string  // set once the remote repo is confirmed on format v2
+  /**
+   * One-shot: set when NoteFlow Cloud takes over (GitHub Sync pauses and its
+   * `lastSync` freezes), consumed by the first successful pull — which skips the
+   * local-deletion rule and re-uploads every note dir. Absent = false, so
+   * existing settings.json files keep behaving exactly as before.
+   */
+  needsFullReconcile?: boolean
 }
 
 export type InitialPullStatus = 'pending' | 'ok' | 'failed'
@@ -93,6 +101,34 @@ function readSettings(): Record<string, unknown> {
 
 function writeSettings(data: Record<string, unknown>): void {
   fs.writeFileSync(getSettingsPath(), JSON.stringify(data), 'utf-8')
+}
+
+/**
+ * Is NoteFlow Cloud the active sync provider? Read FLAT from settings.json —
+ * importing cloudSync.ts here would be a cycle (it imports this module).
+ *
+ * Deliberately NOT using readSettings(): that one swallows every failure into
+ * `{}`, which for this guard means "Cloud is off" → the pull would delete local
+ * notes because settings.json happened to be unreadable. This one is
+ * **fail-closed**: an unreadable/corrupt file answers "assume Cloud is on" (no
+ * deletions). A missing `cloudSync` section — the normal GitHub-only user — is
+ * NOT a failure and answers false, so the deletion rule keeps working for them.
+ */
+function isCloudSyncEnabledFailClosed(): boolean {
+  let raw: string
+  try {
+    raw = fs.readFileSync(getSettingsPath(), 'utf-8')
+  } catch {
+    // Missing file: GitHub can't be connected either (the token lives there), so
+    // pullNotes returns early — answering true here costs nothing.
+    return true
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return (parsed.cloudSync as { enabled?: boolean } | undefined)?.enabled === true
+  } catch {
+    return true // corrupt JSON — can't prove Cloud is off, so don't delete
+  }
 }
 
 // ── Token encryption ──────────────────────────────────────────────────────────
@@ -546,6 +582,29 @@ export function getSyncStatus(): SyncStatus {
   }
 }
 
+/**
+ * Marks GitHub Sync as needing a full reconcile on its next pull. Called when
+ * NoteFlow Cloud takes over (`enableCloudSync`): from that moment GitHub is
+ * paused and its `lastSync` stays frozen while notes keep being created/pulled
+ * by Cloud, so `lastSync` no longer means "the remote knew everything on disk"
+ * and the pull's local-deletion rule would wipe live notes. The next successful
+ * pull skips that rule, re-uploads every note dir and clears the flag.
+ *
+ * Writes BOTH the in-memory cache and settings.json in one go: every push does
+ * `settings.githubSync = syncSettings`, so a plain read/write from outside this
+ * module would be clobbered by the next push.
+ * No-op when there is no connected repo (nothing to reconcile).
+ */
+export function markNeedsFullReconcile(): void {
+  const s = syncSettings ?? loadSyncSettings()
+  if (!s.encryptedToken || !s.owner || !s.repo) return
+  if (s.needsFullReconcile) return
+  syncSettings = { ...s, needsFullReconcile: true }
+  const settings = readSettings()
+  settings.githubSync = syncSettings
+  writeSettings(settings)
+}
+
 export function setInitialPullStatus(status: InitialPullStatus): void {
   if (initialPullStatus === status) return
   initialPullStatus = status
@@ -737,6 +796,9 @@ export async function pullNotes(notesDir: string): Promise<{
   const updatedFiles: string[] = []
   let hadMetadataChanges = false
   const previousLastSync = s.lastSync
+  // Read the one-shot reconcile flag BEFORE the pull touches the settings: this
+  // pull must not trust `lastSync` (GitHub was paused while Cloud was on).
+  const needsFullReconcile = s.needsFullReconcile === true
   const state = getState()
   let stateChanged = false
 
@@ -818,8 +880,15 @@ export async function pullNotes(notesDir: string): Promise<{
     // older than the last sync — meaning it was known to the remote at some
     // point and was since deleted. Dirs newer than lastSync were created
     // locally after the last sync and haven't been pushed yet — keep them.
+    // The rule is skipped entirely while the remote is pre-v2, a full reconcile
+    // is pending, or NoteFlow Cloud is the active provider — see
+    // shouldRunDeletionRule in syncState.ts.
+    // `cloudEnabled` is read fail-closed and as late as possible, so Cloud being
+    // switched on mid-pull still disarms the rule.
+    const cloudEnabled = isCloudSyncEnabledFailClosed()
     const lastSyncTime = s.lastSync ? new Date(s.lastSync).getTime() : null
-    if (lastSyncTime !== null && remoteIsV2) {
+    const runDeletionRule = shouldRunDeletionRule(lastSyncTime, needsFullReconcile, cloudEnabled, remoteIsV2)
+    if (runDeletionRule && lastSyncTime !== null) { // null already excluded above; repeated for narrowing
       for (const dir of listNoteDirs(notesDir)) {
         if (remoteNoteDirs.has(dir)) continue
         // Journal guard: a pending upsert under this dir means its push never
@@ -868,15 +937,33 @@ export async function pullNotes(notesDir: string): Promise<{
     // Keep the SHA cache bounded: drop entries for blobs gone from the tree.
     if (pruneShas(state, new Set(blobs.map((b) => b.path)))) stateChanged = true
 
-    syncSettings = { ...s, lastSync: new Date().toISOString() }
+    // Rebase on the CURRENT in-memory settings, not on the snapshot taken before
+    // the network round-trips: anything written meanwhile (remoteFormatMigratedAt,
+    // markNeedsFullReconcile) must not be clobbered — same pattern as
+    // persistMigratedAt. The one-shot reconcile flag is consumed on the success
+    // path ONLY (a failed pull must keep it, the deletion rule is still unsafe),
+    // and only if THIS pull honored it: set mid-pull ⇒ it survives to the next.
+    const latest = syncSettings ?? s
+    syncSettings = {
+      ...latest,
+      lastSync: new Date().toISOString(),
+      needsFullReconcile: needsFullReconcile ? false : latest.needsFullReconcile === true,
+    }
     const settings = readSettings()
     settings.githubSync = syncSettings
     writeSettings(settings)
     syncError = undefined
     const wasNotOk = initialPullStatus !== 'ok'
-    if (wasNotOk) {
-      setInitialPullStatus('ok')
-      flushPendingLocalChanges(notesDir, previousLastSync)
+    if (wasNotOk) setInitialPullStatus('ok')
+    // Upload catch-up, in a single call whichever conditions apply:
+    // - full reconcile (first pull after Cloud took over): re-queues EVERY note
+    //   dir (previousLastSync undefined) to put the stale repo back up to date.
+    // - Cloud still enabled: GitHub gets no pushes while paused, so each pull
+    //   uploads what landed via Cloud since the previous lastSync — that keeps
+    //   lastSync trustworthy again for when Cloud is switched off.
+    // - gate opening (pending/failed → ok): the historical case.
+    if (wasNotOk || needsFullReconcile || cloudEnabled) {
+      flushPendingLocalChanges(notesDir, needsFullReconcile ? undefined : previousLastSync)
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1060,7 +1147,13 @@ function schedulePushUnguarded(relPath: string, content: string, onStart?: () =>
       const token = decryptToken(s.encryptedToken!)
       await upsertRemoteFile(token, s.owner!, s.repo!, relPath, content)
       if (journalComplete(getState(), relPath, 'upsert')) persistState()
-      syncSettings = { ...s, lastSync: new Date().toISOString() }
+      // Rebase on the CURRENT settings, never on the `s` captured when the timer
+      // was armed: this closure can outlive it by minutes (5s debounce + the
+      // serialized mutation queue), and spreading the stale snapshot would drop
+      // whatever was written meanwhile — e.g. needsFullReconcile, silently
+      // re-arming the deletion rule. Same pattern as persistMigratedAt.
+      const latest = syncSettings ?? s
+      syncSettings = { ...latest, lastSync: new Date().toISOString() }
       const settings = readSettings()
       settings.githubSync = syncSettings
       writeSettings(settings)
