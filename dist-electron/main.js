@@ -1762,14 +1762,14 @@ electron_1.ipcMain.handle('account:open-checkout', (_event, product) => {
         ? cloudConfig_1.LEMONSQUEEZY_CHECKOUT_URLS[product]
         : '';
     if (!base)
-        return { ok: false, error: 'Checkout is not available yet.' };
+        return { ok: false, error: 'Checkout is not available yet.', errorCode: 'checkoutUnavailable' };
     const userId = account.getUserId();
     if (!userId)
-        return { ok: false, error: 'Sign in to your NoteFlow account first.' };
+        return { ok: false, error: 'Sign in to your NoteFlow account first.', errorCode: 'notSignedIn' };
     const sep = base.includes('?') ? '&' : '?';
     const url = parseHttpsUrl(`${base}${sep}checkout%5Bcustom%5D%5Buser_id%5D=${encodeURIComponent(userId)}`);
     if (!url)
-        return { ok: false, error: 'Invalid checkout URL.' };
+        return { ok: false, error: 'Invalid checkout URL.', errorCode: 'checkoutInvalidUrl' };
     electron_1.shell.openExternal(url.toString()).catch((err) => {
         console.error('Failed to open checkout URL:', err);
     });

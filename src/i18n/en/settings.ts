@@ -251,6 +251,28 @@ export const settings = {
     couldNotSendCode: 'Could not send the sign-in code.',
     couldNotVerify: 'Could not verify the code.',
     couldNotRefresh: 'Could not refresh subscription status.',
+    // One entry per AccountErrorCode (src/types/index.ts, mirrored in
+    // electron/account.ts). The main process only sends the code; the copy is
+    // chosen here so the message follows the app language.
+    errors: {
+      notConfigured: "NoteFlow account services aren't available in this build yet.",
+      invalidEmail: 'That email address does not look valid. Check it and try again.',
+      emptyCode: 'Enter the 6-digit code we emailed you.',
+      invalidCode: "That code doesn't match, or it has expired. Check your email or request a new one.",
+      rateLimited: 'Too many attempts. Wait a moment before trying again.',
+      network: 'Could not reach the NoteFlow account service. Check your connection and try again.',
+      unexpectedResponse: 'The account service returned an unexpected response. Please try again.',
+      sendFailed: 'Could not send the sign-in code. Please try again.',
+      verifyFailed: 'Could not verify the code. Please try again.',
+      notSignedIn: 'Sign in to your NoteFlow account first.',
+      refreshFailed: 'Could not load your subscription status. Please try again.',
+      checkoutUnavailable: "This plan isn't available for purchase yet.",
+      checkoutInvalidUrl: 'The checkout link is not valid in this build.',
+    },
+    // "Resend code" control under the code input (step 2 of sign-in).
+    resendCode: 'Resend code',
+    resendCodeIn: 'Resend in {seconds}s',
+    codeResent: 'New code sent — check your inbox.',
     active: 'Active',
     lastChecked: 'Last checked: {time}',
     // Plans block (signed in, entitlements missing). Price figures are NOT in

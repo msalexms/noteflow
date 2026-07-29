@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
+// Type-only import (erased at compile time — the preload runs sandboxed, with
+// no Node/module loading beyond electron itself).
+import type { AccountErrorCode } from './account'
 
 export type NoteDirRecord = {
   dir: string
@@ -211,17 +214,20 @@ const api = {
     cloudCheckoutConfigured: boolean
     bundleCheckoutConfigured: boolean
   }> => ipcRenderer.invoke('account:get-status'),
-  accountRequestOtp: (email: string): Promise<{ ok: boolean; error?: string }> =>
+  // Failures carry a machine-readable `errorCode` (see AccountErrorCode in
+  // electron/account.ts) so the renderer can localize them; `error` is the
+  // English fallback.
+  accountRequestOtp: (email: string): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:request-otp', email),
-  accountVerifyOtp: (email: string, code: string): Promise<{ ok: boolean; error?: string }> =>
+  accountVerifyOtp: (email: string, code: string): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:verify-otp', email, code),
-  accountSignOut: (): Promise<{ ok: boolean; error?: string }> =>
+  accountSignOut: (): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:sign-out'),
-  accountRefreshEntitlements: (): Promise<{ ok: boolean; error?: string; entitlements: { ai: boolean; cloud: boolean } }> =>
+  accountRefreshEntitlements: (): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode; entitlements: { ai: boolean; cloud: boolean } }> =>
     ipcRenderer.invoke('account:refresh-entitlements'),
   // Opens the subscription checkout in the browser; the URL (with the user id)
   // is built in main so the id never crosses the bridge.
-  accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle'): Promise<{ ok: boolean; error?: string }> =>
+  accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle'): Promise<{ ok: boolean; error?: string; errorCode?: AccountErrorCode }> =>
     ipcRenderer.invoke('account:open-checkout', product),
   onAccountStatusChanged: (
     cb: (status: {

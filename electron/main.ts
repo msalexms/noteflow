@@ -1803,16 +1803,16 @@ ipcMain.handle('account:refresh-entitlements', () => {
 // user id (checkout[custom][user_id], URL-encoded) so the billing webhook can
 // attribute the purchase. Built here in main so the user id never crosses to
 // the renderer.
-ipcMain.handle('account:open-checkout', (_event, product: string) => {
+ipcMain.handle('account:open-checkout', (_event, product: string): account.AccountOpResult => {
   const base = product === 'ai' || product === 'cloud' || product === 'bundle'
     ? LEMONSQUEEZY_CHECKOUT_URLS[product]
     : ''
-  if (!base) return { ok: false, error: 'Checkout is not available yet.' }
+  if (!base) return { ok: false, error: 'Checkout is not available yet.', errorCode: 'checkoutUnavailable' }
   const userId = account.getUserId()
-  if (!userId) return { ok: false, error: 'Sign in to your NoteFlow account first.' }
+  if (!userId) return { ok: false, error: 'Sign in to your NoteFlow account first.', errorCode: 'notSignedIn' }
   const sep = base.includes('?') ? '&' : '?'
   const url = parseHttpsUrl(`${base}${sep}checkout%5Bcustom%5D%5Buser_id%5D=${encodeURIComponent(userId)}`)
-  if (!url) return { ok: false, error: 'Invalid checkout URL.' }
+  if (!url) return { ok: false, error: 'Invalid checkout URL.', errorCode: 'checkoutInvalidUrl' }
   shell.openExternal(url.toString()).catch((err) => {
     console.error('Failed to open checkout URL:', err)
   })

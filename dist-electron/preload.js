@@ -115,6 +115,9 @@ const api = {
     // NoteFlow account (Supabase Auth + entitlements) — public status only,
     // tokens never cross this bridge.
     getAccountStatus: () => electron_1.ipcRenderer.invoke('account:get-status'),
+    // Failures carry a machine-readable `errorCode` (see AccountErrorCode in
+    // electron/account.ts) so the renderer can localize them; `error` is the
+    // English fallback.
     accountRequestOtp: (email) => electron_1.ipcRenderer.invoke('account:request-otp', email),
     accountVerifyOtp: (email, code) => electron_1.ipcRenderer.invoke('account:verify-otp', email, code),
     accountSignOut: () => electron_1.ipcRenderer.invoke('account:sign-out'),

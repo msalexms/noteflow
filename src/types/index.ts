@@ -276,6 +276,32 @@ export interface AccountEntitlements {
   cloud: boolean
 }
 
+// Why an account operation failed, in a form the UI can localize (the raw
+// `error` string that comes with it is English, for logs/fallback).
+// MIRROR of AccountErrorCode in electron/account.ts — the renderer can't import
+// from electron/. Every code has a message under `settings.account.errors`.
+export type AccountErrorCode =
+  | 'notConfigured'
+  | 'invalidEmail'
+  | 'emptyCode'
+  | 'invalidCode'
+  | 'rateLimited'
+  | 'network'
+  | 'unexpectedResponse'
+  | 'sendFailed'
+  | 'verifyFailed'
+  | 'notSignedIn'
+  | 'refreshFailed'
+  | 'checkoutUnavailable'
+  | 'checkoutInvalidUrl'
+
+// Result of any account IPC call (mirror of AccountOpResult in electron/account.ts).
+export interface AccountOpResult {
+  ok: boolean
+  error?: string             // English fallback, shown when there is no errorCode
+  errorCode?: AccountErrorCode
+}
+
 // Renderer-safe view of the account session — never carries tokens.
 export interface AccountStatus {
   configured: boolean   // false while the build has no Supabase project configured
@@ -432,11 +458,11 @@ declare global {
       onSyncStatusChanged: (cb: () => void) => () => void
       // NoteFlow account (Supabase Auth + entitlements)
       getAccountStatus: () => Promise<AccountStatus>
-      accountRequestOtp: (email: string) => Promise<{ ok: boolean; error?: string }>
-      accountVerifyOtp: (email: string, code: string) => Promise<{ ok: boolean; error?: string }>
-      accountSignOut: () => Promise<{ ok: boolean; error?: string }>
-      accountRefreshEntitlements: () => Promise<{ ok: boolean; error?: string; entitlements: AccountEntitlements }>
-      accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle') => Promise<{ ok: boolean; error?: string }>
+      accountRequestOtp: (email: string) => Promise<AccountOpResult>
+      accountVerifyOtp: (email: string, code: string) => Promise<AccountOpResult>
+      accountSignOut: () => Promise<AccountOpResult>
+      accountRefreshEntitlements: () => Promise<AccountOpResult & { entitlements: AccountEntitlements }>
+      accountOpenCheckout: (product: 'ai' | 'cloud' | 'bundle') => Promise<AccountOpResult>
       onAccountStatusChanged: (cb: (status: AccountStatus) => void) => () => void
       // NoteFlow Cloud (encrypted sync) — keys never cross this bridge
       getCloudStatus: () => Promise<CloudSyncStatus>

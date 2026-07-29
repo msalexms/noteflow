@@ -473,6 +473,18 @@ Obsidian, Emerald Forest, Synthwave. Light: Arctic Day, Parchment. El tema se pe
 `settings.json` (`theme`) y se lee de forma síncrona al arrancar (`settings:get-theme`); usuarios
 existentes conservan el suyo, los nuevos arrancan en `noteflow-dark`.
 
+**⚠️ Gotcha de la paleta Tailwind:** `tailwind.config.js` **redefine** las claves `red`, `cyan`,
+`purple` (y `accent*`, `text*`, `surface*`, `border`) como color plano ligado a la CSS var del tema.
+Al ser un string, la clave **sustituye** a la paleta por tonos de Tailwind → **`text-red-400`,
+`bg-red-500/10`, `border-red-500/30` y demás variantes numeradas de `red`/`cyan`/`purple` NO generan
+CSS** (clases muertas: el texto hereda color y el `border` se queda con el gris por defecto). Lo
+correcto es `text-red` / `bg-red/10` / `border-red/50` (opacidad con `/`), que además sigue al tema
+activo. Las paletas que el config **no** toca (`green-400`, `amber-500`…) sí funcionan. Hay usos
+antiguos de `red-400`/`red-500` por el código que son no-ops — al tocar un componente, migrarlos.
+
+Animaciones propias del config: `animate-shake` (nudge horizontal de 0,28 s para un input que acaba
+de rechazar un valor, p. ej. el código de sign-in en Ajustes → Cuenta; úsalo con `motion-safe:`).
+
 ### Colores del editor (overrides sobre el tema)
 
 Además del acento y la fuente de la app, Ajustes → Apariencia permite repintar **6 colores del

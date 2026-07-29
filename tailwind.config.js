@@ -18,6 +18,18 @@ module.exports = {
         cyan:         'rgb(var(--cyan) / <alpha-value>)',
         purple:       'rgb(var(--purple) / <alpha-value>)',
       },
+      keyframes: {
+        // Short horizontal nudge for inputs that just rejected a value (e.g. a
+        // wrong sign-in code). Small amplitude on purpose — a hint, not a jolt.
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%, 60%': { transform: 'translateX(-3px)' },
+          '40%, 80%': { transform: 'translateX(3px)' },
+        },
+      },
+      animation: {
+        shake: 'shake 0.28s ease-in-out',
+      },
       fontFamily: {
         // `font-mono` is the app's general UI font: it follows the active theme's
         // app font via --app-font-family (set by themeStore), falling back to the

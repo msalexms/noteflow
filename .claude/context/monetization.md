@@ -648,8 +648,26 @@ puro vía `fetch` desde el proceso main.
   (`getAccountStatus`, `accountRequestOtp`, `accountVerifyOtp`, `accountSignOut`,
   `accountRefreshEntitlements`, `onAccountStatusChanged`) y tipos `AccountStatus` /
   `AccountEntitlements` en `src/types/index.ts`.
+- **Errores tipados (`AccountErrorCode`)** — `AccountOpResult` lleva, además del `error` en inglés
+  (fallback para logs), un **`errorCode`** de una unión cerrada (`notConfigured`, `invalidEmail`,
+  `emptyCode`, `invalidCode`, `rateLimited`, `network`, `unexpectedResponse`, `sendFailed`,
+  `verifyFailed`, `notSignedIn`, `refreshFailed`, `checkoutUnavailable`, `checkoutInvalidUrl`) para
+  que el renderer pinte el mensaje **en el idioma de la app** en vez del string crudo de GoTrue.
+  La unión está **triplicada** (main `electron/account.ts` → renderer `src/types/index.ts` → una
+  clave por código en `settings.account.errors` de los dicts EN/ES) y el espejo lo fija el test
+  `tests/electron/accountErrorCodes.test.ts`. **No hay `expiredCode`:** GoTrue responde a un código
+  equivocado y a uno caducado con el mismo payload (`error_code: otp_expired` / "Token has expired
+  or is invalid"), así que `invalidCode` cubre ambos y la UI ofrece reenviar.
 - **UI** — `src/components/Settings/AccountPanel.tsx` (sección "Account" en `SettingsModal`,
   textos vía i18n `t.settings.account.*`): no configurado → placeholder informativo; signed out →
   email → código de 6 dígitos; signed in → email + badges de plan + el bloque compartido
   `PlanOffers` con los **planes y sus precios** (Bundle/AI/Cloud — ver § 3 "UI" y § visión
   "Precios") + Refresh + Sign out.
+  **Dos superficies de error, nunca a la vez:** la caja roja de arriba (`error`) para el paso de
+  email, refresh y checkout (`handleSignOut` ignora el resultado de `accountSignOut()`: no pinta
+  error, solo lo limpia); e **inline bajo el input del código** (`codeError`) para el
+  paso de verificación — icono `AlertCircle`, borde rojo + `animate-shake` en el input,
+  `aria-invalid` + `aria-describedby`/`role="alert"`, contenido seleccionado al fallar (retecleo
+  directo) y limpieza del error al escribir. Ese paso incluye **"Resend code"**
+  (`sendCode('resend')`, misma llamada `accountRequestOtp` sin volver al paso de email) con
+  cooldown local de 30 s — el rate-limit real lo pone GoTrue y llega como `rateLimited`.

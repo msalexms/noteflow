@@ -46,9 +46,38 @@ export interface AccountStatus {
   bundleCheckoutConfigured: boolean
 }
 
+/**
+ * Machine-readable reason for a failed account operation, so the renderer can
+ * show a localized message instead of the raw English string from GoTrue.
+ *
+ * MIRROR: `AccountErrorCode` in `src/types/index.ts` (the renderer can't import
+ * from `electron/`) and one i18n entry per code under `settings.account.errors`.
+ *
+ * Note there is no separate `expiredCode`: GoTrue answers a wrong code and an
+ * expired one with the very same payload (`otp_expired` / "Token has expired or
+ * is invalid"), so `invalidCode` covers both and the UI offers "Resend code".
+ */
+export type AccountErrorCode =
+  | 'notConfigured'      // this build ships no Supabase project
+  | 'invalidEmail'       // client-side check before calling GoTrue
+  | 'emptyCode'          // client-side check before calling GoTrue
+  | 'invalidCode'        // wrong or expired one-time code
+  | 'rateLimited'        // HTTP 429 (too many codes requested / attempts)
+  | 'network'            // fetch threw (offline, DNS, timeout)
+  | 'unexpectedResponse' // 2xx whose body isn't a usable session
+  | 'sendFailed'         // any other failure while emailing the code
+  | 'verifyFailed'       // any other failure while verifying the code
+  | 'notSignedIn'        // the operation needs a session and there is none
+  | 'refreshFailed'      // subscriptions query failed
+  | 'checkoutUnavailable'// no checkout URL for that product in this build
+  | 'checkoutInvalidUrl' // the configured checkout URL didn't parse
+
 export interface AccountOpResult {
   ok: boolean
+  /** English fallback (logs, and builds whose UI has no copy for the code yet). */
   error?: string
+  /** Preferred by the UI: localized through i18n. */
+  errorCode?: AccountErrorCode
 }
 
 // ── Settings helpers (same idiom as githubSync) ───────────────────────────────
@@ -133,6 +162,15 @@ function extractErrorMessage(json: unknown, fallback: string): string {
   return fallback
 }
 
+/** GoTrue's machine-readable reason (`error_code`), when the payload carries one. */
+function extractErrorCode(json: unknown): string {
+  if (json && typeof json === 'object') {
+    const raw = (json as Record<string, unknown>).error_code
+    if (typeof raw === 'string') return raw
+  }
+  return ''
+}
+
 // ── Session persistence ───────────────────────────────────────────────────────
 
 export function loadAccountSettings(): AccountSettings {
@@ -194,9 +232,11 @@ export function getUserId(): string | null {
 
 /** Emails a 6-digit one-time code (creates the account on first sign-in). */
 export async function requestOtp(email: string): Promise<AccountOpResult> {
-  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR }
+  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' }
   const trimmed = email.trim()
-  if (!trimmed || !trimmed.includes('@')) return { ok: false, error: 'Please enter a valid email address.' }
+  if (!trimmed || !trimmed.includes('@')) {
+    return { ok: false, error: 'Please enter a valid email address.', errorCode: 'invalidEmail' }
+  }
 
   try {
     const res = await supabaseRequest('/auth/v1/otp', {
@@ -204,21 +244,27 @@ export async function requestOtp(email: string): Promise<AccountOpResult> {
       body: { email: trimmed, create_user: true },
     })
     if (res.status >= 400) {
-      if (res.status === 429) return { ok: false, error: 'Too many attempts. Please wait a moment and try again.' }
-      return { ok: false, error: extractErrorMessage(res.json, 'Could not send the sign-in code.') }
+      if (res.status === 429) {
+        return { ok: false, error: 'Too many attempts. Please wait a moment and try again.', errorCode: 'rateLimited' }
+      }
+      return {
+        ok: false,
+        error: extractErrorMessage(res.json, 'Could not send the sign-in code.'),
+        errorCode: 'sendFailed',
+      }
     }
     return { ok: true }
   } catch (err: unknown) {
     console.error('[Account] requestOtp failed:', String(err))
-    return { ok: false, error: NETWORK_ERROR }
+    return { ok: false, error: NETWORK_ERROR, errorCode: 'network' }
   }
 }
 
 /** Exchanges the emailed code for a session, persists it and fetches entitlements. */
 export async function verifyOtp(email: string, code: string): Promise<AccountOpResult> {
-  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR }
+  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' }
   const trimmedCode = code.trim()
-  if (!trimmedCode) return { ok: false, error: 'Please enter the code from your email.' }
+  if (!trimmedCode) return { ok: false, error: 'Please enter the code from your email.', errorCode: 'emptyCode' }
 
   try {
     const res = await supabaseRequest('/auth/v1/verify', {
@@ -226,11 +272,21 @@ export async function verifyOtp(email: string, code: string): Promise<AccountOpR
       body: { type: 'email', email: email.trim(), token: trimmedCode },
     })
     if (res.status >= 400) {
+      if (res.status === 429) {
+        return { ok: false, error: 'Too many attempts. Please wait a moment and try again.', errorCode: 'rateLimited' }
+      }
+      // GoTrue reports both a wrong code and an expired one as
+      // "Token has expired or is invalid" (error_code: otp_expired) — one code.
       const raw = extractErrorMessage(res.json, '')
-      const friendly = /expired|invalid/i.test(raw)
-        ? 'That code is invalid or has expired. Request a new one and try again.'
-        : raw || 'Could not verify the code.'
-      return { ok: false, error: friendly }
+      const rawCode = extractErrorCode(res.json)
+      if (rawCode === 'otp_expired' || /expired|invalid/i.test(raw)) {
+        return {
+          ok: false,
+          error: 'That code is invalid or has expired. Request a new one and try again.',
+          errorCode: 'invalidCode',
+        }
+      }
+      return { ok: false, error: raw || 'Could not verify the code.', errorCode: 'verifyFailed' }
     }
 
     const session = res.json as {
@@ -240,7 +296,7 @@ export async function verifyOtp(email: string, code: string): Promise<AccountOpR
       user?: { id?: string; email?: string }
     }
     if (!session?.access_token || !session.refresh_token || !session.user?.id) {
-      return { ok: false, error: 'Unexpected response from the account service.' }
+      return { ok: false, error: 'Unexpected response from the account service.', errorCode: 'unexpectedResponse' }
     }
 
     persistAccountSettings({
@@ -260,7 +316,7 @@ export async function verifyOtp(email: string, code: string): Promise<AccountOpR
     return { ok: true }
   } catch (err: unknown) {
     console.error('[Account] verifyOtp failed:', String(err))
-    return { ok: false, error: NETWORK_ERROR }
+    return { ok: false, error: NETWORK_ERROR, errorCode: 'network' }
   }
 }
 
@@ -345,11 +401,13 @@ export async function signOut(): Promise<AccountOpResult> {
 
 /** Re-reads the user's subscription rows and re-derives {ai, cloud}. */
 export async function refreshEntitlements(): Promise<AccountOpResult & { entitlements: Entitlements }> {
-  if (!isCloudConfigured()) return { ok: false, error: NOT_CONFIGURED_ERROR, entitlements: NO_ENTITLEMENTS }
+  if (!isCloudConfigured()) {
+    return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured', entitlements: NO_ENTITLEMENTS }
+  }
 
   const token = await getAccessToken()
   if (!token) {
-    return { ok: false, error: 'Not signed in.', entitlements: NO_ENTITLEMENTS }
+    return { ok: false, error: 'Not signed in.', errorCode: 'notSignedIn', entitlements: NO_ENTITLEMENTS }
   }
 
   try {
@@ -360,6 +418,7 @@ export async function refreshEntitlements(): Promise<AccountOpResult & { entitle
       return {
         ok: false,
         error: extractErrorMessage(res.json, 'Could not load subscription status.'),
+        errorCode: 'refreshFailed',
         entitlements,
       }
     }
@@ -369,7 +428,7 @@ export async function refreshEntitlements(): Promise<AccountOpResult & { entitle
     return { ok: true, entitlements }
   } catch (err: unknown) {
     console.error('[Account] refreshEntitlements failed:', String(err))
-    return { ok: false, error: NETWORK_ERROR, entitlements }
+    return { ok: false, error: NETWORK_ERROR, errorCode: 'network', entitlements }
   }
 }
 

@@ -99,6 +99,15 @@ function extractErrorMessage(json, fallback) {
     }
     return fallback;
 }
+/** GoTrue's machine-readable reason (`error_code`), when the payload carries one. */
+function extractErrorCode(json) {
+    if (json && typeof json === 'object') {
+        const raw = json.error_code;
+        if (typeof raw === 'string')
+            return raw;
+    }
+    return '';
+}
 // ── Session persistence ───────────────────────────────────────────────────────
 function loadAccountSettings() {
     const settings = readSettings();
@@ -152,49 +161,65 @@ function getUserId() {
 /** Emails a 6-digit one-time code (creates the account on first sign-in). */
 async function requestOtp(email) {
     if (!(0, cloudConfig_1.isCloudConfigured)())
-        return { ok: false, error: NOT_CONFIGURED_ERROR };
+        return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' };
     const trimmed = email.trim();
-    if (!trimmed || !trimmed.includes('@'))
-        return { ok: false, error: 'Please enter a valid email address.' };
+    if (!trimmed || !trimmed.includes('@')) {
+        return { ok: false, error: 'Please enter a valid email address.', errorCode: 'invalidEmail' };
+    }
     try {
         const res = await supabaseRequest('/auth/v1/otp', {
             method: 'POST',
             body: { email: trimmed, create_user: true },
         });
         if (res.status >= 400) {
-            if (res.status === 429)
-                return { ok: false, error: 'Too many attempts. Please wait a moment and try again.' };
-            return { ok: false, error: extractErrorMessage(res.json, 'Could not send the sign-in code.') };
+            if (res.status === 429) {
+                return { ok: false, error: 'Too many attempts. Please wait a moment and try again.', errorCode: 'rateLimited' };
+            }
+            return {
+                ok: false,
+                error: extractErrorMessage(res.json, 'Could not send the sign-in code.'),
+                errorCode: 'sendFailed',
+            };
         }
         return { ok: true };
     }
     catch (err) {
         console.error('[Account] requestOtp failed:', String(err));
-        return { ok: false, error: NETWORK_ERROR };
+        return { ok: false, error: NETWORK_ERROR, errorCode: 'network' };
     }
 }
 /** Exchanges the emailed code for a session, persists it and fetches entitlements. */
 async function verifyOtp(email, code) {
     if (!(0, cloudConfig_1.isCloudConfigured)())
-        return { ok: false, error: NOT_CONFIGURED_ERROR };
+        return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured' };
     const trimmedCode = code.trim();
     if (!trimmedCode)
-        return { ok: false, error: 'Please enter the code from your email.' };
+        return { ok: false, error: 'Please enter the code from your email.', errorCode: 'emptyCode' };
     try {
         const res = await supabaseRequest('/auth/v1/verify', {
             method: 'POST',
             body: { type: 'email', email: email.trim(), token: trimmedCode },
         });
         if (res.status >= 400) {
+            if (res.status === 429) {
+                return { ok: false, error: 'Too many attempts. Please wait a moment and try again.', errorCode: 'rateLimited' };
+            }
+            // GoTrue reports both a wrong code and an expired one as
+            // "Token has expired or is invalid" (error_code: otp_expired) — one code.
             const raw = extractErrorMessage(res.json, '');
-            const friendly = /expired|invalid/i.test(raw)
-                ? 'That code is invalid or has expired. Request a new one and try again.'
-                : raw || 'Could not verify the code.';
-            return { ok: false, error: friendly };
+            const rawCode = extractErrorCode(res.json);
+            if (rawCode === 'otp_expired' || /expired|invalid/i.test(raw)) {
+                return {
+                    ok: false,
+                    error: 'That code is invalid or has expired. Request a new one and try again.',
+                    errorCode: 'invalidCode',
+                };
+            }
+            return { ok: false, error: raw || 'Could not verify the code.', errorCode: 'verifyFailed' };
         }
         const session = res.json;
         if (!session?.access_token || !session.refresh_token || !session.user?.id) {
-            return { ok: false, error: 'Unexpected response from the account service.' };
+            return { ok: false, error: 'Unexpected response from the account service.', errorCode: 'unexpectedResponse' };
         }
         persistAccountSettings({
             email: session.user.email ?? email.trim(),
@@ -213,7 +238,7 @@ async function verifyOtp(email, code) {
     }
     catch (err) {
         console.error('[Account] verifyOtp failed:', String(err));
-        return { ok: false, error: NETWORK_ERROR };
+        return { ok: false, error: NETWORK_ERROR, errorCode: 'network' };
     }
 }
 /**
@@ -297,11 +322,12 @@ async function signOut() {
 }
 /** Re-reads the user's subscription rows and re-derives {ai, cloud}. */
 async function refreshEntitlements() {
-    if (!(0, cloudConfig_1.isCloudConfigured)())
-        return { ok: false, error: NOT_CONFIGURED_ERROR, entitlements: entitlements_1.NO_ENTITLEMENTS };
+    if (!(0, cloudConfig_1.isCloudConfigured)()) {
+        return { ok: false, error: NOT_CONFIGURED_ERROR, errorCode: 'notConfigured', entitlements: entitlements_1.NO_ENTITLEMENTS };
+    }
     const token = await getAccessToken();
     if (!token) {
-        return { ok: false, error: 'Not signed in.', entitlements: entitlements_1.NO_ENTITLEMENTS };
+        return { ok: false, error: 'Not signed in.', errorCode: 'notSignedIn', entitlements: entitlements_1.NO_ENTITLEMENTS };
     }
     try {
         const res = await supabaseRequest('/rest/v1/subscriptions?select=product,status,renews_at', {
@@ -311,6 +337,7 @@ async function refreshEntitlements() {
             return {
                 ok: false,
                 error: extractErrorMessage(res.json, 'Could not load subscription status.'),
+                errorCode: 'refreshFailed',
                 entitlements,
             };
         }
@@ -321,7 +348,7 @@ async function refreshEntitlements() {
     }
     catch (err) {
         console.error('[Account] refreshEntitlements failed:', String(err));
-        return { ok: false, error: NETWORK_ERROR, entitlements };
+        return { ok: false, error: NETWORK_ERROR, errorCode: 'network', entitlements };
     }
 }
 /**

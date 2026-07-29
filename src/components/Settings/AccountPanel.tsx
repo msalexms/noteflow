@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { KeyRound, Loader, LogOut, Mail, RefreshCw, UserCircle } from 'lucide-react'
-import type { AccountStatus } from '../../types'
+import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, KeyRound, Loader, LogOut, Mail, MailCheck, RefreshCw, Send, UserCircle } from 'lucide-react'
+import type { AccountErrorCode, AccountOpResult, AccountStatus } from '../../types'
 import type { SubscriptionProduct } from '../../lib/subscriptionPlans'
 import { tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
@@ -12,6 +12,11 @@ import { settingsButtonClass } from './ui'
 const LEGAL_BASE = 'https://yagoid.github.io/noteflow'
 
 type Step = 'email' | 'code'
+
+// Seconds the "Resend code" button stays disabled after a code is emailed —
+// enough to stop accidental double-sends without getting in the way (GoTrue
+// rate-limits on its side too, which would surface as `rateLimited`).
+const RESEND_COOLDOWN_S = 30
 
 // Settings → Account: NoteFlow account (Supabase email + OTP) and plan badges.
 // All session/token handling lives in the main process — this panel only ever
@@ -26,26 +31,91 @@ export function AccountPanel() {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  // `error` = the box at the top (email step, refresh, checkout, sign out).
+  // `codeError` = inline under the code input; the two never show at once, so a
+  // failed verification is reported exactly where the user is looking.
   const [error, setError] = useState<string | null>(null)
+  const [codeError, setCodeError] = useState<string | null>(null)
+  const [codeNotice, setCodeNotice] = useState<string | null>(null)
+  const [shakeCode, setShakeCode] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const codeInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     window.noteflow.getAccountStatus().then(setStatus)
     return window.noteflow.onAccountStatusChanged(setStatus)
   }, [])
 
-  async function handleSendCode() {
+  // Resend cooldown ticker — only alive while it is counting down.
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000)
+    return () => clearTimeout(id)
+  }, [resendCooldown])
+
+  /** Localized reason for a failed account op, falling back to main's English string. */
+  function describeError(result: AccountOpResult, fallback: string): string {
+    const messages: Record<AccountErrorCode, string> = t.settings.account.errors
+    if (result.errorCode && messages[result.errorCode]) return messages[result.errorCode]
+    return result.error ?? fallback
+  }
+
+  // Deferred to the next frame: the input is `disabled` while busy, and React
+  // hasn't re-enabled it yet when this runs right after `setBusy(false)`.
+  function focusCodeInput(select: boolean) {
+    requestAnimationFrame(() => {
+      codeInputRef.current?.focus()
+      if (select) codeInputRef.current?.select()
+    })
+  }
+
+  // The shake is one-shot: clear the flag so a second wrong code nudges again.
+  // A timer rather than onAnimationEnd, because under `prefers-reduced-motion`
+  // the `motion-safe:` variant keeps the animation — and its end event — from
+  // ever running, which would leave the flag stuck on.
+  useEffect(() => {
+    if (!shakeCode) return
+    const id = setTimeout(() => setShakeCode(false), 400)
+    return () => clearTimeout(id)
+  }, [shakeCode])
+
+  /** Marks the code input as rejected: red border, a nudge, and ready to retype. */
+  function rejectCode(message: string) {
+    setCodeError(message)
+    setCodeNotice(null)
+    setShakeCode(true)
+    // Select what's there so the next keystroke replaces the wrong code.
+    focusCodeInput(true)
+  }
+
+  // Emails a code. From the email step this advances to the code step; from the
+  // code step ("Resend code") it stays put and reports inline.
+  async function sendCode(mode: 'initial' | 'resend') {
     const trimmed = email.trim()
     if (!trimmed) return
     setBusy(true)
     setError(null)
+    setCodeError(null)
+    setCodeNotice(null)
     const result = await window.noteflow.accountRequestOtp(trimmed)
     setBusy(false)
     if (result.ok) {
       setStep('code')
       setCode('')
-    } else {
-      setError(result.error ?? t.settings.account.couldNotSendCode)
+      setResendCooldown(RESEND_COOLDOWN_S)
+      if (mode === 'resend') {
+        setCodeNotice(t.settings.account.codeResent)
+        focusCodeInput(false)
+      }
+      return
     }
+    const message = describeError(result, t.settings.account.couldNotSendCode)
+    if (mode === 'resend') rejectCode(message)
+    else setError(message)
+  }
+
+  function handleSendCode() {
+    return sendCode('initial')
   }
 
   async function handleVerify() {
@@ -53,6 +123,8 @@ export function AccountPanel() {
     if (!trimmed) return
     setBusy(true)
     setError(null)
+    setCodeError(null)
+    setCodeNotice(null)
     const result = await window.noteflow.accountVerifyOtp(email.trim(), trimmed)
     setBusy(false)
     if (result.ok) {
@@ -60,8 +132,9 @@ export function AccountPanel() {
       setStep('email')
       setCode('')
       setEmail('')
+      setResendCooldown(0)
     } else {
-      setError(result.error ?? t.settings.account.couldNotVerify)
+      rejectCode(describeError(result, t.settings.account.couldNotVerify))
     }
   }
 
@@ -69,6 +142,9 @@ export function AccountPanel() {
     setStep('email')
     setCode('')
     setError(null)
+    setCodeError(null)
+    setCodeNotice(null)
+    setResendCooldown(0)
   }
 
   async function handleRefresh() {
@@ -76,13 +152,13 @@ export function AccountPanel() {
     setError(null)
     const result = await window.noteflow.accountRefreshEntitlements()
     setBusy(false)
-    if (!result.ok) setError(result.error ?? t.settings.account.couldNotRefresh)
+    if (!result.ok) setError(describeError(result, t.settings.account.couldNotRefresh))
   }
 
   async function handleSubscribe(product: SubscriptionProduct) {
     setError(null)
     const result = await window.noteflow.accountOpenCheckout(product)
-    if (!result.ok) setError(result.error ?? t.settings.account.couldNotOpenCheckout)
+    if (!result.ok) setError(describeError(result, t.settings.account.couldNotOpenCheckout))
   }
 
   async function handleSignOut() {
@@ -93,6 +169,9 @@ export function AccountPanel() {
     setStep('email')
     setEmail('')
     setCode('')
+    setCodeError(null)
+    setCodeNotice(null)
+    setResendCooldown(0)
   }
 
   // ── Initial status fetch ──
@@ -116,10 +195,15 @@ export function AccountPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Error */}
+      {/* Error box — everything except the code step, which reports inline
+          under its own input (see below) so the two never say the same thing. */}
       {error && (
-        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded text-xs font-mono text-red-400">
-          {error}
+        <div
+          role="alert"
+          className="flex items-start gap-2 px-3 py-2 bg-red/10 border border-red/30 rounded text-xs font-mono text-red leading-relaxed"
+        >
+          <AlertCircle size={13} className="shrink-0 mt-[1px]" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -164,7 +248,7 @@ export function AccountPanel() {
             <button
               onClick={handleSignOut}
               disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono text-text-muted hover:text-red hover:bg-red/10 transition-colors disabled:opacity-40"
             >
               <LogOut size={11} />
               {t.settings.account.signOut}
@@ -232,22 +316,52 @@ export function AccountPanel() {
             {t.settings.account.codeSentSuffix}
           </p>
           <div>
-            <label className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider">
+            <label
+              htmlFor="account-code"
+              className="block text-[11px] font-mono text-text-muted mb-1 uppercase tracking-wider"
+            >
               {t.settings.account.code}
             </label>
             <input
+              id="account-code"
+              ref={codeInputRef}
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => {
+                setCode(e.target.value)
+                // Typing means "let me try again" — clear the rejection.
+                if (codeError) setCodeError(null)
+                if (codeNotice) setCodeNotice(null)
+              }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleVerify() }}
               placeholder="123456"
               disabled={busy}
-              className="w-full px-3 py-1.5 rounded text-xs font-mono tracking-widest bg-surface-0 border border-border text-text placeholder:text-text-muted/40 focus:outline-none focus:border-text/30 disabled:opacity-40"
+              aria-invalid={!!codeError}
+              aria-describedby={codeError ? 'account-code-error' : undefined}
+              className={`w-full px-3 py-1.5 rounded text-xs font-mono tracking-widest bg-surface-0 border text-text placeholder:text-text-muted/40 focus:outline-none disabled:opacity-40 transition-colors ${
+                codeError ? 'border-red/50 focus:border-red/70' : 'border-border focus:border-text/30'
+              } ${shakeCode ? 'motion-safe:animate-shake' : ''}`}
             />
+            {codeError && (
+              <p
+                id="account-code-error"
+                role="alert"
+                className="flex items-start gap-1.5 mt-1.5 text-[11px] font-mono text-red leading-relaxed"
+              >
+                <AlertCircle size={12} className="shrink-0 mt-[1px]" />
+                <span>{codeError}</span>
+              </p>
+            )}
+            {!codeError && codeNotice && (
+              <p className="flex items-center gap-1.5 mt-1.5 text-[11px] font-mono text-text-muted">
+                <MailCheck size={12} className="shrink-0" />
+                {codeNotice}
+              </p>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleVerify}
               disabled={busy || !code.trim()}
@@ -255,6 +369,18 @@ export function AccountPanel() {
             >
               {busy ? <Loader size={11} className="animate-spin" /> : <KeyRound size={11} />}
               {t.settings.account.verifyAndSignIn}
+            </button>
+            {/* Didn't arrive / expired: a new code without going back to the
+                email step. Short cooldown so it can't be spammed. */}
+            <button
+              onClick={() => sendCode('resend')}
+              disabled={busy || resendCooldown > 0}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono ${settingsButtonClass}`}
+            >
+              <Send size={11} />
+              {resendCooldown > 0
+                ? tf(t.settings.account.resendCodeIn, { seconds: resendCooldown })
+                : t.settings.account.resendCode}
             </button>
             <button
               onClick={handleUseDifferentEmail}
