@@ -218,6 +218,12 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   `index.css`.
 - **Orden de detección de bloque** en `htmlFromMarkdown`: code fence → heading → HR → lista →
   blockquote → tabla → párrafo (un prefijo `>` no choca con bullets/ordenadas/headings).
+- **Invariante del separador de bloque en `blockElToMd`:** cada bloque serializado debe terminar en
+  **exactamente `\n\n`** (`htmlFromMarkdown` separa bloques con `split(/\n\n/)`). Ojo con quién pone
+  el separador: `tableElToMd` **ya devuelve** su `\n\n` final (el caso `table` no debe añadir nada),
+  mientras que `listElToMd` cierra el último ítem con un solo `\n` y por eso el caso `ul`/`ol` sí
+  suma `+ '\n'`. Un `\n` de más tras un bloque hace que el siguiente se reparsee con un hard break
+  inicial (`<p><br>…`) y el hueco **crece en cada round-trip** guardar/reabrir (bug real con tablas).
 - Estos elementos son **markdown plano** en el cuerpo del `.md`: no tocan el frontmatter ni los tres
   espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
   editores externos/CLI/móvil.

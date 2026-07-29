@@ -49,3 +49,24 @@ describe('htmlFromMarkdown — multi-line task annotations', () => {
     expect(html).not.toContain('🔺')
   })
 })
+
+// A table is followed by exactly one blank line in the serialized markdown
+// (`tableElToMd` owns that separator). If a serializer ever emits an extra
+// newline there, the next block gets parsed with a leading hard break and the
+// gap grows on every save/reopen round-trip — these tests pin the boundary.
+describe('htmlFromMarkdown — blocks after a table', () => {
+  const table = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+
+  it('renders the paragraph after a table without a leading hard break', () => {
+    const html = htmlFromMarkdown(`${table}\n\nText`)
+    expect(html).toContain('<p>Text</p>')
+    expect(html).not.toContain('<br>Text')
+    expect(html).not.toContain('<p></p>')
+  })
+
+  it('renders a heading after a table without an empty paragraph before it', () => {
+    const html = htmlFromMarkdown(`${table}\n\n# Title`)
+    expect(html).toContain('<h1>Title</h1>')
+    expect(html).not.toContain('<p><br></p>')
+  })
+})

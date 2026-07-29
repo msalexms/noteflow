@@ -159,7 +159,9 @@ function blockElToMd(el: Element): string {
     const code = codeEl?.textContent ?? ''
     return `\`\`\`${lang}\n${code.trimEnd()}\n\`\`\`\n\n`
   }
-  if (tag === 'table') return tableElToMd(el) + '\n'
+  // `tableElToMd()` already appends the trailing '\n\n' block separator — do not add another
+  // one here or every save/reopen round-trip would inject an extra blank line after the table.
+  if (tag === 'table') return tableElToMd(el)
   if (tag === 'blockquote') {
     // Convert each child block to markdown, then prefix every line with `> `
     // (blank lines between paragraphs become a bare `>`).
@@ -582,5 +584,6 @@ function tableElToMd(tbl: Element): string {
   const sep  = '| ' + aligns.join(' | ') + ' |'
   const body = rows.slice(firstHasTh ? 1 : 0).map(toLine).join('\n')
 
+  // Includes the trailing block separator ('\n\n'); `blockElToMd()` must not add more.
   return [head, sep, body].filter(Boolean).join('\n') + '\n\n'
 }
