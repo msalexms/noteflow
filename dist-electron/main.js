@@ -939,12 +939,30 @@ function applyTrayMenu() {
     ]);
     tray.setContextMenu(contextMenu);
 }
+/**
+ * Brings the main window up and gives it focus.
+ *
+ * On Windows show()+focus() is not enough when the call comes from the
+ * 'second-instance' event: clicking the pinned taskbar icon spawns a second
+ * process, that process loses the single-instance lock and quits, but while it
+ * lives IT is the foreground process — so Windows blocks SetForegroundWindow
+ * for us and the window comes up BEHIND the others (the reported "first click
+ * does nothing, you have to click twice" bug). The always-on-top bounce is the
+ * usual workaround: flip it on, restore the previous value and move to top,
+ * which pulls the window to the front without leaving it pinned.
+ */
 function showWindow() {
-    if (!mainWindow)
+    if (!mainWindow || mainWindow.isDestroyed())
         return;
     if (mainWindow.isMinimized())
         mainWindow.restore();
     mainWindow.show();
+    if (process.platform === 'win32') {
+        const wasAlwaysOnTop = mainWindow.isAlwaysOnTop();
+        mainWindow.setAlwaysOnTop(true);
+        mainWindow.setAlwaysOnTop(wasAlwaysOnTop);
+        mainWindow.moveTop();
+    }
     mainWindow.focus();
 }
 function toggleWindow() {
@@ -3065,6 +3083,15 @@ if (!gotTheLock) {
     electron_1.app.quit();
 }
 electron_1.app.whenReady().then(async () => {
+    // Losing the lock means another instance already owns the app: quit was
+    // already requested above, so do NO startup work (migration, initial pull,
+    // tray, window) before this process dies.
+    if (!gotTheLock)
+        return;
+    // Must match electron-builder's `build.appId` so Windows groups the taskbar
+    // button with the pinned shortcut and attributes notifications correctly.
+    if (process.platform === 'win32')
+        electron_1.app.setAppUserModelId('dev.noteflow.notes');
     // Remove default menu for all windows
     electron_1.Menu.setApplicationMenu(null);
     // One-time local format migration (v1 flat .md → v2 folder-per-note).

@@ -313,8 +313,21 @@ tarjetas seleccionables (tema/fuente/backend) **no** usan estas clases: tienen s
 Todo en **tokens del tema** (`surface-*`, `border`, `text`, `text-muted`) — nunca colores
 hardcodeados, o se rompe en alguno de los 14 temas.
 
-### Single instance
-`app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente.
+### Single instance y activación de la ventana (Windows)
+`app.requestSingleInstanceLock()` — una segunda instancia trae la existente al frente
+(`second-instance` → `showWindow()`). Detalles no obvios, todos en `electron/main.ts`:
+
+- El proceso que **pierde** el lock llama a `app.quit()`, pero eso no aborta el arranque: el callback
+  de `app.whenReady()` empieza con un `if (!gotTheLock) return` para que ese proceso condenado no
+  haga migración, pull inicial, tray ni ventana antes de morir.
+- `app.setAppUserModelId('dev.noteflow.notes')` (solo Win, al principio de `whenReady`) debe coincidir
+  con `build.appId` de electron-builder: agrupa el botón de la barra de tareas con el acceso directo
+  anclado y atribuye bien las notificaciones.
+- `showWindow()` hace, **solo en Windows**, un rebote de always-on-top (`setAlwaysOnTop(true)` →
+  restaurar el valor previo → `moveTop()`) antes del `focus()`. Motivo: al pulsar el icono anclado con
+  la app oculta en el tray, Windows lanza un segundo proceso que pasa a ser el de primer plano y
+  bloquea `SetForegroundWindow` para nosotros; sin el rebote la ventana aparecía **detrás** y hacía
+  falta un segundo click.
 
 ### Sync entre ventanas
 Al escribir/borrar una nota, main hace broadcast (`notes-updated`) a todas las BrowserWindows.
