@@ -194,7 +194,7 @@ es **un preset más**, no una implementación nueva.
   2. **Ajustes → IA** y 3. **panel de IA del Cerebro** (`LlmConfigView`, mismo componente en ambas):
      `['ai', 'bundle']` dentro del gate.
   4. **Ajustes → Sincronización → NoteFlow Cloud** (`CloudPanel`): `['cloud', 'bundle']`, tanto en el
-     estado sin sesión como en el gate de entitlement.
+     estado sin sesión como en el gate de entitlement (que cubre setup y enable — ver § 4, "Gating").
   Reglas: si `!account.configured` (build sin Supabase) no pinta nada — no se anuncian precios de algo
   que no se puede comprar. Un plan solo aparece mientras falte su entitlement, y **Bundle exige que
   falten AMBAS** (para no facilitar doble facturación); si no queda ninguno, no renderiza. Nombre y
@@ -532,26 +532,39 @@ oferta, no como posesión rota — pero **no se destruye ni configuración ni da
   `t.settings.sync.*` (`chooseBackendDesc`, `cloudCardDesc`, `githubTitle`, `githubCardDesc`,
   `badgeActive`/`badgePaused`/`badgeInactive`, `pausedByCloud`).
 - **El panel renderiza según `keysState` + cuenta:** sin sesión → "sign in en Settings → Account";
-  `no-keys` → formulario de passphrase (input + confirmación, mínimo 8 chars) → `cloudSetup` →
-  el **recovery code se muestra UNA vez** en un bloque ámbar que oculta el resto del panel hasta
-  pulsar "I have saved my recovery code" (vive solo en estado local del componente, con botón
-  Copy y aviso rojo de irrecuperabilidad); `locked` → un único input acepta passphrase O recovery
-  (el backend distingue) → `cloudUnlock`; `unlocked` → badge enabled/disabled + Last sync +
-  `syncError` (rojo, accionable) + botones Enable/Disable, Sync now (`cloudPull`, resultado tipo
-  GitHub) y Lock.
-- **Gating (decisión):** solo **Enable sync** exige la entitlement `cloud` — sin ella, mensaje
-  "requires subscription" + el bloque compartido `PlanOffers` con Cloud (y Bundle si falta también
-  la entitlement `ai`); un plan sin URL en `LEMONSQUEEZY_CHECKOUT_URLS` se queda en "Coming soon".
-  El estado sin sesión del panel muestra ese mismo bloque (precios + acceso a Ajustes → Cuenta) en
-  vez de solo el "sign in first". Setup/unlock/pull/disable NO se gatean (RLS solo bloquea
-  escrituras; un suscriptor caducado puede bajar sus datos). El IPC `account:open-checkout` acepta
-  `'ai' | 'cloud' | 'bundle'` y `AccountStatus` expone `aiCheckoutConfigured` /
-  `cloudCheckoutConfigured` / `bundleCheckoutConfigured`.
+  `no-keys` **sin entitlement `cloud`** → el bloque de planes (ver "Gating" abajo), sin onboarding;
+  `no-keys` **con entitlement** → onboarding de elección de modo (dos cards, Estándar/managed
+  preseleccionada) → botón directo `cloudSetupManaged`, o formulario de passphrase (input +
+  confirmación, mínimo 8 chars) → `cloudSetup` → el **recovery code se muestra UNA vez** en un
+  bloque ámbar que oculta el resto del panel hasta pulsar "I have saved my recovery code" (vive solo
+  en estado local del componente, con botón Copy y aviso rojo de irrecuperabilidad); `locked` → un
+  único input acepta passphrase O recovery (el backend distingue) → `cloudUnlock`; `unlocked` →
+  badge enabled/disabled + Last sync + `syncError` (rojo, accionable) + botones Enable/Disable,
+  Sync now (`cloudPull`, resultado tipo GitHub) y Lock.
+- **Gating (decisión):** en la UI se gatean por entitlement `cloud` **el setup/onboarding** (estado
+  `no-keys`) y **Enable sync** (estado `unlocked` + disabled). En ambos casos se muestra el MISMO
+  bloque (constante `subscriptionGate` de `CloudPanel.tsx`, para que no se separen): mensaje
+  "requires subscription" + el compartido `PlanOffers` con Cloud (y Bundle si falta también la
+  entitlement `ai`); un plan sin URL en `LEMONSQUEEZY_CHECKOUT_URLS` se queda en "Coming soon". El
+  estado sin sesión del panel muestra ese mismo bloque de planes (precios + acceso a Ajustes →
+  Cuenta) en vez de solo el "sign in first". El setup se gatea porque **crear claves para una nube
+  que no se puede activar no tiene sentido**, y no compromete la recuperación de datos: quien no
+  tiene claves tampoco tiene nada subido. **Unlock/Sync now/Disable/Lock NO se gatean** (RLS solo
+  bloquea escrituras; un suscriptor caducado tiene que poder desbloquear y bajarse sus datos), y los
+  switches de modo managed↔e2ee tampoco. ⚠️ Matiz preexistente (no es del gate): **Sync now solo se
+  renderiza con `status.enabled`**, así que un caducado que pulse Disable pierde el pull manual y no
+  puede reactivar (el botón Enable sí está gateado) — el camino de salida de datos existe mientras
+  no desactive. Ojo: este gating es **solo de la UI del renderer** — los
+  IPC `cloud:setup*` y la Edge Function `cloud-keys` siguen sin gate por entitlement (espejo de la
+  RLS de `user_keys`). El IPC `account:open-checkout` acepta `'ai' | 'cloud' | 'bundle'` y
+  `AccountStatus` expone `aiCheckoutConfigured` / `cloudCheckoutConfigured` /
+  `bundleCheckoutConfigured`.
 - **Exclusión mutua (visual):** el selector de dos tarjetas ya la comunica (solo un backend
   activo; badge "Paused" en GitHub mientras Cloud esté enabled). Además, dentro del panel de
   GitHub sigue el aviso ámbar "paused while NoteFlow Cloud is enabled" (la config se conserva) y,
-  a la inversa, con GitHub conectado y Cloud desbloqueado pero no habilitado, aviso de que activar
-  Cloud pausará GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
+  a la inversa, con GitHub conectado, Cloud desbloqueado pero no habilitado **y entitlement
+  `cloud`** (o sea, justo cuando activar Cloud está al alcance), aviso de que activar Cloud pausará
+  GitHub. El routing real sigue siendo `syncProvider.ts` — la UI solo lo comunica.
 - **Reactividad:** `CloudPanel` se suscribe a `onCloudStatusChanged` + `onAccountStatusChanged`;
   `SyncPanel` a `onCloudStatusChanged` (badges + aviso de pausa). El estado *connected* de GitHub
   lo sube `GitHubSyncSection` al padre vía callback: `sync:status-changed` solo se emite para el

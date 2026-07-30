@@ -34,18 +34,40 @@ supabase db push   # aplica supabase/migrations/*.sql
    6 dígitos. Como el login de NoteFlow es **sin deep links** (el usuario teclea el código, no
    abre un enlace), sin SMTP propio el flujo de login **no funciona ni en desarrollo**.
 
-   Opción rápida: **[Resend](https://resend.com)** (tier gratuito, sin dominio propio para
-   probar):
-   1. Dashboard de Resend → **API Keys** → crear una y copiarla.
-   2. Dashboard de Supabase → Authentication → sección **SMTP Settings** ("Set up custom SMTP"):
+   El proveedor es **[Resend](https://resend.com)**.
+
+   **Verificar un dominio propio — imprescindible para tener usuarios reales.** Sin dominio
+   verificado, Resend presta su `resend.dev` en modo **sandbox**: solo deja enviar a la dirección
+   del titular de la cuenta. Sirve para probar el login con tu propio email, pero **cualquier otro
+   destinatario recibe un rechazo**, así que el registro de usuarios no funciona hasta verificar.
+
+   1. Resend → **Domains → Add Domain**. Usar un **subdominio** de envío
+      (hoy `noteflow.yagoid.es`), no el dominio raíz: aísla la reputación de envío y deja el raíz
+      libre para correo personal. La **región no se puede cambiar** después sin rehacer el
+      dominio — `eu-west-1` (Ireland) para usuarios europeos.
+   2. Crear en el DNS los registros que muestra Resend: un **MX** para los bounces, un **TXT** con
+      el SPF y un **TXT** con la clave DKIM (más un `_dmarc` opcional). Si el proveedor de DNS
+      soporta la **autorización automática** que ofrece Resend (Cloudflare entre otros), es la vía
+      recomendada: evita los dos fallos típicos de hacerlo a mano — repetir el dominio en el campo
+      "Name" (`send.sub.dominio.es.dominio.es`) y dejar un CNAME proxied (en Cloudflare, nube
+      naranja) que hace que la verificación no pase nunca.
+   3. Verificar en Resend (con Cloudflare suele tardar minutos, no horas).
+   4. Resend → **API Keys** → crear una con permiso **Sending access** y restringida al dominio,
+      en vez de una de acceso total.
+   5. Dashboard de Supabase → Authentication → sección **SMTP Settings** ("Set up custom SMTP"):
       - Host: `smtp.resend.com`
       - Port: `465` (SSL) o `587` (TLS)
       - Username: `resend`
       - Password: la API key de Resend
-      - Sender email: `onboarding@resend.dev` (válido para pruebas sin verificar dominio;
-        en producción, verificar un dominio propio en Resend)
+      - Sender email: una dirección del dominio verificado (hoy `noreply@noteflow.yagoid.es`)
       - Sender name: `NoteFlow`
-   3. Guardar.
+   6. Guardar y **probar con un email que no sea el del titular de la cuenta de Resend**: es el
+      único test que demuestra que el sandbox ya no aplica.
+
+   > **Cuota:** el tier gratuito de Resend son **100 correos/día y 3.000/mes**, y **cada intento
+   > de login gasta uno**. Al agotarse, los OTP dejan de salir y el login se cae sin más señal que
+   > un `sendFailed` — vigilar el consumo según crezca la base de usuarios.
+
 3. Dashboard → **Authentication → Emails** → editar **DOS plantillas**: **"Confirm signup"** y
    **"Magic Link"**. Con "Confirm email" activado (el default), el primer OTP de una cuenta
    **nueva** sale por la plantilla "Confirm signup" — no por "Magic Link", que solo se usa para

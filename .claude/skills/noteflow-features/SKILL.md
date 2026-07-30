@@ -848,7 +848,8 @@ Los dos modos (se eligen al configurar, con dos cards):
 
 Flujo del panel según estado:
 - **Sin sesión:** mensaje "inicia sesión en Settings → Account".
-- **Sin claves (`no-keys`):** elección de modo con dos cards (Standard preseleccionada).
+- **Sin claves (`no-keys`):** con la entitlement `cloud`, elección de modo con dos cards (Standard
+  preseleccionada); sin ella, en su lugar sale el bloque de planes (ver "Gating por suscripción").
   Standard = un click ("Enable") y directo a desbloqueado. Private = crear **passphrase**
   (input + confirmación, mínimo 8 caracteres) → se muestra el **recovery code UNA sola vez** en
   un bloque ámbar destacado (copiable, con aviso rojo: perder passphrase + recovery = notas
@@ -868,14 +869,17 @@ Flujo del panel según estado:
   ya subidas; la passphrase y el recovery code actuales dejan de funcionar — el desbloqueo pasa
   a ser automático con la sesión). Nunca silencioso; requiere estar desbloqueado (sin pedir
   ningún secreto).
-- **Gating por suscripción:** solo el botón **Enable sync** exige la entitlement `cloud` (sin
-  ella: mensaje "requires subscription" + el **mismo bloque de planes** que Ajustes → Cuenta —
-  NoteFlow Cloud y, si tampoco tienes AI, el Bundle con badge "Best value" —, cada card clickable
-  para abrir su checkout). Crear claves, unlock, pull y disable funcionan sin suscripción
-  (un suscriptor caducado puede seguir bajando sus datos).
+- **Gating por suscripción:** exigen la entitlement `cloud` **crear las claves** (la elección de
+  modo del estado `no-keys` — configurar una nube que no podrías activar no lleva a ninguna parte)
+  y el botón **Enable sync**. En ambos casos, en su lugar: mensaje "requires subscription" + el
+  **mismo bloque de planes** que Ajustes → Cuenta — NoteFlow Cloud y, si tampoco tienes AI, el
+  Bundle con badge "Best value" —, cada card clickable para abrir su checkout. **Unlock, Sync now,
+  Disable y Lock funcionan sin suscripción**: quien ya tiene claves y datos subidos puede seguir
+  desbloqueando y bajándose sus notas aunque caduque.
 - **Sin sesión**, el panel ya no se limita a pedirte que inicies sesión: muestra también esos
   precios, y clicar cualquier card lleva a Ajustes → Cuenta para crear la cuenta sin salir de Ajustes.
-- Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa".
+- Antes de activar con GitHub Sync conectado, aviso ámbar: "GitHub Sync quedará en pausa" (solo
+  cuando activar Cloud está realmente al alcance, es decir con la entitlement `cloud`).
 
 Detalle técnico (jerarquía de claves, modos managed/e2ee, motor de sync):
 `.claude/context/monetization.md` § 4.

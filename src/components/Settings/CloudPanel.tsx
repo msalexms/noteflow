@@ -312,6 +312,28 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
 
   const isLoading = busy !== 'idle'
 
+  // Entitlement gate — shared by the two places where the panel stops short of
+  // Cloud: the onboarding (no keys yet: creating keys for a cloud you cannot use
+  // is pointless) and the enable button (unlocked but not enabled). Same copy and
+  // same offers in both so the paywall reads identically wherever it shows up.
+  // Unlock, Sync now, Disable and Lock stay ungated: whoever already has keys and
+  // data up there must keep being able to read and take it out after lapsing.
+  // Cloud, plus the Bundle while the AI plan is missing too. Display prices —
+  // the authoritative figure is the checkout's.
+  const subscriptionGate = (
+    <div className="space-y-2">
+      <p className="text-[11px] font-mono text-text-muted leading-relaxed">
+        {t.settings.cloud.requiresSubscription}
+      </p>
+      <PlanOffers
+        products={['cloud', 'bundle']}
+        account={account}
+        busy={isLoading}
+        onSubscribe={handleSubscribe}
+      />
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       {header}
@@ -323,9 +345,14 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
         </div>
       )}
 
+      {/* ── No keys yet + no entitlement: the paywall replaces the onboarding.
+             Creating key material here would only set up a cloud the user
+             cannot enable; nothing is uploaded yet, so nothing to recover ── */}
+      {status.keysState === 'no-keys' && !account.entitlements.cloud && subscriptionGate}
+
       {/* ── Onboarding (no keys yet): choose the encryption mode — two cards,
              Standard (managed) preselected and recommended ── */}
-      {status.keysState === 'no-keys' && (
+      {status.keysState === 'no-keys' && account.entitlements.cloud && (
         <div className="space-y-3">
           <p className="text-[11px] font-mono text-text-muted leading-relaxed">
             {t.settings.cloud.chooseModeDesc}
@@ -511,30 +538,17 @@ export function CloudPanel({ onNavigate }: { onNavigate?: (section: SettingsSect
             </div>
           )}
 
-          {/* Mutual-exclusion heads-up shown BEFORE enabling Cloud over GitHub */}
-          {!status.enabled && githubConnected && (
+          {/* Mutual-exclusion heads-up shown BEFORE enabling Cloud over GitHub —
+              only when enabling is actually within reach (entitlement present) */}
+          {!status.enabled && githubConnected && account.entitlements.cloud && (
             <div className="px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-[11px] font-mono text-yellow-400 leading-relaxed">
               {t.settings.cloud.willPauseGitHub}
             </div>
           )}
 
-          {/* Entitlement gate — enabling only; unlock/pull/disable stay open so a
-              lapsed subscriber can still read and take their data out. */}
-          {!status.enabled && !account.entitlements.cloud && (
-            <div className="space-y-2">
-              <p className="text-[11px] font-mono text-text-muted leading-relaxed">
-                {t.settings.cloud.requiresSubscription}
-              </p>
-              {/* Cloud, plus the Bundle while the AI plan is missing too. Display
-                  prices — the authoritative figure is the checkout's. */}
-              <PlanOffers
-                products={['cloud', 'bundle']}
-                account={account}
-                busy={isLoading}
-                onSubscribe={handleSubscribe}
-              />
-            </div>
-          )}
+          {/* Gate in front of Enable sync — it replaces the button (the other
+              controls of this state stay open, see the constant above). */}
+          {!status.enabled && !account.entitlements.cloud && subscriptionGate}
 
           <div className="flex gap-2 flex-wrap">
             {status.enabled ? (
