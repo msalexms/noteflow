@@ -4,6 +4,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_AI_SETTINGS = void 0;
+exports.markStale = markStale;
+exports.markStaleUnknown = markStaleUnknown;
+exports.getStale = getStale;
 exports.init = init;
 exports.isEnabled = isEnabled;
 exports.primeSettings = primeSettings;
@@ -24,7 +27,9 @@ exports.graph = graph;
  * githubSync.schedulePush), and respawns the worker if it crashes (the index persists).
  */
 const electron_1 = require("electron");
+const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const indexStaleness_1 = require("./indexStaleness");
 const protocol_1 = require("./protocol");
 exports.DEFAULT_AI_SETTINGS = {
     enabled: false,
@@ -71,10 +76,84 @@ function bumpWorkerActivity() {
         void stop().catch((err) => console.error('[aiIndex] idle stop failed:', String(err)));
     }, WORKER_IDLE_STOP_MS);
 }
+// ── Pending index state ("the index is out of date") ────────────────────────
+// The renderer's stale marker must reflect what the index actually holds, so main owns the truth:
+// a note dir enters the pending set the moment it is written and only leaves when the worker says
+// it indexed it. Deriving it from the worker's 'idle' state does not work — that also fires on
+// worker boot, model unload and errors, none of which mean "indexed".
+//
+// Persisted because the gap is durable: scheduleIndex drops the work when the worker is dormant
+// (see below), so those edits stay unindexed until the next explicit reindex — across restarts too.
+// The rules themselves live in indexStaleness.ts (pure, unit-tested).
+let pendingState = null;
+let lastStaleSent = null;
+function pendingPath() {
+    return path_1.default.join(electron_1.app.getPath('userData'), 'ai-index', 'pending.json');
+}
+/** Lazy so nothing touches userData before the app is ready. */
+function pendingNotes() {
+    if (pendingState)
+        return pendingState;
+    try {
+        pendingState = indexStaleness_1.IndexStaleness.fromJSON(JSON.parse(fs_1.default.readFileSync(pendingPath(), 'utf-8')));
+    }
+    catch {
+        pendingState = new indexStaleness_1.IndexStaleness(); // missing or unreadable → nothing pending
+    }
+    return pendingState;
+}
+/** Persist, then notify — but only when the value the renderer sees actually changed. */
+function pendingChanged() {
+    try {
+        const file = pendingPath();
+        fs_1.default.mkdirSync(path_1.default.dirname(file), { recursive: true });
+        fs_1.default.writeFileSync(file, JSON.stringify(pendingNotes().toJSON()), 'utf-8');
+    }
+    catch (err) {
+        // Never let bookkeeping break a note save — worst case the marker resets on the next boot.
+        console.error('[aiIndex] failed to persist pending index state:', String(err));
+    }
+    const next = getStale();
+    if (lastStaleSent && lastStaleSent.stale === next.stale && lastStaleSent.count === next.count)
+        return;
+    lastStaleSent = next;
+    eventSink.stale?.(next);
+}
+/** Flag one note dir as waiting for the index to catch up. No-op while AI is off. */
+function markStale(dirPath) {
+    if (!settings.enabled)
+        return;
+    if (pendingNotes().markDir(path_1.default.basename(dirPath), Date.now()))
+        pendingChanged();
+}
+/** Flag a change we cannot pin to a note dir (e.g. notes deleted by a sync pull). */
+function markStaleUnknown() {
+    if (!settings.enabled)
+        return;
+    if (pendingNotes().markUnknown(Date.now()))
+        pendingChanged();
+}
+function getStale() {
+    if (!settings.enabled)
+        return { stale: false, count: 0 };
+    return pendingNotes().info();
+}
+function clearPending(dirPath, since) {
+    if (pendingNotes().clearDir(path_1.default.basename(dirPath), since))
+        pendingChanged();
+}
+function clearPendingBefore(since) {
+    if (pendingNotes().clearBefore(since))
+        pendingChanged();
+}
+function clearAllPending() {
+    if (pendingNotes().clearAll())
+        pendingChanged();
+}
 // ── Public API ──────────────────────────────────────────────────────────────
 function init(opts) {
     notesDir = opts.notesDir;
-    eventSink = { progress: opts.onProgress, state: opts.onState };
+    eventSink = { progress: opts.onProgress, state: opts.onState, stale: opts.onStale };
 }
 function isEnabled() {
     return settings.enabled;
@@ -95,16 +174,23 @@ function getSettings() {
 async function activateModel() {
     await ensureStarted(); // light SQLite worker
     const res = (await request('load-model', {}));
-    if (res?.needsReindex)
+    if (res?.needsReindex) {
         await reindexAll();
+        return;
+    }
+    // The stored vectors are reusable, so nothing was rebuilt — but notes edited while AI was off
+    // never reached the index (scheduleIndex is a no-op then) and we have no record of which ones.
+    markStaleUnknown();
 }
 /** Apply a new settings snapshot: start/stop/restart the worker as needed. */
 async function applySettings(next) {
     const prev = settings;
     settings = next;
     if (!next.enabled) {
-        // Disable → fully stop the worker (drops both SQLite and the model).
+        // Disable → fully stop the worker (drops both SQLite and the model). Pending work goes with it:
+        // warning about a stale index makes no sense while AI is off, and re-enabling reindexes anyway.
         await stop();
+        clearAllPending();
         return;
     }
     const modelChanged = prev.modelId !== next.modelId;
@@ -121,6 +207,9 @@ async function applySettings(next) {
 function scheduleIndex(dirPath) {
     if (!settings.enabled)
         return;
+    // Mark before the debounce: from this instant the index is behind, whether or not the run below
+    // ever happens.
+    markStale(dirPath);
     const key = path_1.default.basename(dirPath);
     const existing = indexTimers.get(key);
     if (existing)
@@ -128,11 +217,13 @@ function scheduleIndex(dirPath) {
     indexTimers.set(key, setTimeout(async () => {
         indexTimers.delete(key);
         // Only index if the model is already up this session — never wake the worker/model from a save.
-        // While dormant the edit is skipped; the next explicit reindex catches it up.
+        // While dormant the edit is skipped; the next explicit reindex catches it up (it stays pending).
         if (!child || !ready)
             return;
+        const startedAt = Date.now();
         try {
             await request('index-note', { dirPath });
+            clearPending(dirPath, startedAt); // only now is this note really in the index
         }
         catch (err) {
             console.error('[aiIndex] index-note failed:', String(err));
@@ -140,13 +231,27 @@ function scheduleIndex(dirPath) {
     }, INDEX_DEBOUNCE_MS));
 }
 function removeFromIndex(dirPath) {
-    if (!settings.enabled || !child || !ready)
+    if (!settings.enabled)
         return;
-    request('remove-note', { dirPath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)));
+    if (!child || !ready) {
+        markStaleUnknown();
+        return;
+    } // index keeps serving a note that no longer exists
+    const startedAt = Date.now();
+    request('remove-note', { dirPath })
+        .then(() => clearPending(dirPath, startedAt))
+        .catch((err) => {
+        console.error('[aiIndex] remove-note failed:', String(err));
+        markStaleUnknown();
+    });
 }
 async function reindexAll() {
     await ensureStarted();
-    return request('reindex-all', { notesDir });
+    const startedAt = Date.now();
+    const res = await request('reindex-all', { notesDir });
+    // Everything written before the rebuild started is now in the index; notes touched during it stay.
+    clearPendingBefore(startedAt);
+    return res;
 }
 async function search(query, k = 10) {
     if (!settings.enabled)

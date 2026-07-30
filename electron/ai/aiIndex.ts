@@ -7,12 +7,16 @@
  * githubSync.schedulePush), and respawns the worker if it crashes (the index persists).
  */
 import { utilityProcess, app } from 'electron'
+import fs from 'fs'
 import path from 'path'
+import { IndexStaleness, type StaleInfo } from './indexStaleness'
 import {
   DEFAULT_AI_MODEL,
   type IndexState, type IndexProgress, type RelatedNote, type SemanticHit, type GraphEdge,
   type WorkerResponse,
 } from './protocol'
+
+export type { StaleInfo } from './indexStaleness'
 
 export interface AiSettings {
   enabled: boolean
@@ -35,7 +39,11 @@ let starting: Promise<void> | null = null
 
 let settings: AiSettings = { ...DEFAULT_AI_SETTINGS }
 let notesDir = ''
-let eventSink: { progress?: (p: IndexProgress) => void; state?: (s: IndexState) => void } = {}
+let eventSink: {
+  progress?: (p: IndexProgress) => void
+  state?: (s: IndexState) => void
+  stale?: (s: StaleInfo) => void
+} = {}
 
 let nextId = 1
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>()
@@ -67,15 +75,89 @@ function bumpWorkerActivity(): void {
   }, WORKER_IDLE_STOP_MS)
 }
 
+// ── Pending index state ("the index is out of date") ────────────────────────
+// The renderer's stale marker must reflect what the index actually holds, so main owns the truth:
+// a note dir enters the pending set the moment it is written and only leaves when the worker says
+// it indexed it. Deriving it from the worker's 'idle' state does not work — that also fires on
+// worker boot, model unload and errors, none of which mean "indexed".
+//
+// Persisted because the gap is durable: scheduleIndex drops the work when the worker is dormant
+// (see below), so those edits stay unindexed until the next explicit reindex — across restarts too.
+// The rules themselves live in indexStaleness.ts (pure, unit-tested).
+
+let pendingState: IndexStaleness | null = null
+let lastStaleSent: StaleInfo | null = null
+
+function pendingPath(): string {
+  return path.join(app.getPath('userData'), 'ai-index', 'pending.json')
+}
+
+/** Lazy so nothing touches userData before the app is ready. */
+function pendingNotes(): IndexStaleness {
+  if (pendingState) return pendingState
+  try {
+    pendingState = IndexStaleness.fromJSON(JSON.parse(fs.readFileSync(pendingPath(), 'utf-8')))
+  } catch {
+    pendingState = new IndexStaleness() // missing or unreadable → nothing pending
+  }
+  return pendingState
+}
+
+/** Persist, then notify — but only when the value the renderer sees actually changed. */
+function pendingChanged(): void {
+  try {
+    const file = pendingPath()
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(pendingNotes().toJSON()), 'utf-8')
+  } catch (err) {
+    // Never let bookkeeping break a note save — worst case the marker resets on the next boot.
+    console.error('[aiIndex] failed to persist pending index state:', String(err))
+  }
+  const next = getStale()
+  if (lastStaleSent && lastStaleSent.stale === next.stale && lastStaleSent.count === next.count) return
+  lastStaleSent = next
+  eventSink.stale?.(next)
+}
+
+/** Flag one note dir as waiting for the index to catch up. No-op while AI is off. */
+export function markStale(dirPath: string): void {
+  if (!settings.enabled) return
+  if (pendingNotes().markDir(path.basename(dirPath), Date.now())) pendingChanged()
+}
+
+/** Flag a change we cannot pin to a note dir (e.g. notes deleted by a sync pull). */
+export function markStaleUnknown(): void {
+  if (!settings.enabled) return
+  if (pendingNotes().markUnknown(Date.now())) pendingChanged()
+}
+
+export function getStale(): StaleInfo {
+  if (!settings.enabled) return { stale: false, count: 0 }
+  return pendingNotes().info()
+}
+
+function clearPending(dirPath: string, since: number): void {
+  if (pendingNotes().clearDir(path.basename(dirPath), since)) pendingChanged()
+}
+
+function clearPendingBefore(since: number): void {
+  if (pendingNotes().clearBefore(since)) pendingChanged()
+}
+
+function clearAllPending(): void {
+  if (pendingNotes().clearAll()) pendingChanged()
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function init(opts: {
   notesDir: string
   onProgress?: (p: IndexProgress) => void
   onState?: (s: IndexState) => void
+  onStale?: (s: StaleInfo) => void
 }): void {
   notesDir = opts.notesDir
-  eventSink = { progress: opts.onProgress, state: opts.onState }
+  eventSink = { progress: opts.onProgress, state: opts.onState, stale: opts.onStale }
 }
 
 export function isEnabled(): boolean {
@@ -100,7 +182,10 @@ export function getSettings(): AiSettings {
 async function activateModel(): Promise<void> {
   await ensureStarted() // light SQLite worker
   const res = (await request('load-model', {})) as { needsReindex?: boolean }
-  if (res?.needsReindex) await reindexAll()
+  if (res?.needsReindex) { await reindexAll(); return }
+  // The stored vectors are reusable, so nothing was rebuilt — but notes edited while AI was off
+  // never reached the index (scheduleIndex is a no-op then) and we have no record of which ones.
+  markStaleUnknown()
 }
 
 /** Apply a new settings snapshot: start/stop/restart the worker as needed. */
@@ -109,8 +194,10 @@ export async function applySettings(next: AiSettings): Promise<void> {
   settings = next
 
   if (!next.enabled) {
-    // Disable → fully stop the worker (drops both SQLite and the model).
+    // Disable → fully stop the worker (drops both SQLite and the model). Pending work goes with it:
+    // warning about a stale index makes no sense while AI is off, and re-enabling reindexes anyway.
     await stop()
+    clearAllPending()
     return
   }
 
@@ -127,16 +214,21 @@ export async function applySettings(next: AiSettings): Promise<void> {
 /** Debounced incremental index of a single note directory (called from fs:write-note). */
 export function scheduleIndex(dirPath: string): void {
   if (!settings.enabled) return
+  // Mark before the debounce: from this instant the index is behind, whether or not the run below
+  // ever happens.
+  markStale(dirPath)
   const key = path.basename(dirPath)
   const existing = indexTimers.get(key)
   if (existing) clearTimeout(existing)
   indexTimers.set(key, setTimeout(async () => {
     indexTimers.delete(key)
     // Only index if the model is already up this session — never wake the worker/model from a save.
-    // While dormant the edit is skipped; the next explicit reindex catches it up.
+    // While dormant the edit is skipped; the next explicit reindex catches it up (it stays pending).
     if (!child || !ready) return
+    const startedAt = Date.now()
     try {
       await request('index-note', { dirPath })
+      clearPending(dirPath, startedAt) // only now is this note really in the index
     } catch (err) {
       console.error('[aiIndex] index-note failed:', String(err))
     }
@@ -144,13 +236,24 @@ export function scheduleIndex(dirPath: string): void {
 }
 
 export function removeFromIndex(dirPath: string): void {
-  if (!settings.enabled || !child || !ready) return
-  request('remove-note', { dirPath }).catch((err) => console.error('[aiIndex] remove-note failed:', String(err)))
+  if (!settings.enabled) return
+  if (!child || !ready) { markStaleUnknown(); return } // index keeps serving a note that no longer exists
+  const startedAt = Date.now()
+  request('remove-note', { dirPath })
+    .then(() => clearPending(dirPath, startedAt))
+    .catch((err) => {
+      console.error('[aiIndex] remove-note failed:', String(err))
+      markStaleUnknown()
+    })
 }
 
 export async function reindexAll(): Promise<{ ok: boolean; indexed: number }> {
   await ensureStarted()
-  return request('reindex-all', { notesDir }) as Promise<{ ok: boolean; indexed: number }>
+  const startedAt = Date.now()
+  const res = await (request('reindex-all', { notesDir }) as Promise<{ ok: boolean; indexed: number }>)
+  // Everything written before the rebuild started is now in the index; notes touched during it stay.
+  clearPendingBefore(startedAt)
+  return res
 }
 
 export async function search(query: string, k = 10): Promise<SemanticHit[]> {

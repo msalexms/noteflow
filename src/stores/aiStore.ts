@@ -13,9 +13,10 @@ interface AiState {
   enabled: boolean
   modelId: string
   indexState: IndexState
-  // Notes changed since the last completed index — results are out of date until the
-  // incremental indexer catches up (clears itself on the next 'idle').
+  // Notes the index hasn't caught up with yet — results are out of date until it does. Owned by
+  // main (it knows what actually got indexed); this is just the last value it reported.
   stale: boolean
+  staleCount: number
   progress: IndexProgress | null
   relatedByKey: Record<string, RelatedNote[]>
   graphEdges: GraphEdge[]
@@ -36,6 +37,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   modelId: '',
   indexState: 'idle',
   stale: false,
+  staleCount: 0,
   progress: null,
   relatedByKey: {},
   graphEdges: [],
@@ -54,7 +56,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEnabled: async (value) => {
     const next: AiSettings = await window.noteflow.setAiSettings({ enabled: value })
     set({ enabled: next.enabled, modelId: next.modelId })
-    if (!value) set({ relatedByKey: {}, graphEdges: [], progress: null, indexState: 'idle', stale: false })
+    if (!value) set({ relatedByKey: {}, graphEdges: [], progress: null, indexState: 'idle', stale: false, staleCount: 0 })
   },
 
   reindexAll: async () => {
@@ -94,20 +96,26 @@ export const useAiStore = create<AiState>((set, get) => ({
   initListeners: () => {
     const offProgress = window.noteflow.onAiReindexProgress((progress) => set({ progress }))
     const offState = window.noteflow.onAiIndexState((indexState) => {
+      const wasIndexing = get().indexState === 'indexing'
       set({ indexState })
-      // When a (re)index finishes, the index is up to date again: clear the stale flag,
-      // drop cached related results so panels refetch fresh, and refresh the brain
-      // graph's content edges if it's open.
-      if (indexState === 'idle') {
-        set({ relatedByKey: {}, stale: false })
+      // Only a real 'indexing' → 'idle' transition means fresh vectors landed: drop cached related
+      // results so panels refetch, and refresh the brain graph's edges if it's open. Bare 'idle's
+      // (worker boot, model unload) index nothing and must not trigger a refetch.
+      if (indexState === 'idle' && wasIndexing) {
+        set({ relatedByKey: {} })
         if (get().enabled) void get().fetchGraphEdges()
       }
     })
-    // A note changed on disk → the on-disk index no longer matches the latest content until
-    // the incremental indexer (re)runs. Only relevant while AI is on.
-    const offNotes = window.noteflow.onNotesUpdated(() => {
-      if (get().enabled) set({ stale: true })
+    // Staleness comes from main, which tracks what actually reached the index (and persists it,
+    // so edits made while the AI worker was dormant still show up after a restart).
+    let gotStaleEvent = false
+    const offStale = window.noteflow.onAiIndexStale((info) => {
+      gotStaleEvent = true
+      set({ stale: info.stale, staleCount: info.count })
     })
-    return () => { offProgress(); offState(); offNotes() }
+    window.noteflow.aiGetStale()
+      .then((info) => { if (!gotStaleEvent) set({ stale: info.stale, staleCount: info.count }) })
+      .catch((err) => console.error('Failed to read AI index staleness:', err))
+    return () => { offProgress(); offState(); offStale() }
   },
 }))

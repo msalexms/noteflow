@@ -173,6 +173,12 @@ const api = {
         electron_1.ipcRenderer.on('ai:index-state', wrapper);
         return () => electron_1.ipcRenderer.removeListener('ai:index-state', wrapper);
     },
+    aiGetStale: () => electron_1.ipcRenderer.invoke('ai:get-stale'),
+    onAiIndexStale: (cb) => {
+        const wrapper = (_event, info) => cb(info);
+        electron_1.ipcRenderer.on('ai:index-stale', wrapper);
+        return () => electron_1.ipcRenderer.removeListener('ai:index-stale', wrapper);
+    },
     // AI / LLM provider (chat + second brain)
     aiLlmGetConfig: () => electron_1.ipcRenderer.invoke('ai:llm-get-config'),
     aiLlmPresets: () => electron_1.ipcRenderer.invoke('ai:llm-presets'),

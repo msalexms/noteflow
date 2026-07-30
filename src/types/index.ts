@@ -176,6 +176,13 @@ export interface IndexProgress {
   phase: string
 }
 
+// Whether the index is behind the notes — owned by main (see aiIndex.ts), not derived from
+// IndexState: 'idle' also fires on worker boot and model unload, which index nothing.
+export interface IndexStaleInfo {
+  stale: boolean
+  count: number
+}
+
 // ── AI / LLM provider (chat + second brain) ─────────────────────────────────────
 
 // A provider preset (catalog entry) — the renderer renders the picker from these
@@ -494,6 +501,8 @@ declare global {
       aiReindexAll: () => Promise<{ ok: boolean }>
       onAiReindexProgress: (cb: (progress: IndexProgress) => void) => () => void
       onAiIndexState: (cb: (state: IndexState) => void) => () => void
+      aiGetStale: () => Promise<IndexStaleInfo>
+      onAiIndexStale: (cb: (info: IndexStaleInfo) => void) => () => void
       // AI / LLM provider (chat + second brain)
       aiLlmGetConfig: () => Promise<LlmConfigPublic>
       aiLlmPresets: () => Promise<LlmPreset[]>

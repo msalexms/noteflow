@@ -324,6 +324,12 @@ const api = {
     ipcRenderer.on('ai:index-state', wrapper)
     return () => ipcRenderer.removeListener('ai:index-state', wrapper)
   },
+  aiGetStale: () => ipcRenderer.invoke('ai:get-stale'),
+  onAiIndexStale: (cb: (info: { stale: boolean; count: number }) => void) => {
+    const wrapper = (_event: unknown, info: { stale: boolean; count: number }) => cb(info)
+    ipcRenderer.on('ai:index-stale', wrapper)
+    return () => ipcRenderer.removeListener('ai:index-stale', wrapper)
+  },
 
   // AI / LLM provider (chat + second brain)
   aiLlmGetConfig: () => ipcRenderer.invoke('ai:llm-get-config'),

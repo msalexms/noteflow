@@ -329,7 +329,19 @@ function handleAccountStatusChanged() {
     syncCloudRealtimeState();
     emitAccountStatusChanged();
 }
+// Notes that arrive from a pull are content the semantic index has never seen. Schedule the
+// incremental index for each pulled note dir (skipped while the worker is dormant, but it still
+// flags the index as behind) and mark deletions/metadata as an unattributable change.
+function indexPulledNotes(result) {
+    if (!aiIndex.isEnabled())
+        return;
+    for (const dirPath of result.updatedFiles)
+        aiIndex.scheduleIndex(dirPath);
+    if (result.hadDeletions || result.hadMetadataChanges)
+        aiIndex.markStaleUnknown();
+}
 function broadcastPullResult(result) {
+    indexPulledNotes(result);
     if (result.hadDeletions || result.hadMetadataChanges) {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
     }
@@ -1706,6 +1718,7 @@ electron_1.ipcMain.handle('sync:disconnect', () => {
 // Manual GitHub pull + its broadcast (shared by sync:pull and sync:pull-active).
 async function githubManualPull() {
     const result = await githubSync.pullNotes(NOTES_DIR);
+    indexPulledNotes(result);
     // Guarded no-op once the remote is already on format v2
     githubSync.migrateRemoteToV2IfNeeded(NOTES_DIR).then((didMigrate) => {
         if (didMigrate) {
@@ -1867,6 +1880,7 @@ electron_1.ipcMain.handle('cloud:disable', () => {
 // Manual Cloud pull + its broadcast (shared by cloud:pull and sync:pull-active).
 async function cloudManualPull() {
     const result = await cloudSync.pullNotes(NOTES_DIR);
+    indexPulledNotes(result);
     if (result.hadDeletions || result.hadMetadataChanges || result.pulled === 0) {
         electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('notes-updated'));
     }
@@ -1908,6 +1922,9 @@ function emitAiState(state) {
 function emitAiProgress(progress) {
     electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:reindex-progress', progress));
 }
+function emitAiStale(info) {
+    electron_1.BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('ai:index-stale', info));
+}
 electron_1.ipcMain.handle('ai:get-settings', () => readAiSettings());
 electron_1.ipcMain.handle('ai:set-settings', async (_event, patch) => {
     const prev = readAiSettings();
@@ -1929,6 +1946,7 @@ electron_1.ipcMain.handle('ai:related', (_event, noteId, sectionId, k) => aiInde
 electron_1.ipcMain.handle('ai:search', (_event, query, k) => aiIndex.search(query, k));
 electron_1.ipcMain.handle('ai:graph', () => aiIndex.graph());
 electron_1.ipcMain.handle('ai:reindex-all', () => aiIndex.reindexAll());
+electron_1.ipcMain.handle('ai:get-stale', () => aiIndex.getStale());
 // ── LLM provider (chat / second brain) ─────────────────────────────────────────
 // The provider runs here in main; the API key lives encrypted in settings.aiLlm and never
 // reaches the renderer. RAG retrieval reuses the local index (aiIndex.search/graph).
@@ -3270,7 +3288,7 @@ electron_1.app.whenReady().then(async () => {
     checkExpiredNotes();
     // Semantic index (AI). init() wires config; primeSettings defers the worker warmup so
     // model loading / reindex doesn't compete with the app's first paint.
-    aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState });
+    aiIndex.init({ notesDir: NOTES_DIR, onProgress: emitAiProgress, onState: emitAiState, onStale: emitAiStale });
     aiIndex.primeSettings(readAiSettings());
     // The format migration rewrote every note path — the AI index stores stale
     // file paths and must be rebuilt once. Deferred so it doesn't fight startup.

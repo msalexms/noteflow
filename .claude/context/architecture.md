@@ -262,6 +262,7 @@ Renderer (React)
 | `ai:search` | handle | Búsqueda semántica híbrida (vector + FTS5, RRF). La usa el RAG del chat (Fase 3) |
 | `ai:graph` | handle | Aristas de contenido nota-a-nota (centroides por nota + coseno) para la vista cerebro (Fase 2) |
 | `ai:reindex-all` | handle | Reindexa TODAS las secciones en background (lotes de 16) con progreso |
+| `ai:get-stale` | handle | `{stale, count}`: si el índice va por detrás de las notas (main lleva la cuenta, persistida). Se emite además por el evento `ai:index-stale` — detalle en `ai.md` |
 | `ai:llm-get-config` / `ai:llm-set-config` | handle | Lee/escribe `settings.aiLlm` (config del LLM por proveedor). `get` saneado (sin key); `set` aplica al **preset activo** (clave/modelo/baseUrl por proveedor) y cifra la key con `safeStorage` |
 | `ai:llm-presets` | handle | Catálogo de presets de proveedor (`electron/ai/llm/presets.ts`) |
 | `ai:llm-list-models` / `ai:llm-test` | handle | Lista modelos del proveedor activo / valida conexión+credenciales |
@@ -281,6 +282,7 @@ Renderer (React)
 `account:status-changed` (broadcast del status público de la cuenta a todas las ventanas),
 `cloud:status-changed` (broadcast del status público de NoteFlow Cloud — mismo shape que `cloud:get-status`),
 `ai:reindex-progress` (`{done,total}`), `ai:index-state` (estado del índice),
+`ai:index-stale` (`{stale,count}` — índice por detrás de las notas; OJO: no es lo mismo que `ai:index-state`),
 `ai:chat-delta` (`{requestId,delta}`), `ai:chat-sources` (`{requestId,sources}`),
 `ai:chat-done` (`{requestId,aborted?}`), `ai:chat-error` (`{requestId,error}`),
 `ai:chat-tool-call` (`{requestId,toolCallId,name,input,label}` — `label` es la frase en presente

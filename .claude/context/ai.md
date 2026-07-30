@@ -38,6 +38,20 @@ consumidores** (related ✅, grafo ✅, chat ✅).
   **lee la carpeta de la nota desde disco** (`noteFormat.parseNoteDir`); `notes.file_path` en la
   DB guarda el path del DIRECTORIO. Hash por sección para no re-embeber lo que no cambió.
   `stripNoise` quita imágenes base64 y trunca a ~2000 chars antes de embeber (crítico: 157s→6.7s).
+  Las notas que llegan por **pull** (GitHub/Cloud) también pasan por `scheduleIndex` vía
+  `indexPulledNotes` en `main.ts`.
+- **Índice desactualizado (punto ámbar del botón "Reindex" en la vista cerebro):** la verdad vive en
+  **main** — `aiIndex` + `electron/ai/indexStaleness.ts` (lógica pura, con tests). Un dir de nota
+  entra en pendientes al escribirse (`scheduleIndex`, **antes** del debounce) y solo sale cuando el
+  worker confirma: `index-note`/`remove-note` OK, o `reindex-all` (corte por timestamp — lo editado
+  *durante* el rebuild sigue pendiente). Se persiste en `userData/ai-index/pending.json` porque
+  `scheduleIndex` **descarta** el trabajo con el worker dormido (idle-stop 90s) y esas ediciones
+  quedan sin indexar también entre sesiones. Los cambios no atribuibles a un dir (borrados/metadata
+  de un pull, reactivar la IA sin reindex) usan el flag `unknownAt`, que solo limpia un reindex
+  completo. Main lo publica por `ai:index-stale` (+ `ai:get-stale` al montar) y `aiStore` solo lo
+  refleja. **Nunca derivarlo de `ai:index-state === 'idle'`:** el worker emite `idle` también al
+  arrancar, al descargar el modelo por inactividad y en el `catch` de errores — por eso la marca
+  antes casi nunca se veía.
 - **related (por sección activa):** centroides por sección → **centrado por la media global**
   (corrige anisotropía) → coseno → de otras notas la mejor por nota, hermanas de la misma nota
   individuales → umbral + top-k. **search:** híbrido vector+FTS5 con fusión RRF (para Fase 3).
