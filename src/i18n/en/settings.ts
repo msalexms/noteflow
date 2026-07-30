@@ -141,6 +141,21 @@ export const settings = {
     openBrowser: 'Open browser',
     connecting: 'Connecting...',
     syncNow: 'Sync now',
+    // Mirror local → repo. Only shown while NoteFlow Cloud is enabled: GitHub is
+    // then a paused write-only mirror and the repo slowly goes stale.
+    mirror: 'Mirror to GitHub',
+    mirrorConfirmTitle: 'Mirror to GitHub?',
+    mirrorConfirmMessage: 'The repository will be overwritten with the notes on this device: anything missing or different is uploaded, and anything that no longer exists here is deleted from the repository. Your notes on this device are not modified.',
+    mirrorConfirmAction: 'Mirror',
+    mirrorDone: 'Repository mirrored — {pushed} uploaded, {deleted} deleted.',
+    mirrorAlreadyMirrored: 'The repository already matches this device.',
+    mirrorFailed: 'Could not mirror to GitHub.',
+    mirrorRequiresCloud: 'Mirroring is only available while NoteFlow Cloud is enabled.',
+    mirrorInProgress: 'A mirror is already running.',
+    mirrorTokenError: 'Could not read the GitHub token. Please reconnect GitHub.',
+    // Deletions are skipped whenever a local file can't be read: an incomplete
+    // local snapshot would make live notes look deleted.
+    mirrorDeletionsSkipped: 'Nothing was deleted from the repository: some local files could not be read.',
     disconnect: 'Disconnect',
     setupDesc: "Sync notes across machines via a private GitHub repository. The repo will be created automatically if it doesn't exist.",
     repoName: 'Repository name',

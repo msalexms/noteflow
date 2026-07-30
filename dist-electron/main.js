@@ -1742,6 +1742,21 @@ async function githubManualPull() {
     return result;
 }
 electron_1.ipcMain.handle('sync:pull', async () => githubManualPull());
+// Mirror local → repo: leaves the GitHub repo as an exact copy of what is on
+// disk (uploads what differs, deletes what is gone). Offered ONLY while NoteFlow
+// Cloud owns the sync loop — that is when GitHub is a paused write-only mirror
+// and the repo rots. The Cloud gate lives here and not in githubSync.ts, which
+// cannot import cloudSync.ts (that module imports it — it would be a cycle).
+// Local notes are untouched, so no 'notes-updated' broadcast; the sync status
+// (lastSync/error) does change, hence the usual status broadcast.
+electron_1.ipcMain.handle('sync:mirror-to-github', async () => {
+    if (!cloudSync.isCloudSyncEnabled()) {
+        return { ok: false, pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [], error: 'cloud-required' };
+    }
+    const result = await githubSync.mirrorToGitHub(NOTES_DIR);
+    emitSyncStatusChanged();
+    return result;
+});
 // Routes the titlebar's manual pull to whichever backend is live: Cloud when
 // enabled (they are mutually exclusive), GitHub otherwise. Same broadcast
 // contract as sync:pull / cloud:pull so the store reloads either way.

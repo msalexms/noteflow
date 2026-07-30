@@ -12,7 +12,9 @@ ver `monetization.md` § 4 "Settings UI").
 ⚠️ Exclusión mutua = **enrutado**, no "GitHub no escribe nunca": el pull manual de GitHub
 (`sync:pull`, botón de Settings → Sync → GitHub) sigue disponible con Cloud activo y su catch-up
 (`flushPendingLocalChanges`) empuja ficheros al repo **sin pasar por el router** — es lo que evita
-que el espejo pausado se quede obsoleto (ver la regla de borrado más abajo).
+que el espejo pausado se quede obsoleto (ver la regla de borrado más abajo). Ese catch-up es
+parcial (filtra por `updated` y nunca borra): para dejar el repo **exacto** está la acción
+**"Espejar en GitHub"** (`mirrorToGitHub`, abajo), que solo se ofrece con Cloud activo.
 
 **Cerrar sesión de la cuenta NoteFlow apaga Cloud** (`enabled = false` vía `disableCloudSync()`,
 que conserva `lastSync`/`pullCursor`/journal) → se **libera la exclusión mutua** y GitHub Sync
@@ -73,6 +75,19 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   (regla de borrado del pull); subirlas al remoto por adelantado las hace inmunes (el pull conserva
   toda carpeta presente en remoto). No-op si el gate de push está cerrado (`initialPullStatus!=='ok'`)
   — ahí `flushPendingLocalChanges` las sube tras el primer pull.
+- **⚠️ INVARIANTE — un PUT solo ocurre si el contenido DIFIERE del remoto.** La Contents API
+  **commitea un PUT idéntico igualmente** (un commit cuyo tree es el del padre), así que reenviar un
+  fichero sin cambios ensucia el historial sin cambiar nada: el repo del usuario llegó a tener un
+  **23,8 % de commits vacíos** (ráfagas de 170+ sobre 309 ficheros). Dos guardas, ninguna con
+  requests extra:
+  1. **`upsertRemoteFileNow`:** el GET que ya hace para obtener el `sha` (token de concurrencia que
+     la Contents API exige) devuelve **el git blob sha** del fichero → si coincide con
+     `gitBlobSha(content)` **no hay PUT** y la función retorna OK. Los llamantes que cuentan
+     `pushed++` y limpian el journal **siguen siendo correctos**: el remoto ya tiene exactamente ese
+     contenido, la intención está satisfecha. Defensivo: si la respuesta no trae un `sha` string (un
+     directorio responde con un array) no se salta nada. El reintento por conflicto (`_retrying`)
+     reentra por la misma función y hereda la guarda.
+  2. **Catch-up del pull** (`flushPendingLocalChanges`): ver abajo.
 - **Pull:** `pullNotes(notesDir)` — agrupa los blobs del árbol por carpeta de nota; la **carpeta
   es la unidad de conflicto**: compara `updated:` de `note.md` y si el remoto es más nuevo
   escribe la carpeta ENTERA (y borra secciones locales que ya no existan en remoto). Borrado de
@@ -109,7 +124,9 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   un `updated` viejo, que el flush normal nunca sube. Cerrar sesión pasa por `disableCloudSync()`, así
   que también marca. El **primer pull que termine OK** lo consume y corre `flushPendingLocalChanges`
   con `previousLastSync = undefined`, que re-encola todas las carpetas de nota **cuyo `updated` sea
-  parseable** (las que no lo sea se saltan, igual que en el flush normal). Solo se limpia en el camino
+  parseable** (las que no lo sea se saltan, igual que en el flush normal) — y dentro de cada una,
+  solo los ficheros que **difieran** del remoto (filtro por blob sha, abajo: es justo el caso que
+  producía las ráfagas de 170+ commits vacíos). Solo se limpia en el camino
   de éxito, nunca en el `catch`. Mientras Cloud siga habilitado, los pulls posteriores corren el flush
   **normal** (desde `previousLastSync`): mantiene el repo razonablemente fresco sin re-subir el corpus
   entero, pero ⚠️ **filtra por el `updated` del `note.md`, no por el momento de llegada**, así que una
@@ -119,6 +136,79 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   `persistMigratedAt`): las closures del push debounced viven minutos (debounce + cola de mutaciones
   serializada) y escribir sobre el snapshot viejo borraría un `needsFullReconcile` puesto entretanto,
   re-armando la regla de borrado.
+- **Espejo local → repo (`mirrorToGitHub(notesDir)`), acción manual solo-Cloud:** deja el repo como
+  **copia exacta** del dir de notas — sube lo que falte o difiera, **borra del remoto** lo que ya no
+  exista en local y reafirma el marcador v2. Botón "Mirror to GitHub"/"Espejar en GitHub" en
+  Settings → Sync → GitHub, **entre "Sincronizar ahora" y "Desconectar" y solo si Cloud está
+  habilitado** (con diálogo de confirmación: el repo se sobrescribe y se borran ficheros de él).
+  Existe porque con Cloud activo GitHub es un espejo de **solo escritura**: no recibe borrados y el
+  flush del pull filtra por el `updated` del `note.md`, así que una nota que Cloud trajo de otro
+  dispositivo con `updated` viejo nunca sube. "Sincronizar ahora" (`sync:pull`) NO cambia.
+  - **Gate de Cloud en `main.ts`** (`sync:mirror-to-github` → `{ok:false, error:'cloud-required'}`
+    si Cloud está apagado): `githubSync.ts` no puede importar `cloudSync.ts` (ciclo). El handler no
+    emite `notes-updated` (el disco no cambia), solo `sync:status-changed`.
+  - **Decisión pura y testeada en `electron/mirrorPlan.ts`** (sin imports de Electron, patrón
+    `syncState.ts`): `planMirror(localFiles, remoteBlobs, metadataFilenames)` → `{toUpload, toDelete,
+    unchanged}`. Los idénticos se saltan **sin ninguna request** comparando el **git blob sha
+    calculado en local** (`gitBlobSha` = `sha1("blob <bytes>\0<content>")`) con el sha del tree.
+  - ⚠️ **Dos condiciones más para borrar, ambas antipérdida:**
+    1. **Solo se toca lo que hay dentro de una carpeta de nota REAL del remoto**, es decir anclada
+       por `<dir>/note.md` (misma regla que `groupRemoteNoteDirs`). Una carpeta remota **sin ancla**
+       se deja **intacta por completo** (ni `deleteDir` ni `delete` por fichero): no es una nota para
+       ninguna parte de la app y el pull ni la mira, así que dejarla no resucita nada, mientras que
+       journalar un `deleteDir` sobre ella sería peligroso — si luego se apaga Cloud,
+       `retrySyncJournal` la drena con `deleteRemoteDirNow`, que barre **todo** lo que cuelgue de
+       `<dir>/` sin allowlist (un `docs/` del usuario perdería `docs/logo.png` y sus subcarpetas).
+       *Efecto colateral aceptado:* secciones huérfanas de una carpeta cuyo `note.md` nunca se subió
+       no se limpian; el pull las ignora igual.
+    2. **Si falló la lectura de CUALQUIER fichero local, la fase de borrado se salta entera.** Con
+       la foto local incompleta, "no existe en local" no significa nada: un `note.md` ilegible
+       (EACCES, lock de antivirus) parecería una nota borrada y se llevaría su carpeta del repo. El
+       resultado lo comunica con un **código** en `warnings` (`'deletions-skipped-unreadable'`) que
+       el renderer traduce, separado de `errors` — ahí van los mensajes crudos de la API de GitHub,
+       que no son copy nuestro.
+       En la misma línea, el espejo empieza con un `readdirSync(notesDir)` explícito: `listNoteDirs`
+       traga el fallo y devuelve `[]` (tolerancia intencionada que usan otros sitios), lo que aquí
+       sería indistinguible de "el usuario borró todas las notas" — vaciaría el repo **y** el run
+       parecería limpio. Un dir **vacío pero legible** sí espeja (vaciar el repo es justo lo que se
+       pide, y el diálogo lo avisa).
+  - ⚠️ **`toDelete` viene AGRUPADO en entradas de journal (`MirrorDeletion`)**, no como lista plana:
+    una carpeta de nota que ya no existe en local se borra como **un solo `deleteDir` con clave
+    `<dir>`** (como `scheduleDeleteDir`), y el `delete` por fichero queda solo para secciones sueltas
+    de una nota que SÍ sigue en local y para ficheros de raíz. Es una **cuestión de pérdida de
+    datos**, no de estética: si el DELETE de `<dir>/note.md` falla y estaba journalado como `delete`
+    de fichero, el pull **no lo respeta** — `shouldPullSkipDir` solo mira `deleteDir`, y el ancla se
+    reescribe sin pasar por `shouldPullSkipFile` (esa guarda solo cubre las secciones) → la nota
+    borrada resucita en disco y Cloud la propaga a todos los dispositivos.
+  - ⚠️ **Allowlist de borrado (`isMirrorDeletable`) — lo crítico:** solo se borra (a) `<dir>/*.md`
+    dentro de una carpeta de nota, (b) un `METADATA_FILENAMES` de raíz, (c) un `.md` plano de raíz
+    (restos de v1). **Nunca** `README.md` (lo escribe NoteFlow y no existe en local), nunca nada con
+    un segmento que empiece por `.` (marcador `.noteflow-format`, `.github/`, `.gitignore`), nunca
+    otras extensiones de raíz (LICENSE…) ni anidamiento más profundo. La lista de metadatos se
+    **pasa como parámetro** para no crear un 5º espejo de `METADATA_FILENAMES`.
+  - **Durabilidad:** toda subida/borrado pasa por `upsertRemoteFile`/`removeRemoteFile` (la cola
+    serializada) y se journala con las mismas claves que el push/delete normales, **persistiendo
+    `sync-state.json` en el acto** al journalar cada borrado (como `scheduleDelete`/
+    `scheduleDeleteDir`): si se persistiera solo al final, cerrar la app a media pasada dejaría la
+    carpeta a medio borrar en el repo y **sin** entrada en el journal → el siguiente pull manual
+    resucitaría la nota desde el `note.md` que quedó. ⚠️ **Pero aquí el
+    journal NO significa reintento automático:** el espejo solo corre con Cloud activo, y en ese
+    estado **nada drena el journal de GitHub** (el tick del autosync sale antes — `main.ts` — y
+    `retrySyncJournal` está gateado por `initialPullStatus === 'ok'`). El journal sirve de red ante
+    crash y de **guarda del pull manual** (un `deleteDir` pendiente impide que "Sincronizar ahora"
+    resucite la nota); la recuperación real de un fallo es **volver a lanzar el espejo**, y la única
+    señal son `syncError` y los `errors` que devuelve la acción. Si más tarde se apaga Cloud, un
+    `deleteDir` journalado sí se reintenta vía `deleteRemoteDirNow`, que barre **todos** los blobs
+    bajo la carpeta (igual que borrar una nota normalmente).
+    Tras cada subida/skip se cachea el sha de los anclas `<dir>/note.md` y de los metadatos, y se
+    poda con `pruneShas` a lo que queda en el remoto. Los ficheros que resultan **idénticos** también
+    dan de baja su `upsert` journalado (un timer de push cancelado al empezar): dejarlo colgado
+    desarmaría para siempre la regla de borrado local de ese dir (`shouldDeletionRuleSkipDir`).
+  - **Al terminar SIN errores** bumpea `lastSync` (al instante **previo** a leer el disco, para no
+    exponer a la regla de borrado una nota escrita durante el espejo) y **consume
+    `needsFullReconcile`**: tras un espejo exacto el repo sí conoce todo lo que hay en disco. Con
+    cualquier error no toca ninguno de los dos. Guarda de reentrada `mirrorInFlight` (doble clic) y
+    cancelación de los `pushTimers` al empezar (como `pushAllNotes`).
 - **Metadata:** `METADATA_FILENAMES` = groups.json, **folders.json**, section-colors.json,
   **note-order.json**, templates.json, ui-settings.json (los dos en negrita se pusheaban pero NO
   se pulleaban — bug arreglado con el cambio de formato). `templates.json` (plantillas) y
@@ -132,6 +222,8 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   (`sync-state.json` perdido o corrupto, `disconnectGitHub`, `pruneShas`), el primer pull tras una
   pausa larga de Cloud sobrescribe los metadatos locales con los viejos. Las notas sobreviven (la
   regla de borrado ya no corre en ese escenario), pero pierden carpeta/grupo/orden.
+  👉 Lo que **hoy resuelve** ese escenario es la acción de **espejo** (arriba): sube los metadatos
+  locales al repo y re-cachea sus SHAs, así que el siguiente pull ya no tiene nada viejo que pisar.
 - **Autosync:** cada 5 min (`AUTO_SYNC_INTERVAL_MS`) mientras esté conectado: primero drena el
   journal (`retrySyncJournal`), luego pull (que se pospone si quedan mutaciones en vuelo).
 - **Delete:** `scheduleDelete(relPath)` (sección suelta) y `scheduleDeleteDir(dir)` (lista el
@@ -175,5 +267,22 @@ ver `monetization.md` § 4 "Cliente CLI (headless)".
   metadatos).
 - **Repo:** se crea automáticamente con `private: true` + `auto_init: true` si no existe.
 - **initialPullStatus** (`pending|ok|failed`) gatea pushes hasta que el primer pull tenga éxito.
-  `flushPendingLocalChanges` re-encola la carpeta entera cuando `note.md updated > lastSync`.
+- **Catch-up de subida (`flushPendingLocalChanges`) — dos niveles de filtro:**
+  1. **Puerta por carpeta:** se salta la nota cuyo `note.md updated <= lastSync` (o cuyo `updated` no
+     sea parseable). Es lo único que distingue "hay algo que subir": el timestamp **no dice qué
+     sección cambió**, así que selecciona la carpeta ENTERA.
+  2. **Filtro por fichero (blob sha):** dentro de la carpeta se salta cada `.md` cuyo
+     `gitBlobSha(contenido en disco)` coincida con el sha del **tree que el pull ya trajo** — se le
+     pasa el `treeShaByPath` de `pullNotes` (`remoteHasContent` en `mirrorPlan.ts`, puro y testeado),
+     así que **cero requests extra**. Sin él, editar el título de una nota de 8 secciones encolaba 9
+     pushes de los que 8 eran no-ops (y, antes de la guarda de `upsertRemoteFileNow`, 8 commits
+     vacíos). ⚠️ **Nunca se salta por falta de datos**: sin mapa de shas, con el path ausente del
+     tree o si falla la lectura ⇒ se encola (saltar sería perder un push).
+     Al saltar un fichero se **da de baja su `upsert` journalado** (mismo razonamiento que la pasada
+     `unchanged` de `mirrorToGitHub`): la intención está satisfecha y dejarla colgada desarmaría para
+     siempre la regla de borrado local de ese dir (`shouldDeletionRuleSkipDir`). La función devuelve
+     si el journal cambió y `pullNotes` lo persiste con el resto del estado.
+
+  Con esto un guardado real sigue costando **2 commits** (`note.md` + la sección tocada): el push por
+  la Git Data API (blobs→tree→commit, 1 commit por guardado) está **descartado por ahora**.
 - **Migración remota:** `migrateRemoteToV2IfNeeded(notesDir)` — ver "Migración v1 → v2".

@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Cloud, CloudOff, ExternalLink, Github, Loader, Pause, RefreshCw, Unlink } from 'lucide-react'
+import { Cloud, CloudOff, ExternalLink, Github, Loader, Pause, RefreshCw, Unlink, UploadCloud } from 'lucide-react'
 import { useNotesStore } from '../../stores/notesStore'
 import { plural, tf } from '../../i18n/format'
 import { useT } from '../../i18n/useT'
+import { ConfirmModal } from '../ConfirmModal'
 import { CloudPanel } from './CloudPanel'
 import type { SettingsSection } from './SettingsModal'
 import { settingsButtonClass } from './ui'
@@ -16,7 +17,9 @@ interface SyncStatus {
   error?: string
 }
 
-type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling'
+type Step = 'idle' | 'waiting-auth' | 'completing' | 'pulling' | 'mirroring'
+
+type MirrorResult = Awaited<ReturnType<typeof window.noteflow.mirrorToGitHub>>
 
 type Backend = 'cloud' | 'github'
 
@@ -120,7 +123,7 @@ export function SyncPanel({ onNavigate }: { onNavigate?: (section: SettingsSecti
                 <span>{t.settings.sync.pausedByCloud}</span>
               </div>
             )}
-            <GitHubSyncSection onConnectedChange={setGithubConnected} />
+            <GitHubSyncSection onConnectedChange={setGithubConnected} cloudEnabled={cloudEnabled} />
           </div>
         )}
       </section>
@@ -164,7 +167,15 @@ function BackendCard({
   )
 }
 
-function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connected: boolean) => void }) {
+function GitHubSyncSection({
+  onConnectedChange,
+  cloudEnabled,
+}: {
+  onConnectedChange: (connected: boolean) => void
+  // Cloud owns the sync loop → GitHub is a paused write-only mirror, which is the
+  // only situation where the "Mirror to GitHub" action is offered (main gates it too).
+  cloudEnabled: boolean
+}) {
   const t = useT()
   const loadNotes = useNotesStore((s) => s.loadNotes)
 
@@ -175,6 +186,8 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
   const [userCode, setUserCode] = useState<string | null>(null)
   const [verificationUri, setVerificationUri] = useState<string | null>(null)
   const [pullResult, setPullResult] = useState<{ pulled: number; errors: string[] } | null>(null)
+  const [mirrorResult, setMirrorResult] = useState<MirrorResult | null>(null)
+  const [confirmMirror, setConfirmMirror] = useState(false)
 
   useEffect(() => {
     window.noteflow.getSyncStatus().then(setStatus)
@@ -237,10 +250,25 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
   async function handlePull() {
     setStep('pulling')
     setError(null)
+    setMirrorResult(null)
     const result = await window.noteflow.pullNotes()
     setPullResult(result)
     setStep('idle')
     if (result.pulled > 0) await loadNotes()
+    const updated = await window.noteflow.getSyncStatus()
+    setStatus(updated)
+  }
+
+  // Local → repo. Nothing on disk changes, so no loadNotes() — only the sync
+  // status (lastSync / error) needs refreshing.
+  async function handleMirror() {
+    setStep('mirroring')
+    setError(null)
+    setPullResult(null)
+    setMirrorResult(null)
+    const result = await window.noteflow.mirrorToGitHub()
+    setMirrorResult(result)
+    setStep('idle')
     const updated = await window.noteflow.getSyncStatus()
     setStatus(updated)
   }
@@ -250,6 +278,29 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
     const updated = await window.noteflow.getSyncStatus()
     setStatus(updated)
     setPullResult(null)
+    setMirrorResult(null)
+  }
+
+  function mirrorMessage(result: MirrorResult): string {
+    if (result.ok) {
+      return result.pushed === 0 && result.deleted === 0
+        ? t.settings.sync.mirrorAlreadyMirrored
+        : tf(t.settings.sync.mirrorDone, { pushed: result.pushed, deleted: result.deleted })
+    }
+    switch (result.error) {
+      case 'cloud-required': return t.settings.sync.mirrorRequiresCloud
+      case 'in-progress': return t.settings.sync.mirrorInProgress
+      case 'token': return t.settings.sync.mirrorTokenError
+      case 'not-connected': return t.settings.sync.notConnected
+      // Per-file failures (GitHub API messages) are listed below the message.
+      default: return t.settings.sync.mirrorFailed
+    }
+  }
+
+  function mirrorWarning(code: MirrorResult['warnings'][number]): string {
+    switch (code) {
+      case 'deletions-skipped-unreadable': return t.settings.sync.mirrorDeletionsSkipped
+    }
   }
 
   const isLoading = step !== 'idle'
@@ -310,6 +361,25 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
             : plural(t.settings.sync.pulled, pullResult.pulled)}
           {pullResult.errors.length > 0 && (
             <div className="mt-1 text-[11px] text-red-400">{pullResult.errors.join(', ')}</div>
+          )}
+        </div>
+      )}
+
+      {/* Mirror result */}
+      {mirrorResult && (
+        <div className={`px-3 py-2 rounded-lg text-xs font-mono ${
+          mirrorResult.ok
+            ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+            : 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400'
+        }`}>
+          {mirrorMessage(mirrorResult)}
+          {/* Our own notices — localized from codes. The raw GitHub API
+              failures below stay verbatim (they aren't NoteFlow copy). */}
+          {mirrorResult.warnings.map((code) => (
+            <div key={code} className="mt-1 text-[11px]">{mirrorWarning(code)}</div>
+          ))}
+          {mirrorResult.errors.length > 0 && (
+            <div className="mt-1 text-[11px] text-red-400">{mirrorResult.errors.join(', ')}</div>
           )}
         </div>
       )}
@@ -383,6 +453,22 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
             )}
             {t.settings.sync.syncNow}
           </button>
+          {/* Only while Cloud owns the sync loop: that is when the paused repo
+              goes stale (no deletions, no notes coming from other devices). */}
+          {cloudEnabled && (
+            <button
+              onClick={() => setConfirmMirror(true)}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-surface-2 hover:bg-surface-3 text-text transition-colors disabled:opacity-40"
+            >
+              {step === 'mirroring' ? (
+                <Loader size={11} className="animate-spin" />
+              ) : (
+                <UploadCloud size={11} />
+              )}
+              {t.settings.sync.mirror}
+            </button>
+          )}
           <button
             onClick={handleDisconnect}
             disabled={isLoading}
@@ -437,6 +523,21 @@ function GitHubSyncSection({ onConnectedChange }: { onConnectedChange: (connecte
           <Loader size={12} className="animate-spin" />
           <span className="text-xs font-mono">{t.common.loading}</span>
         </div>
+      )}
+
+      {confirmMirror && (
+        <ConfirmModal
+          title={t.settings.sync.mirrorConfirmTitle}
+          message={t.settings.sync.mirrorConfirmMessage}
+          confirmLabel={t.settings.sync.mirrorConfirmAction}
+          cancelLabel={t.common.cancel}
+          danger
+          onConfirm={() => {
+            setConfirmMirror(false)
+            void handleMirror()
+          }}
+          onCancel={() => setConfirmMirror(false)}
+        />
       )}
     </div>
   )

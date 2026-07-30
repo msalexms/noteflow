@@ -451,6 +451,18 @@ declare global {
         hadDeletions: boolean
         hadMetadataChanges: boolean
       }>
+      // Mirror local → repo: leaves the repo as an exact copy of the local state
+      // (uploads what differs, deletes what is gone). Only while Cloud is enabled.
+      mirrorToGitHub: () => Promise<{
+        ok: boolean
+        pushed: number
+        deleted: number
+        skipped: number
+        // errors: raw GitHub API failures (verbatim) · warnings: our own codes, localized here
+        errors: string[]
+        warnings: Array<'deletions-skipped-unreadable'>
+        error?: 'cloud-required' | 'not-connected' | 'in-progress' | 'token'
+      }>
       // Manual pull routed to the live backend (Cloud when enabled, else GitHub).
       pullActiveNotes: () => Promise<{
         pulled: number

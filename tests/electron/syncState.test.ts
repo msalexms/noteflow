@@ -207,6 +207,18 @@ describe('pull decisions', () => {
     // Prefix-sibling dir must not be protected by 'a/...' upserts
     expect(shouldDeletionRuleSkipDir(state, 'ab')).toBe(false)
   })
+
+  it('an upsert satisfied without pushing (mirror: remote already identical) stops protecting the dir', () => {
+    // The mirror cancels pending debounce timers, so their journaled upserts
+    // must be completed even for files it did NOT upload (byte-identical on the
+    // remote). Left behind, they would disarm the pull's deletion rule for that
+    // note dir forever — see the `unchanged` loop in mirrorToGitHub.
+    const state = emptySyncState()
+    journalRecord(state, 'a/note.md', 'upsert', NOW)
+    expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(true)
+    expect(journalComplete(state, 'a/note.md', 'upsert')).toBe(true)
+    expect(shouldDeletionRuleSkipDir(state, 'a')).toBe(false)
+  })
 })
 
 describe('shouldRunDeletionRule', () => {

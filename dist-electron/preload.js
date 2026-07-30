@@ -95,6 +95,9 @@ const api = {
     cancelGitHubAuth: () => electron_1.ipcRenderer.invoke('sync:cancel-auth'),
     disconnectGitHub: () => electron_1.ipcRenderer.invoke('sync:disconnect'),
     pullNotes: () => electron_1.ipcRenderer.invoke('sync:pull'),
+    // Mirror local → repo (only available while NoteFlow Cloud is enabled; main
+    // rejects it otherwise with error: 'cloud-required').
+    mirrorToGitHub: () => electron_1.ipcRenderer.invoke('sync:mirror-to-github'),
     // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
     pullActiveNotes: () => electron_1.ipcRenderer.invoke('sync:pull-active'),
     onSyncAuthComplete: (cb) => {

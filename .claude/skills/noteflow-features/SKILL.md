@@ -903,7 +903,14 @@ Settings → Sync (tarjeta "GitHub Sync" del selector de backend).
 
 ### Panel de sync
 - Estado (conectado / subiendo / error), cuenta y repo vinculados.
-- "Pull now" para sync manual · "Disconnect" para desconectar.
+- "Sync now" para pull manual · "Disconnect" para desconectar.
+- **"Mirror to GitHub" / "Espejar en GitHub"** — botón que aparece entre los dos anteriores **solo
+  con NoteFlow Cloud activado** (es entonces cuando GitHub queda en pausa como espejo de solo
+  escritura y el repo se va quedando obsoleto: no le llegan los borrados ni las notas que Cloud
+  trae de otros dispositivos). Pide confirmación y deja el repo como **copia exacta** de lo que hay
+  en este dispositivo: sube lo que falte o difiera y **borra del repo** lo que ya no exista aquí
+  (nunca toca el README ni ficheros ajenos al formato). Las notas locales no se modifican. Al
+  terminar informa de cuántos ficheros subió y borró.
 
 ### Privacidad
 - Repo siempre **privado**. Token cifrado con el SO (`safeStorage`), nunca sale de la máquina.

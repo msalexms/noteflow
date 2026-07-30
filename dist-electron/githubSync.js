@@ -14,6 +14,7 @@ exports.cancelDeviceFlow = cancelDeviceFlow;
 exports.disconnectGitHub = disconnectGitHub;
 exports.pullNotes = pullNotes;
 exports.pushAllNotes = pushAllNotes;
+exports.mirrorToGitHub = mirrorToGitHub;
 exports.pushPathsNow = pushPathsNow;
 exports.schedulePush = schedulePush;
 exports.scheduleDelete = scheduleDelete;
@@ -26,6 +27,7 @@ const path_1 = __importDefault(require("path"));
 const https_1 = __importDefault(require("https"));
 const noteFormat_1 = require("./noteFormat");
 const syncState_1 = require("./syncState");
+const mirrorPlan_1 = require("./mirrorPlan");
 // ── Constants ─────────────────────────────────────────────────────────────────
 const README_CONTENT = `# Your notes are synced with GitHub
 
@@ -317,11 +319,24 @@ async function upsertRemoteFileNow(token, owner, repo, relPath, content, _retryi
     let sha;
     try {
         const existing = (await githubRequest(token, 'GET', `/repos/${owner}/${repo}/contents/${encodeRemotePath(relPath)}`));
-        sha = existing.sha;
+        // Anything that isn't a plain file (a directory answers with an array) has no
+        // usable sha — fall through and let the PUT decide, never skip on ambiguity.
+        if (typeof existing.sha === 'string')
+            sha = existing.sha;
     }
     catch {
         // File doesn't exist yet — will be created
     }
+    // ⚠️ A PUT only happens when the content actually differs. The Contents API's
+    // `sha` IS the git blob sha, so the GET we already need for the concurrency
+    // token also answers "would this change anything?" for free. GitHub accepts an
+    // identical PUT and commits it anyway (a commit whose tree equals its parent's):
+    // saving one note re-queues its whole dir, so a note with 8 sections produced 8
+    // empty commits — ~24% of the user's repo history. Callers that count this as
+    // `pushed` and clear the journal stay correct: the remote already holds exactly
+    // this content, so the intent IS satisfied.
+    if (sha !== undefined && sha === (0, mirrorPlan_1.gitBlobSha)(content))
+        return;
     // note.md carries the title; section files fall back to '<dir>/<file>' label
     const titleMatch = content.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
     const label = titleMatch ? titleMatch[1].trim() : relPath.replace(/\.md$/, '');
@@ -819,8 +834,12 @@ async function pullNotes(notesDir) {
         //   uploads what landed via Cloud since the previous lastSync — that keeps
         //   lastSync trustworthy again for when Cloud is switched off.
         // - gate opening (pending/failed → ok): the historical case.
+        // The tree fetched above is handed over so the catch-up can drop the files
+        // the remote already holds byte-for-byte, without a single extra request.
         if (wasNotOk || needsFullReconcile || cloudEnabled) {
-            flushPendingLocalChanges(notesDir, needsFullReconcile ? undefined : previousLastSync);
+            const flushed = flushPendingLocalChanges(notesDir, needsFullReconcile ? undefined : previousLastSync, treeShaByPath);
+            if (flushed)
+                stateChanged = true;
         }
     }
     catch (err) {
@@ -840,6 +859,25 @@ async function pullNotes(notesDir) {
         hadDeletions: deleted > 0,
         hadMetadataChanges,
     };
+}
+/**
+ * Every notes-dir-relative file that participates in sync: one entry per '.md'
+ * inside each note folder plus the root metadata JSONs that exist on disk.
+ * Throws if the notes dir can't be walked — callers decide what that means.
+ */
+function listLocalSyncPaths(notesDir) {
+    const relPaths = [];
+    for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
+        for (const f of fs_1.default.readdirSync(path_1.default.join(notesDir, dir))) {
+            if (f.endsWith('.md'))
+                relPaths.push(`${dir}/${f}`);
+        }
+    }
+    for (const filename of METADATA_FILENAMES) {
+        if (fs_1.default.existsSync(path_1.default.join(notesDir, filename)))
+            relPaths.push(filename);
+    }
+    return relPaths;
 }
 async function pushAllNotes(notesDir) {
     const s = syncSettings ?? loadSyncSettings();
@@ -862,19 +900,9 @@ async function pushAllNotes(notesDir) {
     }
     let pushed = 0;
     const errors = [];
-    // Every file of every note directory ('<dir>/<file>.md') + root metadata
-    const relPaths = [];
+    let relPaths;
     try {
-        for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
-            for (const f of fs_1.default.readdirSync(path_1.default.join(notesDir, dir))) {
-                if (f.endsWith('.md'))
-                    relPaths.push(`${dir}/${f}`);
-            }
-        }
-        for (const filename of METADATA_FILENAMES) {
-            if (fs_1.default.existsSync(path_1.default.join(notesDir, filename)))
-                relPaths.push(filename);
-        }
+        relPaths = listLocalSyncPaths(notesDir);
     }
     catch {
         return { pushed: 0, errors: [] };
@@ -902,6 +930,256 @@ async function pushAllNotes(notesDir) {
     if (stateChanged)
         persistState();
     return { pushed, errors };
+}
+let mirrorInFlight = false;
+/** Paths tracked by the pull's reconciled-SHA cache: note.md anchors + root metadata. */
+function isShaCachedPath(relPath) {
+    return relPath.endsWith(`/${noteFormat_1.NOTE_MD}`) || METADATA_FILENAMES.includes(relPath);
+}
+/**
+ * Makes the remote repo an EXACT copy of the notes dir: uploads every file that
+ * is missing or differs, DELETES every remote path that no longer exists locally
+ * (strict allowlist in mirrorPlan.ts — README, the format marker and any dotfile
+ * are never touched; inside a folder, only REAL remote note folders anchored by
+ * note.md) and re-asserts the v2 format marker. The deletion phase is skipped
+ * WHOLESALE if any local file could not be read: an incomplete local snapshot
+ * makes "missing locally" mean nothing.
+ *
+ * Exists because GitHub becomes a write-only mirror while NoteFlow Cloud owns
+ * the sync loop: it never receives deletions, and notes arriving from another
+ * device with an old `updated` are not picked up by the pull's flush, so the repo
+ * silently rots. The action is only offered with Cloud enabled — the gate lives
+ * in main.ts (`sync:mirror-to-github`), since importing cloudSync.ts here would
+ * be a cycle.
+ *
+ * Every remote write/delete goes through upsertRemoteFile/removeRemoteFile (the
+ * serialized mutation queue) and is journaled with the same keys as the regular
+ * push/delete paths — a gone note folder as ONE 'deleteDir' on '<dir>', which is
+ * the key the pull's guard honors (per-file 'delete' entries would NOT stop the
+ * pull from rewriting the note.md anchor).
+ * ⚠️ That journal does NOT mean automatic retry here: the mirror only runs with
+ * Cloud enabled, and in that state nothing drains the GitHub journal (the
+ * auto-sync tick returns early and retrySyncJournal is gated on
+ * initialPullStatus === 'ok'). It is crash-safety + a guard for the manual pull;
+ * the real recovery is running the mirror again, and `syncError` / the returned
+ * `errors` are the only signal. If Cloud is later switched off, a journaled
+ * 'deleteDir' is retried via deleteRemoteDirNow, which sweeps EVERY blob under
+ * the folder — exactly like deleting a note normally does.
+ * On a fully clean run `lastSync` is bumped and `needsFullReconcile` is
+ * consumed: after an exact mirror the repo really does know everything on disk,
+ * which is what those two flags mean. Any error leaves both untouched.
+ *
+ * Deliberately NOT gated on `initialPullStatus === 'ok'` like the push paths:
+ * that gate exists so a stale local file can't overwrite a newer remote one, and
+ * overwriting the remote with the local state is precisely what the user asked
+ * for here (Cloud is the source of truth, GitHub is the mirror). It also could
+ * never run otherwise — while Cloud is on, the GitHub auto-sync tick is skipped,
+ * so the initial pull may never have happened.
+ */
+async function mirrorToGitHub(notesDir) {
+    const idle = { pushed: 0, deleted: 0, skipped: 0, errors: [], warnings: [] };
+    const s = syncSettings ?? loadSyncSettings();
+    if (!s.enabled || !s.encryptedToken || !s.owner || !s.repo)
+        return { ok: false, ...idle, error: 'not-connected' };
+    // Reentrancy guard: a double click must not run two passes (they would fight
+    // over the same paths in the mutation queue).
+    if (mirrorInFlight)
+        return { ok: false, ...idle, error: 'in-progress' };
+    let token;
+    try {
+        token = decryptToken(s.encryptedToken);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const userFacingError = `Failed to decrypt GitHub token. Please reconnect GitHub sync. (${msg})`;
+        syncError = userFacingError;
+        statusListener?.();
+        return { ok: false, ...idle, errors: [userFacingError], error: 'token' };
+    }
+    const owner = s.owner;
+    const repo = s.repo;
+    // Taken BEFORE reading disk: on a clean run this becomes `lastSync`, so a note
+    // written WHILE the mirror ran keeps `updated > lastSync` and is never exposed
+    // to the pull's deletion rule (it just wasn't part of this snapshot).
+    const startedAt = new Date().toISOString();
+    const observedNeedsFullReconcile = s.needsFullReconcile === true;
+    // Same reason as pushAllNotes: this uploads the current on-disk content
+    // synchronously, so leaving debounced timers armed would double-push.
+    pushTimers.forEach((t) => clearTimeout(t));
+    pushTimers.clear();
+    mirrorInFlight = true;
+    let pushed = 0;
+    let deleted = 0;
+    let skipped = 0;
+    const errors = [];
+    const warnings = [];
+    const state = getState();
+    let stateChanged = false;
+    try {
+        // Prove the notes dir is readable BEFORE trusting an empty local set.
+        // listNoteDirs swallows a failed readdir and returns [] (deliberately
+        // tolerant — other callers rely on that), which here would be
+        // indistinguishable from "the user deleted every note": the plan would
+        // delete every note folder from the repo AND the run would look clean
+        // (lastSync bumped, needsFullReconcile consumed). Throwing sends it to the
+        // outer catch instead. An EMPTY but readable dir still works — mirroring an
+        // empty local state does empty the repo's notes, which is the point of the
+        // action and what the confirmation dialog warns about.
+        fs_1.default.readdirSync(notesDir);
+        const localFiles = [];
+        // An unreadable local file makes the local snapshot INCOMPLETE, and every
+        // deletion decision is "the remote has it, we don't". Uploading anyway is
+        // harmless, but deleting would remove live data: an unreadable note.md
+        // (EACCES, antivirus lock, file in use) would look exactly like a deleted
+        // note and take its whole folder off the remote.
+        let localReadFailed = false;
+        for (const relPath of listLocalSyncPaths(notesDir)) {
+            try {
+                localFiles.push({
+                    path: relPath,
+                    sha: (0, mirrorPlan_1.gitBlobSha)(fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8')),
+                });
+            }
+            catch (err) {
+                // Unreadable local file: report it and keep going, but the run is no
+                // longer clean (lastSync stays put — the repo isn't an exact copy).
+                errors.push(`${relPath}: ${String(err)}`);
+                localReadFailed = true;
+            }
+        }
+        const blobs = await listRemoteTree(token, owner, repo);
+        const plan = (0, mirrorPlan_1.planMirror)(localFiles, blobs, METADATA_FILENAMES);
+        skipped = plan.unchanged.length;
+        const localShaByPath = new Map(localFiles.map((f) => [f.path, f.sha]));
+        // Paths the remote will hold once this run finishes — used to prune the SHA cache.
+        const remainingRemote = new Set(blobs.map((b) => b.path));
+        // Identical anchors/metadata are reconciled by definition: caching their SHA
+        // lets the next pull skip them without a GET, and (for the metadata JSONs)
+        // is what stops a stale repo from overwriting local groups/folders/order.
+        for (const relPath of plan.unchanged) {
+            // Clear any journaled 'upsert' for this path: a debounced push may have
+            // armed (and journaled) a timer we cancelled above, and the remote already
+            // holds exactly this content, so the intent IS satisfied. Leaving it would
+            // strand the entry forever — shouldDeletionRuleSkipDir would then disarm
+            // the pull's local-deletion rule for that note dir indefinitely.
+            if ((0, syncState_1.journalComplete)(state, relPath, 'upsert'))
+                stateChanged = true;
+            if (!isShaCachedPath(relPath))
+                continue;
+            if ((0, syncState_1.setCachedSha)(state, relPath, localShaByPath.get(relPath)))
+                stateChanged = true;
+        }
+        for (const relPath of plan.toUpload) {
+            try {
+                const content = fs_1.default.readFileSync(path_1.default.join(notesDir, relPath), 'utf-8');
+                await upsertRemoteFile(token, owner, repo, relPath, content);
+                pushed++;
+                remainingRemote.add(relPath);
+                if ((0, syncState_1.journalComplete)(state, relPath, 'upsert'))
+                    stateChanged = true;
+                if (isShaCachedPath(relPath) && (0, syncState_1.setCachedSha)(state, relPath, (0, mirrorPlan_1.gitBlobSha)(content)))
+                    stateChanged = true;
+            }
+            catch (err) {
+                errors.push(`${relPath}: ${String(err)}`);
+                // Journal the failed upsert so retrySyncJournal picks it up later.
+                // IfAbsent: must not clobber a newer delete/deleteDir intent recorded for
+                // this key while the push was in flight (see journalRecordIfAbsent).
+                (0, syncState_1.journalRecordIfAbsent)(state, relPath, 'upsert', new Date().toISOString());
+                (0, syncState_1.journalFail)(state, relPath, 'upsert');
+                stateChanged = true;
+                console.error(`[GitHubSync] mirror upload failed for ${relPath}:`, String(err));
+            }
+        }
+        // Deletions only run on a COMPLETE local snapshot — see localReadFailed.
+        if (localReadFailed) {
+            // A CODE, not a sentence: this one is our own user-facing text, so the
+            // renderer translates it (the raw strings in `errors` are GitHub's).
+            warnings.push('deletions-skipped-unreadable');
+            console.warn('[GitHubSync] mirror: skipping deletions, local snapshot incomplete');
+        }
+        else {
+            for (const entry of plan.toDelete) {
+                // Journal BEFORE attempting it: a lost remote delete makes the file
+                // reappear on the next pull, so it must survive a crash/outage. A whole
+                // note folder is ONE 'deleteDir' op keyed by '<dir>' (see MirrorDeletion):
+                // that is the only key the pull's guard honors for the note.md anchor.
+                // Note journalRecord('deleteDir') drops any file-level op under '<dir>/',
+                // which is why the per-file entries of a gone folder are never recorded.
+                // persistState() right here (like scheduleDelete/scheduleDeleteDir): the
+                // finally-block flush is too late — a crash mid-folder would leave the
+                // repo half-deleted with NO journal entry, and the next manual pull would
+                // resurrect the note from the note.md still sitting on the remote.
+                if ((0, syncState_1.journalRecord)(state, entry.key, entry.op, new Date().toISOString()))
+                    persistState();
+                let failed = false;
+                for (const relPath of entry.paths) {
+                    try {
+                        await removeRemoteFile(token, owner, repo, relPath);
+                        deleted++;
+                        remainingRemote.delete(relPath);
+                    }
+                    catch (err) {
+                        // One blob failing must not abort the rest of the folder, but the
+                        // entry stays journaled so the whole delete is retried as a unit.
+                        failed = true;
+                        errors.push(`${relPath}: ${String(err)}`);
+                        syncError = `Failed to delete ${relPath} on GitHub: ${String(err)}`;
+                        console.error('[GitHubSync] mirror delete failed:', String(err));
+                    }
+                }
+                if (failed) {
+                    (0, syncState_1.journalFail)(state, entry.key, entry.op);
+                    stateChanged = true;
+                }
+                else if ((0, syncState_1.journalComplete)(state, entry.key, entry.op)) {
+                    stateChanged = true;
+                }
+            }
+        }
+        // A mirror asserts "the remote is v2" — make sure the marker says so.
+        if (!remainingRemote.has(noteFormat_1.FORMAT_MARKER_FILE)) {
+            try {
+                await upsertRemoteFile(token, owner, repo, noteFormat_1.FORMAT_MARKER_FILE, `${noteFormat_1.NOTE_FORMAT_VERSION}\n`);
+                remainingRemote.add(noteFormat_1.FORMAT_MARKER_FILE);
+            }
+            catch (err) {
+                errors.push(`${noteFormat_1.FORMAT_MARKER_FILE}: ${String(err)}`);
+            }
+        }
+        if ((0, syncState_1.pruneShas)(state, remainingRemote))
+            stateChanged = true;
+        if (errors.length === 0) {
+            // Rebase on the CURRENT settings, never on the `s` snapshot taken before
+            // the network round-trips (same pattern as persistMigratedAt): anything
+            // written meanwhile — remoteFormatMigratedAt, markNeedsFullReconcile —
+            // must survive. The one-shot flag is only consumed if THIS run observed it.
+            const latest = syncSettings ?? s;
+            syncSettings = {
+                ...latest,
+                lastSync: startedAt,
+                needsFullReconcile: observedNeedsFullReconcile ? false : latest.needsFullReconcile === true,
+            };
+            const settings = readSettings();
+            settings.githubSync = syncSettings;
+            writeSettings(settings);
+            syncError = undefined;
+        }
+    }
+    catch (err) {
+        // Tree listing / notes-dir walk failed — nothing was reconciled.
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(msg);
+        syncError = msg;
+        console.error('[GitHubSync] mirror failed:', msg);
+    }
+    finally {
+        mirrorInFlight = false;
+        if (stateChanged)
+            persistState();
+        statusListener?.();
+    }
+    return { ok: errors.length === 0, pushed, deleted, skipped, errors, warnings };
 }
 /**
  * Pushes a specific set of notes-dir-relative files NOW (awaited, no debounce),
@@ -1042,13 +1320,21 @@ function schedulePushUnguarded(relPath, content, onStart, onComplete) {
     }, 5000); // 5s debounce — avoids spamming API while typing
     pushTimers.set(relPath, timer);
 }
-// Called when pullNotes transitions from pending/failed → ok. Scans the note
-// directories and re-queues pushes for every file of any note whose note.md is
-// newer than the previous lastSync (i.e. edits made while the push gate was
-// closed). The note.md timestamp can't tell WHICH section changed, so the
-// whole dir is re-queued. Survives restarts: detection is purely on-disk.
-function flushPendingLocalChanges(notesDir, previousLastSync) {
+// Called when pullNotes transitions from pending/failed → ok (and on every pull
+// while Cloud owns the writes, or when a full reconcile is pending). Scans the
+// note directories and re-queues pushes for every file of any note whose note.md
+// is newer than the previous lastSync (i.e. edits the push gate never saw).
+// Survives restarts: detection is purely on-disk.
+//
+// The note.md timestamp can't tell WHICH section changed, so the dir-level gate
+// selects the whole folder; `remoteShaByPath` (the tree the pull ALREADY fetched)
+// then drops file by file whatever the remote holds byte-for-byte. Without it a
+// title edit on a note with 8 sections queued 9 pushes, 8 of them no-ops.
+// Returns true when the journal changed — the caller persists the state.
+function flushPendingLocalChanges(notesDir, previousLastSync, remoteShaByPath) {
     const lastSyncMs = previousLastSync ? Date.parse(previousLastSync) : null;
+    const state = getState();
+    let stateChanged = false;
     for (const dir of (0, noteFormat_1.listNoteDirs)(notesDir)) {
         const dirPath = path_1.default.join(notesDir, dir);
         try {
@@ -1061,8 +1347,20 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
             for (const f of fs_1.default.readdirSync(dirPath)) {
                 if (!f.endsWith('.md'))
                     continue;
+                const relPath = `${dir}/${f}`;
                 try {
-                    schedulePushUnguarded(`${dir}/${f}`, fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8'));
+                    const content = fs_1.default.readFileSync(path_1.default.join(dirPath, f), 'utf-8');
+                    if ((0, mirrorPlan_1.remoteHasContent)(remoteShaByPath, relPath, content)) {
+                        // Same reasoning as the mirror's `unchanged` pass: the remote already
+                        // has this content, so a journaled 'upsert' (a debounce timer armed
+                        // before the app closed, or a push that failed) is satisfied. Leaving
+                        // it stranded would disarm the pull's local-deletion rule for this dir
+                        // forever (shouldDeletionRuleSkipDir).
+                        if ((0, syncState_1.journalComplete)(state, relPath, 'upsert'))
+                            stateChanged = true;
+                        continue;
+                    }
+                    schedulePushUnguarded(relPath, content);
                 }
                 catch { /* unreadable file — skip */ }
             }
@@ -1071,6 +1369,7 @@ function flushPendingLocalChanges(notesDir, previousLastSync) {
             // Unreadable dir — skip.
         }
     }
+    return stateChanged;
 }
 /** Removes a single remote file ('<dir>/<file>.md') — used for dropped sections. */
 async function scheduleDelete(relPath) {

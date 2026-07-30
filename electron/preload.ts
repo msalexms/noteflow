@@ -175,6 +175,19 @@ const api = {
     hadDeletions: boolean
     hadMetadataChanges: boolean
   }> => ipcRenderer.invoke('sync:pull'),
+  // Mirror local → repo (only available while NoteFlow Cloud is enabled; main
+  // rejects it otherwise with error: 'cloud-required').
+  mirrorToGitHub: (): Promise<{
+    ok: boolean
+    pushed: number
+    deleted: number
+    skipped: number
+    /** Raw GitHub API failures, shown verbatim. */
+    errors: string[]
+    /** Codes for OUR user-facing notices — the renderer localizes them. */
+    warnings: Array<'deletions-skipped-unreadable'>
+    error?: 'cloud-required' | 'not-connected' | 'in-progress' | 'token'
+  }> => ipcRenderer.invoke('sync:mirror-to-github'),
   // Manual pull routed to the LIVE backend (Cloud when enabled, else GitHub).
   pullActiveNotes: (): Promise<{
     pulled: number
