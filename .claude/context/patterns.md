@@ -80,8 +80,8 @@ acciones por lotes (`SelectionBar`, componente al pie del mismo archivo) reusan 
 store: `updateNote({favorited})`, `archiveNote` (toggle), `updateNote({group,folder})` y `deleteNote`
 iterando sobre la selección (favorite/archive calculan el target como `!todasYaLoTienen`); el borrado
 pasa por `ConfirmModal`. **Color del grupo:** el punto de la cabecera es un botón que abre un popover
-con la paleta `TAG_COLOR_VARS` y llama a `useGroupsStore.setGroupColor` (misma acción que usa el color
-picker del menú contextual del sidebar). `Esc` cierra el popover de color si está abierto; si no, limpia
+con la paleta `TAG_COLOR_VARS` + el swatch de color libre (`CustomColorSwatch`) y llama a
+`useGroupsStore.setGroupColor` (misma acción que usa el color picker del menú contextual del sidebar). `Esc` cierra el popover de color si está abierto; si no, limpia
 la selección; si no, cierra la vista (los inline-edit siguen gestionando su propio `Esc`). Sin IPC nuevo.
 
 ### Vista de nota (note overview)
@@ -527,6 +527,36 @@ override el color sigue vivo al cambiar de tema. Persistencia en `localStorage` 
 **`noteflow-heading-overrides`** — nombre heredado de cuando solo había H1/H2/H3: se mantiene (en vez
 de migrar a otra clave) porque el parser tolera claves ausentes → `null`, y así los usuarios que ya
 habían personalizado sus encabezados no pierden nada. La clave se borra cuando los 6 vuelven a `null`.
+
+### Color de grupos y secciones (paleta del tema + color libre)
+
+Un color de grupo/sección (`GroupColor` en `src/types/index.ts`) es **una de las 8 CSS vars del tema**
+(`ThemeColorVar` = `TAG_COLOR_VARS` en `src/lib/tagColors.ts`) **o un hex libre** `CustomColor`
+(`'#rrggbb'` en minúsculas). Los pickers (menú contextual de sección, barra de color del editor, menú
+del grupo en el sidebar, punto de color de la Group Overview) muestran los 8 presets + el botón *auto*
+(solo secciones) + un **swatch de color libre** (`src/components/CustomColorSwatch.tsx`), mismo patrón
+que Ajustes → Apariencia: círculo con degradado cónico y un `<input type="color">` transparente encima
+que abre el selector del SO.
+
+Reglas al pintar: **nunca** interpolar `rgb(var(${color}))` — un hex rompería esa forma. Usar
+`colorChannels(color)` (devuelve `var(--accent)` o `"122 162 247"`), que funciona igual con y sin
+alpha: `rgb(${colorChannels(c)})`, `rgb(${colorChannels(c)} / 0.2)`. Para el canvas/three de la vista
+cerebro, `readColor()` en `src/components/Brain/brainColors.ts` parsea el hex directamente (el
+`getComputedStyle` de una var no resolvería un hex y caería al gris). Las conversiones hex ↔ triplete
+`"r g b"` viven en `src/lib/colorUtils.ts` (compartidas con `AppearancePanel`).
+
+Validación: `normalizeGroupColor()` (var conocida, o hex normalizado a minúsculas, `#rgb` expandido, o
+`null`) en `src/lib/tagColors.ts`, con **espejos** en `electron/main.ts` (`sanitizeSectionColors`, para
+`section-colors.json`) y en `electron/ai/llm/tools.ts` (`create_group` del agente, que ya generaba
+colores hex). `groups.json` no se valida en main: el color llega tal cual desde el renderer.
+
+El swatch libre **debounce ~250 ms** la persistencia (con flush en `blur`/desmontaje) porque React mapea
+el `onChange` del `<input type="color">` al evento `input`, que dispara en cada frame del arrastre y
+cada commit escribe a disco + programa un push de sync.
+
+**Compatibilidad:** un hex en `section-colors.json`/`groups.json` es descartado por versiones antiguas
+de la app y por NoteFlow Mobile (validan contra las 8 vars) → esas notas/grupos se ven con el color
+automático allí. Aceptado a propósito; el formato de los ficheros no cambia.
 
 ### UI text size (zoom global) y posicionamiento de popups `fixed`
 

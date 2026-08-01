@@ -35,6 +35,9 @@ export const common = {
   groupRoot: 'Group root',
   noFoldersYet: 'No folders yet',
 
+  // Free colour swatch shown next to the 8 theme presets (groups and section colours).
+  customColor: 'Custom color',
+
   // Inline inputs / add actions.
   groupNamePlaceholder: 'Group name…',
   folderNamePlaceholder: 'Folder name…',

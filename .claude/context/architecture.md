@@ -130,7 +130,8 @@ noteflow/
 │   │   │   ├── BrainCanvas.tsx          #   FALLBACK 2D (sin WebGL): <canvas> + d3-force, pan/zoom/drag
 │   │   │   ├── useBrainGraph.ts         #   Modelo compartido: nodos (grupo/carpeta/nota/sección) + 2 capas de aristas
 │   │   │   ├── useForceLayout.ts        #   Simulación d3-force del fallback 2D (estructura + contenido)
-│   │   │   ├── brainColors.ts           #   Resuelve CSS vars del tema → RGB (lo usan 2D y 3D)
+│   │   │   ├── brainColors.ts           #   Resuelve color de nodo → RGB: CSS var del tema o hex libre
+│   │   │   │                            #   (readColor; lo usan 2D y 3D)
 │   │   │   └── BrainNodePreview.tsx     #   Ventanita clicable al pulsar un nodo nota/sección (click→navega)
 │   │   ├── NoteCard/                    # Tarjeta de nota en sidebar
 │   │   ├── TitleBar.tsx                 # Barra de título personalizada (frameless);
@@ -159,7 +160,9 @@ noteflow/
 │   │   ├── cryptoUtils.ts        # Cifrado AES-256-GCM + PBKDF2 (WebCrypto)
 │   │   ├── alarmUtils.ts         # Recolección de alarmas/deadlines para programarlas
 │   │   ├── searchUtils.ts        # Helpers de búsqueda (normalización, matching)
-│   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 colores)
+│   │   ├── tagColors.ts          # getTagColor — color por nombre de tag (8 vars del tema o hex libre);
+│   │   │                         #   normalizeGroupColor (validación) y colorChannels (TODO render de
+│   │   │                         #   color de grupo/sección debe pasar por él, no interpolar `var(...)`)
 │   │   ├── markdownHtml.ts       # Conversión markdown↔HTML (htmlFromMarkdown/htmlToMarkdown);
 │   │   │                         #   usado por el editor TipTap y SectionPreviewCard (previews)
 │   │   └── themes.ts             # Definición de los 14 temas (CSS vars)
@@ -309,7 +312,9 @@ Contenido del dir de notas:
 - `groups.json` — definición de grupos (`{id,name,color,order,archived?}`; `archived?` oculta el
   grupo y sus notas salvo con "Show archived").
 - `folders.json` — definición de carpetas (subcarpetas de grupos).
-- `section-colors.json` — mapa `nombreSección(normalizado) → color CSS var`.
+- `section-colors.json` — mapa `nombreSección(normalizado) → color`: una CSS var del tema (`--accent`…)
+  **o** un hex libre `#rrggbb` (ver "Color de grupos y secciones" en `patterns.md`). No reintroducir un
+  validador var-only en `sanitizeSectionColors`: borraría los colores personalizados del usuario al guardar.
 - `note-order.json` — orden manual de notas por contexto (`Record<contextKey, string[]>`); contextKey: `'ungrouped'`, `'group:<id>'`, `'folder:<id>'`, `'favorites'`. Gestionado desde `groupsStore` (`noteOrder`, `setContextNoteOrder`).
 - `templates.json` — array de plantillas de nota (`NoteTemplate[]`: `{id,name,title,sections,createdAt}`). Gestionado desde `templatesStore`. Crear nota desde plantilla regenera ids de sección y usa `createPopulatedNote`; "Save as template" en el menú ⋯ del editor captura título + secciones (oculto si la nota está cifrada y bloqueada). UI en Settings → Templates.
 - `ui-settings.json` — apariencia (tema, fuente de app, acento, colores del editor) + ajustes del

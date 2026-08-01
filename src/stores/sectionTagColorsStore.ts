@@ -1,8 +1,6 @@
 import { create } from 'zustand'
-import { normalizeTagColorKey, TAG_COLOR_VARS } from '../lib/tagColors'
+import { normalizeGroupColor, normalizeTagColorKey } from '../lib/tagColors'
 import type { GroupColor } from '../types'
-
-const ALLOWED_COLORS = new Set<GroupColor>(TAG_COLOR_VARS)
 
 export type SectionTagColorMap = Record<string, GroupColor>
 
@@ -12,9 +10,9 @@ function sanitizeSectionTagColors(raw: unknown): SectionTagColorMap {
   const next: SectionTagColorMap = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const normalizedKey = normalizeTagColorKey(key)
-    if (!normalizedKey || typeof value !== 'string') continue
-    if (!ALLOWED_COLORS.has(value as GroupColor)) continue
-    next[normalizedKey] = value as GroupColor
+    const color = normalizeGroupColor(value)
+    if (!normalizedKey || !color) continue
+    next[normalizedKey] = color
   }
   return next
 }
@@ -36,9 +34,10 @@ export const useSectionTagColorsStore = create<SectionTagColorsState>((set, get)
 
   setSectionTagColor: async (sectionName, color) => {
     const key = normalizeTagColorKey(sectionName)
-    if (!key || !ALLOWED_COLORS.has(color)) return
+    const value = normalizeGroupColor(color)
+    if (!key || !value) return
 
-    const next = { ...get().sectionTagColors, [key]: color }
+    const next = { ...get().sectionTagColors, [key]: value }
     set({ sectionTagColors: next })
     await window.noteflow.setSectionTagColors(next)
   },

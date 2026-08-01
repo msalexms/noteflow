@@ -30,6 +30,8 @@ export const common = {
   groupRoot: 'Raíz del grupo',
   noFoldersYet: 'Aún no hay carpetas',
 
+  customColor: 'Color personalizado',
+
   groupNamePlaceholder: 'Nombre del grupo…',
   folderNamePlaceholder: 'Nombre de la carpeta…',
   newFolderInline: '+ Nueva carpeta…',

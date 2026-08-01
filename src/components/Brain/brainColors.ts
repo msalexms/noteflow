@@ -1,8 +1,19 @@
+import { hexToRgbChannels } from '../../lib/colorUtils'
+import { isCustomColor } from '../../lib/tagColors'
+
 // The canvas renderer can't use CSS classes, so it resolves the theme's CSS variables
 // (stored on :root as space-separated RGB triples, e.g. "122 162 247") to real numbers.
 // Read a fresh palette whenever the theme changes (keyed on activeThemeId in BrainCanvas).
 
 export type RGB = [number, number, number]
+
+/**
+ * Resolves a group/section colour: a theme CSS var against :root, or a free '#rrggbb'
+ * colour parsed directly (CSS lookup would return nothing and degrade to grey).
+ */
+export function readColor(value: string): RGB {
+  return isCustomColor(value) ? hexToRgbChannels(value) : readVar(value)
+}
 
 export function readVar(name: string): RGB {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -23,15 +34,15 @@ export interface BrainPalette {
   text: RGB
   textMuted: RGB
   border: RGB
-  /** Resolve any group/tag CSS var (e.g. '--accent') to its RGB, cached. */
-  color: (cssVar: string) => RGB
+  /** Resolve any group/tag colour (CSS var like '--accent', or '#rrggbb') to its RGB, cached. */
+  color: (color: string) => RGB
 }
 
 export function readPalette(): BrainPalette {
   const cache = new Map<string, RGB>()
-  const color = (cssVar: string): RGB => {
-    let c = cache.get(cssVar)
-    if (!c) { c = readVar(cssVar); cache.set(cssVar, c) }
+  const color = (value: string): RGB => {
+    let c = cache.get(value)
+    if (!c) { c = readColor(value); cache.set(value, c) }
     return c
   }
   return {

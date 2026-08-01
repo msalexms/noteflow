@@ -3,6 +3,7 @@ import { SectionTabsRow } from './Sidebar/SectionTabsRow'
 import { type NoteContextMenuRequest } from './NoteContextMenu'
 import { useT } from '../i18n/useT'
 import { formatDate } from '../i18n/formatDate'
+import { colorChannels } from '../lib/tagColors'
 import type { SectionTagColorMap } from '../stores/sectionTagColorsStore'
 import type { Note, GroupColor } from '../types'
 
@@ -89,13 +90,13 @@ export function OverviewNoteCard({
       {dropIndicator && (
         <span
           className={`absolute top-0 bottom-0 w-[3px] z-10 ${dropIndicator === 'before' ? 'left-0' : 'right-0'}`}
-          style={{ background: `rgb(var(${color}))`, boxShadow: `0 0 6px rgb(var(${color}) / 0.8)` }}
+          style={{ background: `rgb(${colorChannels(color)})`, boxShadow: `0 0 6px rgb(${colorChannels(color)} / 0.8)` }}
         />
       )}
       {/* Group-color accent line */}
       <span
         className="absolute left-0 top-0 bottom-0 w-[3px]"
-        style={{ background: `rgb(var(${color}) / 0.55)` }}
+        style={{ background: `rgb(${colorChannels(color)} / 0.55)` }}
       />
 
       {/* Selection tick — visible on hover, or always once selected/in selection mode */}

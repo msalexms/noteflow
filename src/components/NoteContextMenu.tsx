@@ -6,8 +6,9 @@ import {
 import { useNotesStore } from '../stores/notesStore'
 import { useGroupsStore } from '../stores/groupsStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
-import { normalizeTagColorKey, TAG_COLOR_VARS } from '../lib/tagColors'
+import { colorChannels, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../lib/tagColors'
 import { ConfirmModal } from './ConfirmModal'
+import { CustomColorSwatch } from './CustomColorSwatch'
 import { EncryptionModal } from './EncryptionModal'
 import { ContextMenu } from './ContextMenu'
 import { useT } from '../i18n/useT'
@@ -317,9 +318,13 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                     onClose()
                   }}
                   className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${currentSectionColor === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
-                  style={{ background: `rgb(var(${color}))` }}
+                  style={{ background: `rgb(${colorChannels(color)})` }}
                 />
               ))}
+              <CustomColorSwatch
+                value={currentSectionColor ?? resolveGroupColor(currentSection.name)}
+                onPick={(c) => { void setSectionTagColor(currentSection.name, c) }}
+              />
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -402,7 +407,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                       }}
                       className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 transition-colors hover:bg-surface-3 hover:text-text ${note.folder === f.id ? 'text-text' : 'text-text-muted'}`}
                     >
-                      <Folder size={12} className="flex-shrink-0" style={{ color: `rgb(var(${currentGroup.color}))` }} />
+                      <Folder size={12} className="flex-shrink-0" style={{ color: `rgb(${colorChannels(currentGroup.color)})` }} />
                       <span className="truncate">{f.name}</span>
                     </button>
                   ))}
@@ -499,7 +504,7 @@ function NoteMenuBody({ request, onClose, onConfirmDelete, onConfirmDeleteSectio
                   >
                     <span
                       className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                      style={{ background: `rgb(var(${g.color}))` }}
+                      style={{ background: `rgb(${colorChannels(g.color)})` }}
                     />
                     {g.name}
                   </button>

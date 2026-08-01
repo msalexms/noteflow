@@ -3,21 +3,21 @@ import { useNotesStore } from '../stores/notesStore'
 import { useSectionTagColorsStore } from '../stores/sectionTagColorsStore'
 import { useThemeStore } from '../stores/themeStore'
 import { useEditorSettingsStore } from '../stores/editorSettingsStore'
-import { resolveColorVar } from '../lib/tagColors'
+import { colorChannels, resolveGroupColor } from '../lib/tagColors'
 import { Editor } from './Editor/Editor'
 import { X, Minus, Lock, Loader2, ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react'
 import { decryptSections } from '../lib/cryptoUtils'
 import { useT } from '../i18n/useT'
-import type { NoteSection } from '../types'
+import type { GroupColor, NoteSection } from '../types'
 
 const FOLDED_W = 220
 const FOLDED_H = 32
 
 // Custom TitleBar for the sticky window
-function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, onTogglePin }: {
+function StickyTitleBar({ noteTitle, sectionName, color, onFold, isPinned, onTogglePin }: {
   noteTitle: string
   sectionName?: string
-  colorVar: string
+  color: GroupColor
   onFold: () => void
   isPinned?: boolean
   onTogglePin?: () => void
@@ -33,7 +33,7 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, on
         {sectionName && (
           <>
             <span className="h-3 w-px bg-border/40 flex-shrink-0" />
-            <span className="truncate font-light" style={{ color: `rgb(var(${colorVar}))` }}>{sectionName}</span>
+            <span className="truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
           </>
         )}
       </div>
@@ -78,10 +78,10 @@ function StickyTitleBar({ noteTitle, sectionName, colorVar, onFold, isPinned, on
 }
 
 // Compact folded pill shown when the sticky note is collapsed
-function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
+function FoldedPill({ noteTitle, sectionName, color, onUnfold }: {
   noteTitle: string
   sectionName?: string
-  colorVar: string
+  color: GroupColor
   onUnfold: () => void
 }) {
   const t = useT()
@@ -90,7 +90,7 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
       className="h-8 flex items-center justify-between px-2 gap-1 cursor-default select-none bg-surface-0 rounded-lg overflow-hidden border border-border/40"
       style={{
         WebkitAppRegion: 'drag',
-        borderLeftColor: `rgb(var(${colorVar}))`,
+        borderLeftColor: `rgb(${colorChannels(color)})`,
         borderLeftWidth: '3px',
       } as React.CSSProperties}
     >
@@ -99,7 +99,7 @@ function FoldedPill({ noteTitle, sectionName, colorVar, onUnfold }: {
         {sectionName && (
           <>
             <span className="h-3 w-px bg-border/40 flex-shrink-0" />
-            <span className="truncate font-light" style={{ color: `rgb(var(${colorVar}))` }}>{sectionName}</span>
+            <span className="truncate font-light" style={{ color: `rgb(${colorChannels(color)})` }}>{sectionName}</span>
           </>
         )}
       </div>
@@ -248,7 +248,7 @@ export function StickyApp() {
   if ((isLoading && notes.length === 0) || !noteId || !sectionId) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar noteTitle={t.common.loading} colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={t.common.loading} color="--accent" onFold={() => {}} />
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-xs font-mono text-text-muted animate-pulse">{t.sticky.loadingSticky}</div>
         </div>
@@ -260,7 +260,7 @@ export function StickyApp() {
   if (note?.encryption && !unlockedSections) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 overflow-hidden border border-border rounded-lg">
-        <StickyTitleBar noteTitle={note.title || t.common.untitled} colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={note.title || t.common.untitled} color="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-4">
           <Lock size={20} className="text-text-muted opacity-30" />
           <p className="text-xs font-mono text-text-muted text-center">{t.encryption.noteEncrypted}</p>
@@ -293,7 +293,7 @@ export function StickyApp() {
   if (!note || !section) {
     return (
       <div className="flex flex-col h-screen bg-surface-0 rounded-lg overflow-hidden border border-border">
-        <StickyTitleBar noteTitle={t.sticky.notFound} colorVar="--accent" onFold={() => {}} />
+        <StickyTitleBar noteTitle={t.sticky.notFound} color="--accent" onFold={() => {}} />
         <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
           <div className="text-sm font-mono text-red-400 mb-2">{t.sticky.noteNotFound}</div>
           <div className="text-xs font-mono text-text-muted">{t.sticky.mayHaveBeenDeleted}</div>
@@ -345,14 +345,14 @@ export function StickyApp() {
   }
 
   const showSectionName = section.name !== 'New' && section.name !== 'Main'
-  const sectionColorVar = resolveColorVar(section.name, sectionTagColors)
+  const sectionColor = resolveGroupColor(section.name, sectionTagColors)
 
   if (isFolded) {
     return (
       <FoldedPill
         noteTitle={note.title}
         sectionName={showSectionName ? section.name : undefined}
-        colorVar={sectionColorVar}
+        color={sectionColor}
         onUnfold={handleUnfold}
       />
     )
@@ -361,12 +361,12 @@ export function StickyApp() {
   return (
     <div
       className="flex flex-col h-screen bg-surface-1 overflow-hidden border border-border rounded-lg"
-      style={{ borderLeftColor: `rgb(var(${sectionColorVar}))`, borderLeftWidth: '3px' }}
+      style={{ borderLeftColor: `rgb(${colorChannels(sectionColor)})`, borderLeftWidth: '3px' }}
     >
       <StickyTitleBar
         noteTitle={note.title}
         sectionName={showSectionName ? section.name : undefined}
-        colorVar={sectionColorVar}
+        color={sectionColor}
         onFold={handleFold}
         isPinned={isPinned}
         onTogglePin={handleTogglePin}

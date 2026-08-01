@@ -574,17 +574,36 @@ const ALLOWED_UPDATE_REDIRECT_HOSTS = new Set([
 function normalizeSectionColorKey(name) {
     return name.trim().toLowerCase();
 }
+/**
+ * Mirror of normalizeGroupColor() in src/lib/tagColors.ts (main can't import from src/):
+ * a theme var stays as-is, a free colour is normalized to lowercase '#rrggbb'
+ * ('#rgb' shorthand expanded); anything else is dropped.
+ */
+function normalizeSectionColorValue(value) {
+    if (typeof value !== 'string')
+        return null;
+    const v = value.trim();
+    if (SECTION_COLOR_VALUES.has(v))
+        return v;
+    if (/^#[0-9a-f]{6}$/i.test(v))
+        return v.toLowerCase();
+    const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+    if (short)
+        return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase();
+    return null;
+}
 function sanitizeSectionColors(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         return {};
     const next = {};
     for (const [key, value] of Object.entries(raw)) {
-        if (typeof value !== 'string' || !SECTION_COLOR_VALUES.has(value))
+        const color = normalizeSectionColorValue(value);
+        if (!color)
             continue;
         const normalizedKey = normalizeSectionColorKey(key);
         if (!normalizedKey)
             continue;
-        next[normalizedKey] = value;
+        next[normalizedKey] = color;
     }
     return next;
 }

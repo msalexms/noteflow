@@ -52,7 +52,7 @@ export function SectionPreviewCard({
       {/* Section label (the card's identity — which tab this represents) */}
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border/60 bg-surface-2/50 group-hover:bg-surface-2/80 transition-colors">
         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colorStyle.color }} />
-        <span className="text-[11px] font-mono font-medium truncate" style={{ color: colorStyle.color }}>
+        <span className="text-[13px] font-mono font-semibold truncate" style={{ color: colorStyle.color }}>
           {section.name}
         </span>
         <span
@@ -66,7 +66,7 @@ export function SectionPreviewCard({
       {/* Editor mock — title + date, a representational toolbar, then a few lines */}
       <div className="flex flex-col" style={{ background: 'rgb(var(--bg-editor))' }}>
         <div className="px-3 pt-1.5">
-          <div className={`${compact ? 'text-[11px]' : 'text-[12.5px]'} font-mono font-bold text-text truncate`}>
+          <div className={`${compact ? 'text-[9px]' : 'text-[10px]'} font-mono font-bold text-text truncate`}>
             {note.title || t.common.untitled}
           </div>
           <div className={`${compact ? 'text-[7.5px]' : 'text-[8.5px]'} font-mono text-text-muted/50 mt-px`}>

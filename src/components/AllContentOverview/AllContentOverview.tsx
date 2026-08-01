@@ -8,6 +8,7 @@ import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { OverviewNoteCard } from '../OverviewNoteCard'
 import { parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
+import { colorChannels } from '../../lib/tagColors'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
 import { formatDate } from '../../i18n/formatDate'
@@ -538,13 +539,13 @@ export function AllContentOverview({ onClose }: AllContentOverviewProps) {
                                         <FolderOpen
                                           size={13}
                                           className="flex-shrink-0"
-                                          style={{ color: `rgb(var(${group.color}))` }}
+                                          style={{ color: `rgb(${colorChannels(group.color)})` }}
                                         />
                                       ) : (
                                         <Folder
                                           size={13}
                                           className="flex-shrink-0"
-                                          style={{ color: `rgb(var(${group.color}))` }}
+                                          style={{ color: `rgb(${colorChannels(group.color)})` }}
                                         />
                                       )}
                                       <span className="truncate">{folder.name}</span>
@@ -681,7 +682,7 @@ function GroupTile({ group, count, expanded, onToggle, onOpen }: GroupTileProps)
       {/* Group-color accent line */}
       <span
         className="absolute left-0 top-0 bottom-0 w-[3px] z-10"
-        style={{ background: `rgb(var(${group.color}))` }}
+        style={{ background: `rgb(${colorChannels(group.color)})` }}
       />
 
       {/* Primary action — expand / collapse inline */}
@@ -694,8 +695,8 @@ function GroupTile({ group, count, expanded, onToggle, onOpen }: GroupTileProps)
         <Folder
           size={18}
           className="flex-shrink-0"
-          fill={`rgb(var(${group.color}) / 0.18)`}
-          style={{ color: `rgb(var(${group.color}))` }}
+          fill={`rgb(${colorChannels(group.color)} / 0.18)`}
+          style={{ color: `rgb(${colorChannels(group.color)})` }}
         />
         <span className="flex-1 min-w-0 text-[13px] font-mono font-medium text-text/90 truncate">
           {group.name}

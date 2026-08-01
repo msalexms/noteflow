@@ -1,5 +1,6 @@
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { useT } from '../../i18n/useT'
+import { colorChannels } from '../../lib/tagColors'
 import type { NoteGroup } from '../../types'
 
 interface NoteGroupHeaderProps {
@@ -22,7 +23,7 @@ export function NoteGroupHeader({ group, noteCount, collapsed, onToggle, onOpenG
     >
       <span
         className="w-2 h-2 rounded-full flex-shrink-0"
-        style={{ background: `rgb(var(${group.color}))` }}
+        style={{ background: `rgb(${colorChannels(group.color)})` }}
       />
       <span
         onClick={(e) => { e.stopPropagation(); onOpenGroupView() }}

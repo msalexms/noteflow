@@ -594,15 +594,31 @@ function normalizeSectionColorKey(name: string): string {
   return name.trim().toLowerCase()
 }
 
+/**
+ * Mirror of normalizeGroupColor() in src/lib/tagColors.ts (main can't import from src/):
+ * a theme var stays as-is, a free colour is normalized to lowercase '#rrggbb'
+ * ('#rgb' shorthand expanded); anything else is dropped.
+ */
+function normalizeSectionColorValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const v = value.trim()
+  if (SECTION_COLOR_VALUES.has(v)) return v
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase()
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v)
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase()
+  return null
+}
+
 function sanitizeSectionColors(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
 
   const next: Record<string, string> = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== 'string' || !SECTION_COLOR_VALUES.has(value)) continue
+    const color = normalizeSectionColorValue(value)
+    if (!color) continue
     const normalizedKey = normalizeSectionColorKey(key)
     if (!normalizedKey) continue
-    next[normalizedKey] = value
+    next[normalizedKey] = color
   }
   return next
 }

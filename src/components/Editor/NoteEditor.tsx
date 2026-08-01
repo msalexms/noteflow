@@ -17,8 +17,9 @@ import { formatDate } from '../../i18n/formatDate'
 import { useT } from '../../i18n/useT'
 import { tf } from '../../i18n/format'
 import { ConfirmModal } from '../ConfirmModal'
+import { CustomColorSwatch } from '../CustomColorSwatch'
 import { EncryptionModal } from '../EncryptionModal'
-import { getTagColor, normalizeTagColorKey, TAG_COLOR_VARS } from '../../lib/tagColors'
+import { colorChannels, getTagColor, normalizeTagColorKey, resolveGroupColor, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { useSectionHoverPreview } from '../SectionPreview/hoverPreviewContext'
 
 // ---------------------------------------------------------------------------
@@ -1264,9 +1265,13 @@ export function NoteEditor({ noteId }: NoteEditorProps) {
                     title={color.replace('--', '')}
                     onClick={() => { void handleSetSectionColor(visibleColorPickerSection.name, color) }}
                     className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${colorPickerOverride === color ? 'ring-1 ring-white/60 ring-offset-1 ring-offset-surface-2' : ''}`}
-                    style={{ background: `rgb(var(${color}))` }}
+                    style={{ background: `rgb(${colorChannels(color)})` }}
                   />
                 ))}
+                <CustomColorSwatch
+                  value={colorPickerOverride ?? resolveGroupColor(visibleColorPickerSection.name)}
+                  onPick={(c) => { void setSectionTagColor(visibleColorPickerSection.name, c) }}
+                />
                 <button
                   onClick={() => { void handleClearSectionColor(visibleColorPickerSection.name) }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${

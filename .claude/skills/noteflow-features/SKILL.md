@@ -143,7 +143,8 @@ Jerarquía de organización de un solo nivel de anidación: **grupo → carpeta 
   recuperarlo: "Unarchive group" (en el menú contextual del grupo atenuado, o el botón "Archived"
   de la cabecera de la group overview).
 - **Asignar nota**: drag & drop, o menú contextual → "Add to group".
-- Cada grupo tiene un color que tiñe los dots/carpetas de sus notas.
+- Cada grupo tiene un color que tiñe los dots/carpetas de sus notas: los **8 colores del tema** o
+  cualquier **color libre** (swatch con degradado al final de la paleta → selector nativo del SO).
 - Las notas sin grupo aparecen al final, en "Sin grupo".
 
 ### Carpetas (subcarpetas dentro de un grupo)
@@ -190,8 +191,9 @@ Acento del color del grupo a la izquierda.
 - **Crear** → botones "New note" / "New folder" en la cabecera.
 - **Renombrar el grupo** → doble clic en el nombre de la cabecera (o el lápiz al hacer hover).
 - **Cambiar el color del grupo** → click en el punto de color de la cabecera: abre un popover con la
-  paleta (la misma del menú contextual del grupo en el sidebar); el color actual va marcado. Se
-  cierra al elegir, con click fuera o con `Esc` (que en ese caso no cierra la vista).
+  paleta (la misma del menú contextual del grupo en el sidebar) más el swatch de **color libre**; el
+  color actual va marcado. Se cierra al elegir un preset, con click fuera o con `Esc` (que en ese caso
+  no cierra la vista); al usar el color libre el popover se queda abierto mientras se arrastra.
 - **Renombrar / eliminar una carpeta** → botones lápiz/papelera en la cabecera de su banda (aparecen
   al hover; borrar pide confirmación y devuelve sus notas a la raíz del grupo).
 - **Ancho de tarjeta** → slider discreto en la cabecera (atenuado, se realza al hover); ensanchar
@@ -334,9 +336,10 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 - **Eliminar**: `Ctrl+W` o botón `×` (no se puede si es la única sección).
 - **Navegar**: `Ctrl+Tab` / `Ctrl+Shift+Tab` (siguiente / anterior).
 - **Sticky**: botón `⧉` abre la sección en ventana flotante.
-- **Color de sección**: desde el menú contextual de la nota se puede asignar un color a una
-  sección por su nombre (se aplica a los tags de sección en el sidebar; "Auto" vuelve al color
-  por nombre). Se guarda en `section-colors.json` (sincronizado).
+- **Color de sección**: desde el menú contextual de la nota (o la barra de color del editor) se puede
+  asignar un color a una sección por su nombre: los 8 del tema o un **color libre** (swatch con
+  degradado → selector nativo del SO); "Auto" vuelve al color por nombre. Se aplica a los tags de
+  sección en el sidebar. Se guarda en `section-colors.json` (sincronizado).
 - **Ocultar a la IA** (`Hide from AI`): marca una sección como invisible para la IA. Una sección
   oculta **nunca** se indexa ni aparece en el chat, en "Related notes", en el grafo del cerebro ni en
   las tools del agente — la IA actúa como si no existiera (el resto de la app la trata con normalidad).

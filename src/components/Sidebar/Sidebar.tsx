@@ -6,8 +6,9 @@ import { Archive, ArchiveRestore, Search, PanelLeftClose, Trash2, Lock, FolderPl
 import { isToday, isYesterday } from 'date-fns'
 import { ConfirmModal } from '../ConfirmModal'
 import { ContextMenu } from '../ContextMenu'
+import { CustomColorSwatch } from '../CustomColorSwatch'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
-import { TAG_COLOR_VARS } from '../../lib/tagColors'
+import { colorChannels, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { escapeRegExp, parseSearchQuery, noteMatchesQuery } from '../../lib/searchUtils'
 import { NoteGroupHeader } from './NoteGroupHeader'
 import { NoteFolderHeader } from './NoteFolderHeader'
@@ -77,7 +78,7 @@ interface RowHandlers {
 
 interface NoteRowProps {
   note: Note
-  groupColor: string | null
+  groupColor: GroupColor | null
   indent?: number
   inFavorites?: boolean
   wrapperClassName?: string
@@ -140,7 +141,7 @@ const NoteRow = memo(function NoteRow({
         style={{
           ...(indent != null ? { paddingLeft: indent } : {}),
           ...(isActive
-            ? { background: groupColor ? `rgb(var(${groupColor}) / 0.14)` : 'rgb(var(--text) / 0.1)' }
+            ? { background: groupColor ? `rgb(${colorChannels(groupColor)} / 0.14)` : 'rgb(var(--text) / 0.1)' }
             : {}),
           ...(isSearchTarget && !isActive ? { background: 'rgb(var(--text) / 0.06)' } : {}),
         }}
@@ -660,7 +661,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
     void reorderGroups(without)
   }
 
-  function renderNoteButton(note: Note, group?: { id: string; color: string } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
+  function renderNoteButton(note: Note, group?: { id: string; color: GroupColor } | null, indent?: number, inFavorites?: boolean, wrapperClassName?: string) {
     // When the note overview is open the editor is hidden, so the highlighted
     // note must follow that view; otherwise fall back to the active editor note.
     const isActive = noteViewId != null ? noteViewId === note.id : activeNoteId === note.id
@@ -703,13 +704,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
         onDrop={(e) => handleNoteMoveDrop(e, group.id, folder.id)}
         style={
           isMoveTarget
-            ? { boxShadow: `inset 0 0 0 1.5px rgb(var(${group.color}) / 0.7)`, background: `rgb(var(${group.color}) / 0.07)` }
+            ? { boxShadow: `inset 0 0 0 1.5px rgb(${colorChannels(group.color)} / 0.7)`, background: `rgb(${colorChannels(group.color)} / 0.07)` }
             : undefined
         }
       >
         {editingFolderId === folder.id ? (
           <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
-            <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(var(${group.color}) / 0.22)`} style={{ color: `rgb(var(${group.color}))` }} />
+            <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(group.color)} / 0.22)`} style={{ color: `rgb(${colorChannels(group.color)})` }} />
             <input
               autoFocus
               value={editingFolderName}
@@ -755,7 +756,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
               position: 'absolute',
               left: '14px', top: '3px', bottom: '5px',
               width: '1px',
-              background: `rgb(var(${group.color}) / 0.22)`,
+              background: `rgb(${colorChannels(group.color)} / 0.22)`,
               pointerEvents: 'none',
               zIndex: 1,
             }} />
@@ -1022,7 +1023,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                     onDrop={(e) => handleNoteMoveDrop(e, group.id)}
                     style={
                       noteMoveTarget?.groupId === group.id && !noteMoveTarget.folderId
-                        ? { boxShadow: `inset 0 0 0 1.5px rgb(var(${group.color}) / 0.7)`, background: `rgb(var(${group.color}) / 0.07)` }
+                        ? { boxShadow: `inset 0 0 0 1.5px rgb(${colorChannels(group.color)} / 0.7)`, background: `rgb(${colorChannels(group.color)} / 0.07)` }
                         : undefined
                     }
                   >
@@ -1052,7 +1053,7 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                         <div className="flex items-center gap-2 px-2 py-1.5">
                           <span
                             className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ background: `rgb(var(${group.color}))` }}
+                            style={{ background: `rgb(${colorChannels(group.color)})` }}
                           />
                           <input
                             autoFocus
@@ -1102,14 +1103,14 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                           position: 'absolute',
                           left: '1px', top: '3px', bottom: '5px',
                           width: '1px',
-                          background: `rgb(var(${group.color}) / 0.5)`,
+                          background: `rgb(${colorChannels(group.color)} / 0.5)`,
                           pointerEvents: 'none',
                           zIndex: 1,
                         }} />
                         {/* Inline "new folder" input */}
                         {newFolderInput?.groupId === group.id && (
                           <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1">
-                            <Folder size={12} className="flex-shrink-0" fill={`rgb(var(${group.color}) / 0.16)`} style={{ color: `rgb(var(${group.color}))` }} />
+                            <Folder size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(group.color)} / 0.16)`} style={{ color: `rgb(${colorChannels(group.color)})` }} />
                             <input
                               autoFocus
                               value={newFolderName}
@@ -1244,9 +1245,13 @@ export function Sidebar({ onCollapse }: SidebarProps) {
                       setGroupContextMenu(null)
                     }}
                     className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${group.color === color ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
-                    style={{ background: `rgb(var(${color}))` }}
+                    style={{ background: `rgb(${colorChannels(color)})` }}
                   />
                 ))}
+                <CustomColorSwatch
+                  value={group.color}
+                  onPick={(c) => { void setGroupColor(group.id, c) }}
+                />
               </div>
             </div>
 

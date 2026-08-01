@@ -21,15 +21,21 @@ export interface NoteEncryption {
 
 // ── Groups ────────────────────────────────────────────────────────────────────
 
-// Same CSS var names as COLOR_VARS in tagColors.ts
-export type GroupColor =
+// The theme palette: same CSS var names as TAG_COLOR_VARS in tagColors.ts
+export type ThemeColorVar =
   '--accent' | '--accent-2' | '--red' | '--cyan' |
   '--purple' | '--text' | '--orange' | '--pink'
+
+// A free colour chosen by the user, normalized to lowercase '#rrggbb'
+export type CustomColor = `#${string}`
+
+// Colour of a group or of a section tag: a theme var or a free hex
+export type GroupColor = ThemeColorVar | CustomColor
 
 export interface NoteGroup {
   id: string        // nanoid(8)
   name: string      // user-visible label
-  color: GroupColor // CSS var → rgb(var(<color>))
+  color: GroupColor // theme CSS var or '#rrggbb' → rgb(colorChannels(color)) — see lib/tagColors.ts
   order: number     // sort order ascending
   archived?: boolean // present iff group is archived (hidden unless "Show archived")
 }

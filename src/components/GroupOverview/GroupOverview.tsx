@@ -7,10 +7,11 @@ import {
 import { useNotesStore } from '../../stores/notesStore'
 import { useGroupsStore } from '../../stores/groupsStore'
 import { useSectionTagColorsStore } from '../../stores/sectionTagColorsStore'
-import { TAG_COLOR_VARS } from '../../lib/tagColors'
+import { colorChannels, TAG_COLOR_VARS } from '../../lib/tagColors'
 import { useSidebarGroups } from '../Sidebar/useSidebarGroups'
 import { NoteContextMenu, type NoteContextMenuRequest } from '../NoteContextMenu'
 import { ConfirmModal } from '../ConfirmModal'
+import { CustomColorSwatch } from '../CustomColorSwatch'
 import { OverviewNoteCard } from '../OverviewNoteCard'
 import { useT } from '../../i18n/useT'
 import { tf, plural } from '../../i18n/format'
@@ -450,7 +451,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
           >
             <span
               className="w-3 h-3 rounded-full transition-transform hover:scale-110"
-              style={{ background: `rgb(var(${color}))` }}
+              style={{ background: `rgb(${colorChannels(color)})` }}
             />
           </button>
           {colorPickerOpen && (
@@ -461,9 +462,10 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
                   title={c.replace('--', '')}
                   onClick={() => { void setGroupColor(groupId, c); setColorPickerOpen(false) }}
                   className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${color === c ? 'ring-1 ring-white/50 ring-offset-1 ring-offset-surface-2' : ''}`}
-                  style={{ background: `rgb(var(${c}))` }}
+                  style={{ background: `rgb(${colorChannels(c)})` }}
                 />
               ))}
+              <CustomColorSwatch value={color} onPick={(c) => { void setGroupColor(groupId, c) }} />
             </div>
           )}
         </div>
@@ -570,7 +572,7 @@ export function GroupOverview({ groupId, onClose }: GroupOverviewProps) {
         {/* Inline new-folder input */}
         {showNewFolder && (
           <div className="flex items-center gap-2">
-            <FolderPlus size={14} style={{ color: `rgb(var(${color}))` }} />
+            <FolderPlus size={14} style={{ color: `rgb(${colorChannels(color)})` }} />
             <input
               autoFocus
               value={newFolderName}
@@ -846,11 +848,11 @@ function Band({
           <Folder
             size={18}
             className="flex-shrink-0"
-            fill={`rgb(var(${color}) / 0.18)`}
-            style={{ color: `rgb(var(${color}))` }}
+            fill={`rgb(${colorChannels(color)} / 0.18)`}
+            style={{ color: `rgb(${colorChannels(color)})` }}
           />
         ) : (
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: `rgb(var(${color}) / 0.5)` }} />
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: `rgb(${colorChannels(color)} / 0.5)` }} />
         )}
         {isFolder ? (
           editing ? (
@@ -999,7 +1001,7 @@ function SelectionBar({
                 onClick={() => { onMoveToGroup(g.id) }}
                 className={`w-full text-left px-3 py-1.5 text-xs font-mono flex items-center gap-2 transition-colors hover:bg-surface-3 hover:text-text ${g.id === currentGroupId ? 'text-text' : 'text-text-muted'}`}
               >
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: `rgb(var(${g.color}))` }} />
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: `rgb(${colorChannels(g.color)})` }} />
                 <span className="truncate">{g.name}</span>
               </button>
             ))}

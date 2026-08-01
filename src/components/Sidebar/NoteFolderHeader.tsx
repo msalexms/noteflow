@@ -1,4 +1,5 @@
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react'
+import { colorChannels } from '../../lib/tagColors'
 import type { NoteFolder, GroupColor } from '../../types'
 
 interface NoteFolderHeaderProps {
@@ -29,12 +30,12 @@ export function NoteFolderHeader({
         className="flex-shrink-0 transition-transform duration-150"
         style={{
           transform: collapsed ? 'none' : 'rotate(90deg)',
-          color: `rgb(var(${groupColor}) / 0.7)`,
+          color: `rgb(${colorChannels(groupColor)} / 0.7)`,
         }}
       />
       {collapsed
-        ? <Folder size={12} className="flex-shrink-0" fill={`rgb(var(${groupColor}) / 0.16)`} style={{ color: `rgb(var(${groupColor}))` }} />
-        : <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(var(${groupColor}) / 0.22)`} style={{ color: `rgb(var(${groupColor}))` }} />
+        ? <Folder size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(groupColor)} / 0.16)`} style={{ color: `rgb(${colorChannels(groupColor)})` }} />
+        : <FolderOpen size={12} className="flex-shrink-0" fill={`rgb(${colorChannels(groupColor)} / 0.22)`} style={{ color: `rgb(${colorChannels(groupColor)})` }} />
       }
       <span className="flex-1 text-[11.5px] font-mono font-medium text-text/70 truncate">
         {folder.name}

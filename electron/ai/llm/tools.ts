@@ -38,6 +38,23 @@ function stripBase64(text: string): string {
 
 const DEFAULT_GROUP_COLOR = '#64748b'
 
+const THEME_COLOR_VARS = new Set([
+  '--accent', '--accent-2', '--red', '--cyan', '--purple', '--text', '--orange', '--pink',
+])
+
+/**
+ * A group colour is either a theme var or a free '#rrggbb' (mirror of normalizeGroupColor()
+ * in src/lib/tagColors.ts). Anything else the model invents falls back to the default.
+ */
+function normalizeGroupColor(value: string): string {
+  const v = value.trim()
+  if (THEME_COLOR_VARS.has(v)) return v
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase()
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v)
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase()
+  return DEFAULT_GROUP_COLOR
+}
+
 // ── External-state shapes (groups.json / folders.json) ──────────────────────────
 interface GroupRec { id: string; name: string; color: string; order: number; archived?: boolean }
 interface FolderRec { id: string; name: string; groupId: string; order: number }
@@ -436,7 +453,7 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
       case 'create_group': {
         const groups = ctx.readGroups()
         const id = makeId(8)
-        groups.push({ id, name: asStr(input.name).trim() || 'Group', color: asStr(input.color).trim() || DEFAULT_GROUP_COLOR, order: groups.length })
+        groups.push({ id, name: asStr(input.name).trim() || 'Group', color: normalizeGroupColor(asStr(input.color)), order: groups.length })
         await ctx.writeGroups(groups)
         return ok(`Created group "${asStr(input.name)}"`, `Created group "${asStr(input.name)}" with id ${id}.`)
       }

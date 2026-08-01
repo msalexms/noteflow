@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Minus, Plus, RotateCcw } from 'lucide-react'
 import { THEMES, APP_FONTS } from '../../lib/themes'
+import { hexToRgbTriple, rgbTripleToHex } from '../../lib/colorUtils'
 import { useThemeStore } from '../../stores/themeStore'
 import { useBrainSettingsStore } from '../../stores/brainSettingsStore'
 import { UI_SCALES } from '../../stores/themeStore'
@@ -47,20 +48,6 @@ const ACCENT_PRESETS: string[] = [
   '187 154 247', // purple
   '125 207 255', // cyan
 ]
-
-function rgbToHex(rgb: string): string {
-  const [r, g, b] = rgb.trim().split(/\s+/).map(Number)
-  const h = (n: number) => Math.max(0, Math.min(255, n || 0)).toString(16).padStart(2, '0')
-  return `#${h(r)}${h(g)}${h(b)}`
-}
-
-function hexToRgb(hex: string): string {
-  const m = hex.replace('#', '')
-  const r = parseInt(m.slice(0, 2), 16)
-  const g = parseInt(m.slice(2, 4), 16)
-  const b = parseInt(m.slice(4, 6), 16)
-  return `${r} ${g} ${b}`
-}
 
 export function AppearancePanel() {
   const activeThemeId = useThemeStore((s) => s.activeThemeId)
@@ -281,8 +268,8 @@ export function AppearancePanel() {
             >
               <input
                 type="color"
-                value={rgbToHex(effectiveAccent)}
-                onChange={(e) => setAccentOverride(hexToRgb(e.target.value))}
+                value={rgbTripleToHex(effectiveAccent)}
+                onChange={(e) => setAccentOverride(hexToRgbTriple(e.target.value))}
                 className="absolute inset-0 opacity-0 cursor-pointer"
               />
             </label>
@@ -344,8 +331,8 @@ export function AppearancePanel() {
                     >
                       <input
                         type="color"
-                        value={rgbToHex(color)}
-                        onChange={(e) => setEditorColor(row.key, hexToRgb(e.target.value))}
+                        value={rgbTripleToHex(color)}
+                        onChange={(e) => setEditorColor(row.key, hexToRgbTriple(e.target.value))}
                         className="absolute inset-0 opacity-0 cursor-pointer"
                       />
                     </label>
