@@ -228,6 +228,47 @@ código extra (estilo por selector `.prose-editor .ProseMirror …` en `index.cs
   espejos del formato (`noteUtils`/`noteFormat`/`cli`), así que sincronizan y se degradan limpio en
   editores externos/CLI/móvil.
 
+### Editor: la tira de tabs sigue a la sección activa
+En `NoteEditor.tsx`, la tira horizontal de pestañas (`tabsScrollRef`) se auto-scrollea para dejar
+visible el tab activo. Decisiones a respetar si se toca:
+- **Un solo efecto centralizado** (`useLayoutEffect`), no lógica repetida en cada handler: la sección
+  activa cambia desde muchos sitios (click, `Ctrl+Tab`, `noteflow:request-section` del sidebar,
+  alta/borrado/undo de sección, restaurar la sección recordada al cambiar de nota).
+- **Firma de pertenencia, no de orden** (`sections.map(id).sort().join('|')` como dep). Dos motivos:
+  ignora el tecleo (`updateNote` crea un array de secciones nuevo en cada edición) y **no dispara al
+  reordenar** — tras soltar un tab arrastrado desde el final, un scroll de vuelta al tab activo
+  escondería justo lo que se acaba de mover. Que la sección activa siga visible **mientras** se
+  arrastra lo cubre el auto-scroll por bordes, no este efecto.
+- **Nada de `scrollIntoView()`**: arrastraría a los ancestros scrollables y descolocaría el layout.
+  El helper `revealSectionTab()` calcula el `scrollLeft` objetivo con `offsetLeft`/`offsetWidth` del
+  tab (localizado por `data-section-id`) y `scrollLeft`/`clientWidth` de la tira, deja ~12 px de
+  margen, descuenta los ~24 px del degradado de fade derecho y **no hace nada si ya está visible**.
+  Se usa `offsetLeft` y no `getBoundingClientRect()` a propósito: es el mismo espacio de coordenadas
+  que `scrollLeft`, así que el zoom de UI no lo afecta (ver "UI text size").
+- `behavior: 'auto'` (salto) la primera vez que se revela una nota — el efecto reintenta en un
+  `requestAnimationFrame` si la tira aún no está medida —, `'smooth'` para cambios dentro de la nota.
+  ⚠️ Al cambiar de nota **hay un commit intermedio** en el que `activeSectionId` (estado) es todavía
+  el de la nota anterior y `activeSection` cae al fallback `sections[0]` — el efecto de reset que lo
+  corrige es passive y corre *después*. El efecto **se salta ese render** (guarda: el `activeSectionId`
+  de estado no pertenece a `note.sections`) y no consume el flag de "primera vez"; si no, la tira
+  saltaría al principio y luego barrería en `'smooth'` hasta la sección recordada.
+  Esa guarda es **incondicional a propósito** — no vale limitarla al primer render de la nota:
+  `noteflow:request-section` hacia *otra* nota hace `setActiveSectionId` un commit antes de que llegue
+  la nota (el sidebar despacha el evento síncrono antes de `setActiveNote`), y ahí el flag de "primera
+  vez" ya está gastado, así que la tira barrería en `'smooth'` hasta el tab #1 de la nota **vieja**
+  justo antes del swap. Trade-off asumido: si sync/CLI borra desde fuera la sección activa de una nota
+  ya asentada, la tira no persigue al fallback `sections[0]` hasta el siguiente cambio de sección.
+- **Auto-scroll por bordes al arrastrar** un tab: el `onDragOver` de la tira mira si el puntero está
+  en los ~40 px de un borde y arranca un bucle `requestAnimationFrame` (~10 px/frame). El rect de la
+  tira y el zoom se **miden una vez en `dragStart`** (llamarlos por evento forzaría layout en cada
+  `dragover`); `clientX` es espacio local y el rect de dispositivo → se divide por `getRootZoom()`
+  antes de compararlos. El bucle se para en `onDrop`/`onDragEnd`/`onDragLeave` de la tira (este
+  último con guarda `contains(relatedTarget)`, porque `dragleave` burbujea al pasar de un tab a
+  otro), en listeners `dragend`/`drop` en `window` (capture) para arrastres que acaban en otro
+  destino, en el cleanup del efecto, y —último agujero— con un **watchdog** de 800 ms sin `dragover`
+  dentro del propio bucle: si el tab origen se desmonta a mitad de arrastre (p. ej. un pull de sync
+  que cambia el set de secciones) su `dragend` se dispara en un nodo desconectado y no llega a nadie.
+
 ### Relaciones sección↔sección (slash command + cerebro)
 Enlaces explícitos que el usuario crea **inline mientras escribe**: en el editor rich teclea `/` →
 menú de comandos → "Link section" → buscador de secciones → inserta una **pill** que enlaza a otra

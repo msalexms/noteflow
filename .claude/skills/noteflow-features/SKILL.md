@@ -332,9 +332,15 @@ Cada nota puede tener múltiples secciones independientes, como tabs:
 
 - **Agregar**: `Ctrl+T` o botón `+`.
 - **Renombrar**: doble-click en el tab → Enter para guardar, Esc para cancelar.
-- **Reordenar**: drag & drop los tabs.
+- **Reordenar**: drag & drop los tabs. Si arrastras cerca del borde izquierdo o derecho de la tira,
+  esta scrollea sola en esa dirección para poder soltar sobre tabs que están fuera de la vista. Al
+  soltar, la tira se queda donde estabas (no salta de vuelta a la sección activa).
 - **Eliminar**: `Ctrl+W` o botón `×` (no se puede si es la única sección).
 - **Navegar**: `Ctrl+Tab` / `Ctrl+Shift+Tab` (siguiente / anterior).
+- **La tira sigue a la sección activa**: con muchas secciones, si la que pasa a estar activa queda
+  fuera de la vista, la tira se desplaza sola hasta mostrarla — venga el cambio de donde venga
+  (click en el tab, `Ctrl+Tab`, click en un tag de sección del sidebar o de una vista, crear/borrar/
+  deshacer una sección, o al volver a una nota en la sección que estabas).
 - **Sticky**: botón `⧉` abre la sección en ventana flotante.
 - **Color de sección**: desde el menú contextual de la nota (o la barra de color del editor) se puede
   asignar un color a una sección por su nombre: los 8 del tema o un **color libre** (swatch con
