@@ -1,0 +1,7 @@
+# dist-electron/ es salida de build: lo escribe tsc y no se edita a mano.
+# Sin esta regla, core.autocrlf=true hace checkout con CRLF, el siguiente
+# `npm run build` reescribe los ficheros en LF, y git los marca como modificados
+# para siempre aunque `git diff` salga vacío (el filtro los normaliza al comparar).
+# Con -text Git guarda y restaura los bytes exactos que emite tsc, incluidos los
+# CRLF que viven dentro de template literals (p. ej. README_CONTENT en githubSync).
+dist-electron/** -text
